@@ -36,6 +36,7 @@ void main() {
 
 const SPRITE_FRAG = `#version 300 es
 precision highp float;
+precision highp sampler2DArray;
 uniform sampler2DArray uSprites;
 in vec2 vUv;
 flat in float vLayer;
