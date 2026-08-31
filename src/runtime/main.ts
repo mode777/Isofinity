@@ -51,9 +51,70 @@ const renderer = new Renderer(
   canvas,
   sprites.albedoLayers,
   sprites.depthLayers,
+  sprites.normalLayers,
   sprites.width,
   sprites.height,
 );
+
+interface LightState {
+  azimuthDeg: number;
+  elevationDeg: number;
+  intensity: number;
+  colorHex: string;
+  ambient: number;
+}
+
+const light: LightState = {
+  azimuthDeg: 60,
+  elevationDeg: 45,
+  intensity: 1.2,
+  colorHex: '#fff1dd',
+  ambient: 0.4,
+};
+
+function srgbToLinear(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function updateLightUniforms(): void {
+  const az = (light.azimuthDeg * Math.PI) / 180;
+  const el = (light.elevationDeg * Math.PI) / 180;
+  const dir: [number, number, number] = [
+    Math.cos(el) * Math.cos(az),
+    Math.sin(el),
+    Math.cos(el) * Math.sin(az),
+  ];
+  const r = srgbToLinear(parseInt(light.colorHex.slice(1, 3), 16) / 255) * light.intensity;
+  const g = srgbToLinear(parseInt(light.colorHex.slice(3, 5), 16) / 255) * light.intensity;
+  const b = srgbToLinear(parseInt(light.colorHex.slice(5, 7), 16) / 255) * light.intensity;
+  renderer.setLight({
+    dir,
+    key: [r, g, b],
+    ambient: [light.ambient, light.ambient, light.ambient],
+  });
+}
+
+function bindLightInput(
+  id: string,
+  outId: string,
+  format: (v: number) => string,
+  apply: (v: number) => void,
+): void {
+  const input = document.getElementById(id) as HTMLInputElement;
+  const output = document.getElementById(outId)!;
+  input.addEventListener('input', () => {
+    apply(Number(input.value));
+    output.textContent = format(Number(input.value));
+  });
+}
+
+bindLightInput('light-az', 'light-az-v', (v) => `${v}°`, (v) => (light.azimuthDeg = v));
+bindLightInput('light-el', 'light-el-v', (v) => `${v}°`, (v) => (light.elevationDeg = v));
+bindLightInput('light-int', 'light-int-v', (v) => v.toFixed(2), (v) => (light.intensity = v));
+bindLightInput('light-amb', 'light-amb-v', (v) => v.toFixed(2), (v) => (light.ambient = v));
+(document.getElementById('light-color') as HTMLInputElement).addEventListener('input', (e) => {
+  light.colorHex = (e.target as HTMLInputElement).value;
+});
 
 {
   const ground = new Float32Array(GRID_N * GRID_N * 6 * 5);
@@ -95,6 +156,7 @@ let instances = new Float32Array(256 * 4);
 const highlightData = new Float32Array(6 * 5);
 
 function renderFrame(): void {
+  updateLightUniforms();
   const scale = PPU / RUNTIME_PPU;
   const placed = world.list();
   if (instances.length < placed.length * 4) {

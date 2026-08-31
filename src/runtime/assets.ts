@@ -1,3 +1,4 @@
+import { DataUtils } from 'three';
 import { bakePrimitive } from '../bake/bake.js';
 import {
   getCapsule,
@@ -16,6 +17,7 @@ export interface SpriteSet {
   height: number;
   albedoLayers: Uint8Array[];
   depthLayers: Float32Array[];
+  normalLayers: Uint16Array[];
   originPx: [number, number];
 }
 
@@ -31,6 +33,7 @@ export function bakeSprites(): SpriteSet {
   const ids: string[] = [];
   const albedoLayers: Uint8Array[] = [];
   const depthLayers: Float32Array[] = [];
+  const normalLayers: Uint16Array[] = [];
   let width = 0;
   let height = 0;
   let originPx: [number, number] = [0, 0];
@@ -42,8 +45,9 @@ export function bakeSprites(): SpriteSet {
     originPx = result.originPx;
     albedoLayers.push(albedoToBytes(result.albedo, result.width, result.height));
     depthLayers.push(depthToChannel(result.depth, result.width, result.height));
+    normalLayers.push(normalToHalf(result.normal, result.width, result.height));
   }
-  return { ids, width, height, albedoLayers, depthLayers, originPx };
+  return { ids, width, height, albedoLayers, depthLayers, normalLayers, originPx };
 }
 
 function albedoToBytes(rgba: Float32Array, w: number, h: number): Uint8Array {
@@ -68,6 +72,22 @@ function depthToChannel(depth: Float32Array, w: number, h: number): Float32Array
     const srcRow = (h - 1 - y) * w;
     for (let x = 0; x < w; x++) {
       out[y * w + x] = depth[(srcRow + x) * 4];
+    }
+  }
+  return out;
+}
+
+function normalToHalf(rgba: Float32Array, w: number, h: number): Uint16Array {
+  const out = new Uint16Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const srcRow = (h - 1 - y) * w;
+    for (let x = 0; x < w; x++) {
+      const s = (srcRow + x) * 4;
+      const d = (y * w + x) * 4;
+      out[d] = DataUtils.toHalfFloat(rgba[s]);
+      out[d + 1] = DataUtils.toHalfFloat(rgba[s + 1]);
+      out[d + 2] = DataUtils.toHalfFloat(rgba[s + 2]);
+      out[d + 3] = DataUtils.toHalfFloat(rgba[s + 3]);
     }
   }
   return out;

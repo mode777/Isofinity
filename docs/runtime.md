@@ -8,15 +8,31 @@ an isometric grid. Camera and bake conventions are defined in
 
 There is no asset file pipeline yet. At page load the runtime calls
 `bakePrimitive(prim, RUNTIME_PPU)` (64 px/unit) for every test primitive and
-uploads the **albedo + coverage** and the **linear ray depth** into two
-WebGL2 `TEXTURE_2D_ARRAY`s (RGBA8 and R32F, one layer per primitive). The
-normal pass is not consumed yet — dynamic lighting is the next milestone.
+uploads all three baked passes into WebGL2 `TEXTURE_2D_ARRAY`s: albedo +
+coverage (RGBA8, LINEAR), linear ray depth (R32F, NEAREST) and world-space
+normals (RGBA16F, NEAREST — NEAREST keeps background zero-normals from
+bleeding across silhouettes).
 
-Row-order warning: GL pixel readback is bottom-up and both texture arrays
+Row-order warning: GL pixel readback is bottom-up and all texture arrays
 are sampled with the same UV, so **every** uploaded pass must be flipped to
-top-down (`albedoToBytes` and `depthToChannel` both flip). A pass uploaded
-unflipped pairs each pixel's data with its mirrored twin — this exact bug
-made baked-depth occlusion look vertically mirrored on the live site.
+top-down (`albedoToBytes`, `depthToChannel` and `normalToHalf` all flip).
+A pass uploaded unflipped pairs each pixel's data with its mirrored twin —
+this exact bug made baked-depth occlusion look vertically mirrored on the
+live site.
+
+## Lighting
+
+POE-style key + ambient over the baked G-buffer, shaded per pixel in the
+fragment shader:
+
+- `color = linearToSrgb(srgbToLinear(albedo) * (ambient + key * max(dot(N, L), 0)))`
+  — albedo is sRGB-encoded (bake convention), shading happens in linear
+  space, the default framebuffer is sRGB.
+- `L` is a world-space direction toward the key light, parametrized by
+  azimuth/elevation sliders; key color (color picker) and intensity, plus a
+  linear ambient scalar, are uploaded as uniforms every frame — all
+  realtime-tweakable in the "Key light" panel.
+- The ground shades with `N = (0,1,0)` so it responds to the same light.
 
 ## Renderer
 
@@ -52,7 +68,8 @@ checkerboard is a visual reference only.
 
 - `src/shared/iso.ts` — dependency-free camera constants + ground-plane
   projection/picking (single source of truth, shared with the bake tool)
-- `src/runtime/assets.ts` — bake-at-boot sprite set
-- `src/runtime/renderer.ts` — WebGL2 batches
+- `src/runtime/assets.ts` — bake-at-boot sprite set (all three passes)
+- `src/runtime/renderer.ts` — WebGL2 batches, per-pixel occlusion + shading
 - `src/runtime/world.ts` — placement state, depth sort, footprint erase
-- `src/runtime/main.ts` — camera-to-canvas mapping, input, toolbar
+- `src/runtime/main.ts` — camera-to-canvas mapping, input, toolbar, light
+  panel wiring

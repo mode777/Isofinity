@@ -1,3 +1,20 @@
+const SHADE_CHUNK = `
+uniform vec3 uLightDir;
+uniform vec3 uKeyLight;
+uniform vec3 uAmbient;
+vec3 srgbToLinear(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+vec3 linearToSrgb(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
+vec3 shade(vec3 albedoSrgb, vec3 N) {
+  float ndl = max(dot(N, uLightDir), 0.0);
+  return linearToSrgb(srgbToLinear(albedoSrgb) * (uAmbient + uKeyLight * ndl));
+}
+`;
+
 const FLAT_VERT = `#version 300 es
 in vec2 aPos;
 in vec3 aColor;
@@ -14,8 +31,9 @@ precision highp float;
 in vec3 vColor;
 uniform float uAlpha;
 out vec4 outColor;
+${SHADE_CHUNK}
 void main() {
-  outColor = vec4(vColor, uAlpha);
+  outColor = vec4(shade(vColor, vec3(0.0, 1.0, 0.0)), uAlpha);
 }
 `;
 
@@ -41,18 +59,21 @@ precision highp float;
 precision highp sampler2DArray;
 uniform sampler2DArray uSprites;
 uniform sampler2DArray uDepths;
+uniform sampler2DArray uNormals;
 uniform float uDepthA;
 uniform float uDepthB;
 in vec2 vUv;
 flat in float vLayer;
 flat in float vDepthOff;
 out vec4 outColor;
+${SHADE_CHUNK}
 void main() {
   vec4 c = texture(uSprites, vec3(vUv, vLayer));
   if (c.a < 0.01) discard;
   float d = texture(uDepths, vec3(vUv, vLayer)).r + vDepthOff;
   gl_FragDepth = uDepthA * d + uDepthB;
-  outColor = c;
+  vec3 N = texture(uNormals, vec3(vUv, vLayer)).rgb;
+  outColor = vec4(shade(c.rgb, N), c.a);
 }
 `;
 
@@ -79,12 +100,19 @@ function link(gl: WebGL2RenderingContext, vertSrc: string, fragSrc: string): Web
 
 export const DEPTH_LINEAR_RANGE = 64;
 
+export interface LightParams {
+  dir: [number, number, number];
+  key: [number, number, number];
+  ambient: [number, number, number];
+}
+
 export class Renderer {
   private gl: WebGL2RenderingContext;
   private flatProg: WebGLProgram;
   private spriteProg: WebGLProgram;
   private tex: WebGLTexture;
   private depthTex: WebGLTexture;
+  private normalTex: WebGLTexture;
   private groundVao: WebGLVertexArrayObject;
   private groundVbo: WebGLBuffer;
   private highlightVao: WebGLVertexArrayObject;
@@ -93,17 +121,25 @@ export class Renderer {
   private instVbo: WebGLBuffer;
   private uFlatRes: WebGLUniformLocation;
   private uFlatAlpha: WebGLUniformLocation;
+  private uFlatLight: Uniforms3;
   private uSpriteRes: WebGLUniformLocation;
   private uSpriteSize: WebGLUniformLocation;
+  private uSpriteLight: Uniforms3;
   private uDepthA: WebGLUniformLocation;
   private uDepthB: WebGLUniformLocation;
   private layerWidth: number;
   private layerHeight: number;
+  private light: LightParams = {
+    dir: [0, 1, 0],
+    key: [1, 1, 1],
+    ambient: [0.3, 0.3, 0.3],
+  };
 
   constructor(
     canvas: HTMLCanvasElement,
     albedoLayers: Uint8Array[],
     depthLayers: Float32Array[],
+    normalLayers: Uint16Array[],
     layerWidth: number,
     layerHeight: number,
   ) {
@@ -123,8 +159,18 @@ export class Renderer {
     this.spriteProg = link(gl, SPRITE_VERT, SPRITE_FRAG);
     this.uFlatRes = gl.getUniformLocation(this.flatProg, 'uRes')!;
     this.uFlatAlpha = gl.getUniformLocation(this.flatProg, 'uAlpha')!;
+    this.uFlatLight = {
+      dir: gl.getUniformLocation(this.flatProg, 'uLightDir')!,
+      key: gl.getUniformLocation(this.flatProg, 'uKeyLight')!,
+      ambient: gl.getUniformLocation(this.flatProg, 'uAmbient')!,
+    };
     this.uSpriteRes = gl.getUniformLocation(this.spriteProg, 'uRes')!;
     this.uSpriteSize = gl.getUniformLocation(this.spriteProg, 'uSize')!;
+    this.uSpriteLight = {
+      dir: gl.getUniformLocation(this.spriteProg, 'uLightDir')!,
+      key: gl.getUniformLocation(this.spriteProg, 'uKeyLight')!,
+      ambient: gl.getUniformLocation(this.spriteProg, 'uAmbient')!,
+    };
     this.uDepthA = gl.getUniformLocation(this.spriteProg, 'uDepthA')!;
     this.uDepthB = gl.getUniformLocation(this.spriteProg, 'uDepthB')!;
     gl.useProgram(this.spriteProg);
@@ -199,6 +245,40 @@ export class Renderer {
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
+    this.normalTex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.normalTex);
+    gl.texImage3D(
+      gl.TEXTURE_2D_ARRAY,
+      0,
+      gl.RGBA16F,
+      layerWidth,
+      layerHeight,
+      normalLayers.length,
+      0,
+      gl.RGBA,
+      gl.HALF_FLOAT,
+      null,
+    );
+    normalLayers.forEach((data, i) => {
+      gl.texSubImage3D(
+        gl.TEXTURE_2D_ARRAY,
+        0,
+        0,
+        0,
+        i,
+        layerWidth,
+        layerHeight,
+        1,
+        gl.RGBA,
+        gl.HALF_FLOAT,
+        data,
+      );
+    });
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
     this.groundVao = gl.createVertexArray()!;
     this.groundVbo = gl.createBuffer()!;
     gl.bindVertexArray(this.groundVao);
@@ -241,6 +321,7 @@ export class Renderer {
     gl.bindVertexArray(null);
     gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uSprites')!, 0);
     gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uDepths')!, 1);
+    gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uNormals')!, 2);
 
     gl.disable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
@@ -248,6 +329,10 @@ export class Renderer {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.clearColor(0.078, 0.086, 0.102, 1);
     gl.clearDepth(1);
+  }
+
+  setLight(light: LightParams): void {
+    this.light = light;
   }
 
   setGround(data: Float32Array): void {
@@ -270,6 +355,7 @@ export class Renderer {
     gl.useProgram(this.flatProg);
     gl.uniform2f(this.uFlatRes, canvas.width, canvas.height);
     gl.uniform1f(this.uFlatAlpha, 1);
+    uploadLight(gl, this.uFlatLight, this.light);
     gl.bindVertexArray(this.groundVao);
     gl.drawArrays(gl.TRIANGLES, 0, this.groundVerts);
 
@@ -279,10 +365,13 @@ export class Renderer {
       gl.useProgram(this.spriteProg);
       gl.uniform2f(this.uSpriteRes, canvas.width, canvas.height);
       gl.uniform2f(this.uSpriteSize, this.layerWidth, this.layerHeight);
+      uploadLight(gl, this.uSpriteLight, this.light);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.depthTex);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.normalTex);
       gl.bindVertexArray(this.spriteVao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.instVbo);
       gl.bufferData(gl.ARRAY_BUFFER, instances, gl.DYNAMIC_DRAW);
@@ -303,4 +392,16 @@ export class Renderer {
   }
 
   private groundVerts = 0;
+}
+
+interface Uniforms3 {
+  dir: WebGLUniformLocation;
+  key: WebGLUniformLocation;
+  ambient: WebGLUniformLocation;
+}
+
+function uploadLight(gl: WebGL2RenderingContext, u: Uniforms3, light: LightParams): void {
+  gl.uniform3f(u.dir, light.dir[0], light.dir[1], light.dir[2]);
+  gl.uniform3f(u.key, light.key[0], light.key[1], light.key[2]);
+  gl.uniform3f(u.ambient, light.ambient[0], light.ambient[1], light.ambient[2]);
 }
