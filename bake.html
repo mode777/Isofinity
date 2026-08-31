@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Isofinity — Bake Tool</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 72rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        color: #ddd;
+        background: #14161a;
+      }
+      .controls {
+        display: flex;
+        gap: 0.5rem;
+        margin: 1rem 0;
+      }
+      button {
+        background: #23262d;
+        color: #ddd;
+        border: 1px solid #3a3f4a;
+        border-radius: 4px;
+        padding: 0.4rem 0.9rem;
+        cursor: pointer;
+        font-size: 0.95rem;
+      }
+      button:hover:not(:disabled) {
+        background: #2d313a;
+      }
+      button.active {
+        background: #3b4252;
+        border-color: #6f7a8f;
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      #status {
+        color: #8a8f98;
+        min-height: 1.4em;
+      }
+      .passes {
+        display: flex;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+        margin: 1rem 0;
+      }
+      figure {
+        margin: 0;
+      }
+      figcaption {
+        color: #8a8f98;
+        font-size: 0.85rem;
+        margin-top: 0.4rem;
+      }
+      canvas {
+        width: 240px;
+        border: 1px solid #333;
+        image-rendering: pixelated;
+        background: repeating-conic-gradient(#1b1e24 0% 25%, #23262d 0% 50%) 0 0 / 16px 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Isofinity — Bake Tool</h1>
+    <p>
+      Bakes a primitive into per-cube sprite passes: albedo (sRGB PNG),
+      cube-space position and world-space normal (float EXR), each with a
+      coverage alpha channel.
+    </p>
+    <div class="controls">
+      <button id="prim-sphere" class="prim active">Sphere</button>
+      <button id="prim-donut" class="prim">Donut</button>
+      <button id="bake">Bake</button>
+    </div>
+    <p id="status"></p>
+    <div class="passes">
+      <figure>
+        <canvas id="pass-albedo"></canvas>
+        <figcaption>albedo.png — sRGB color + coverage</figcaption>
+      </figure>
+      <figure>
+        <canvas id="pass-position"></canvas>
+        <figcaption>position.exr — normalized cube-space [0,1]³</figcaption>
+      </figure>
+      <figure>
+        <canvas id="pass-normal"></canvas>
+        <figcaption>normal.exr — world-space normals (visualized 0..1)</figcaption>
+      </figure>
+    </div>
+    <div class="controls">
+      <button id="dl-albedo" disabled>Download albedo.png</button>
+      <button id="dl-position" disabled>Download position.exr</button>
+      <button id="dl-normal" disabled>Download normal.exr</button>
+      <button id="dl-manifest" disabled>Download bake.json</button>
+    </div>
+    <script type="module" src="/src/bake/main.ts"></script>
+  </body>
+</html>

@@ -4,4 +4,12 @@ import { defineConfig } from 'vite';
 // project subpath (https://<owner>.github.io/Isofinity/).
 export default defineConfig({
   base: './',
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        bake: 'bake.html',
+      },
+    },
+  },
 });
