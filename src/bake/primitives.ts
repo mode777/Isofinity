@@ -1,4 +1,4 @@
-import { BufferGeometry, SphereGeometry, TorusGeometry } from 'three';
+import { BoxGeometry, BufferGeometry, CapsuleGeometry, CylinderGeometry, SphereGeometry, TorusGeometry } from 'three';
 
 export interface Primitive {
   id: string;
@@ -9,6 +9,9 @@ export interface Primitive {
 
 let sphere: Primitive | null = null;
 let donut: Primitive | null = null;
+let cube: Primitive | null = null;
+let cylinder: Primitive | null = null;
+let capsule: Primitive | null = null;
 
 export function getSphere(): Primitive {
   if (!sphere) {
@@ -34,4 +37,40 @@ export function getDonut(): Primitive {
     };
   }
   return donut;
+}
+
+export function getCube(): Primitive {
+  if (!cube) {
+    cube = {
+      id: 'cube',
+      label: 'Cube',
+      albedoHex: 0x4f9e5c,
+      geometry: new BoxGeometry(1, 1, 1),
+    };
+  }
+  return cube;
+}
+
+export function getCylinder(): Primitive {
+  if (!cylinder) {
+    cylinder = {
+      id: 'cylinder',
+      label: 'Cylinder',
+      albedoHex: 0x9e9e3f,
+      geometry: new CylinderGeometry(0.35, 0.35, 0.8, 64),
+    };
+  }
+  return cylinder;
+}
+
+export function getCapsule(): Primitive {
+  if (!capsule) {
+    capsule = {
+      id: 'capsule',
+      label: 'Capsule',
+      albedoHex: 0x8a5fc0,
+      geometry: new CapsuleGeometry(0.28, 0.34, 8, 64),
+    };
+  }
+  return capsule;
 }

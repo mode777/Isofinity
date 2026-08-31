@@ -1,6 +1,13 @@
 import { bakePrimitive, type BakeResult } from './bake.js';
 import { buildManifest, download, exportExr, rgbaToCanvas } from './export.js';
-import { getDonut, getSphere, type Primitive } from './primitives.js';
+import {
+  getCapsule,
+  getCube,
+  getCylinder,
+  getDonut,
+  getSphere,
+  type Primitive,
+} from './primitives.js';
 
 const statusEl = document.getElementById('status')!;
 const canvases = {
@@ -13,6 +20,14 @@ const downloadButtons = {
   position: document.getElementById('dl-position') as HTMLButtonElement,
   normal: document.getElementById('dl-normal') as HTMLButtonElement,
   manifest: document.getElementById('dl-manifest') as HTMLButtonElement,
+};
+
+const primitiveFactories: Record<string, () => Primitive> = {
+  sphere: getSphere,
+  donut: getDonut,
+  cube: getCube,
+  cylinder: getCylinder,
+  capsule: getCapsule,
 };
 
 let current: Primitive = getSphere();
@@ -66,8 +81,12 @@ function selectPrimitive(prim: Primitive, buttonId: string): void {
   bake();
 }
 
-document.getElementById('prim-sphere')!.addEventListener('click', () => selectPrimitive(getSphere(), 'prim-sphere'));
-document.getElementById('prim-donut')!.addEventListener('click', () => selectPrimitive(getDonut(), 'prim-donut'));
+for (const button of document.querySelectorAll<HTMLButtonElement>('button.prim')) {
+  button.addEventListener('click', () => {
+    const factory = primitiveFactories[button.dataset.primitive ?? ''];
+    if (factory) selectPrimitive(factory(), button.id);
+  });
+}
 document.getElementById('bake')!.addEventListener('click', bake);
 
 downloadButtons.albedo.addEventListener('click', () => {

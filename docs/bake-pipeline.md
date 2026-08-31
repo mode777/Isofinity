@@ -12,8 +12,15 @@ Pick a primitive, hit Bake, inspect the passes, download the files.
 ### Camera
 
 - Orthographic, fixed for the whole engine (POE-style fixed view).
-- Azimuth 45°, elevation 26.565° (`atan(0.5)`), i.e. the classic late-90s
-  2:1 dimetric look. Constants: `src/bake/iso.ts`.
+- Orbit rotated **45° around world up (+Y)**: the camera sits on the
+  `(+,+,+)` body diagonal direction `(cos el · cos 45°, sin el, cos el ·
+  sin 45°)` looking at the cube center, with `camera.up = (0,1,0)` and
+  therefore **no roll**. This is the classic late-90s isometric setup
+  (Diablo/Fallout-style 2:1 dimetric).
+- Elevation **30°**: at azimuth 45° the projected ground diagonals of a
+  cube have pixel slope `sin(elevation)` = `sin(30°)` = 0.5 — the exact 2:1
+  tile grid of classic isometric games — and the world +Y axis stays exactly
+  vertical on screen. Constants: `src/bake/iso.ts`.
 - The sprite rect is computed by projecting the 8 corners of the unit cube
   into view space — no hand-tuned dimensions; any camera angle keeps working.
 

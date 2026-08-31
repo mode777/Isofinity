@@ -17,6 +17,7 @@
         display: flex;
         gap: 0.5rem;
         margin: 1rem 0;
+        flex-wrap: wrap;
       }
       button {
         background: #23262d;
@@ -72,8 +73,11 @@
       coverage alpha channel.
     </p>
     <div class="controls">
-      <button id="prim-sphere" class="prim active">Sphere</button>
-      <button id="prim-donut" class="prim">Donut</button>
+      <button id="prim-sphere" class="prim active" data-primitive="sphere">Sphere</button>
+      <button id="prim-donut" class="prim" data-primitive="donut">Donut</button>
+      <button id="prim-cube" class="prim" data-primitive="cube">Cube</button>
+      <button id="prim-cylinder" class="prim" data-primitive="cylinder">Cylinder</button>
+      <button id="prim-capsule" class="prim" data-primitive="capsule">Capsule</button>
       <button id="bake">Bake</button>
     </div>
     <p id="status"></p>

@@ -1,7 +1,7 @@
 import { OrthographicCamera, Vector3 } from 'three';
 
 export const ISO_AZIMUTH_DEG = 45;
-export const ISO_ELEVATION_DEG = 26.565;
+export const ISO_ELEVATION_DEG = 30;
 
 const DEG2RAD = Math.PI / 180;
 const CAMERA_DISTANCE = 4;
@@ -27,6 +27,7 @@ export function frameIsoCube(pxPerUnit: number, padPx: number): IsoFrame {
   const camera = new OrthographicCamera(-1, 1, 1, -1, 1, CAMERA_DISTANCE * 2 + 1);
   const dir = isoDirection(ISO_AZIMUTH_DEG, ISO_ELEVATION_DEG);
   const center = new Vector3(0.5, 0.5, 0.5);
+  camera.up.set(0, 1, 0);
   camera.position.copy(center).addScaledVector(dir, CAMERA_DISTANCE);
   camera.lookAt(center);
   camera.updateMatrixWorld(true);
