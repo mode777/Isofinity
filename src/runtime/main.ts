@@ -1,10 +1,11 @@
 import { SCREEN_UP, groundToScreen, screenToGround } from '../shared/iso.js';
 import { RUNTIME_PPU, bakeSprites } from './assets.js';
 import { Renderer } from './renderer.js';
-import { GRID_N, World } from './world.js';
+import { World } from './world.js';
 
 const PPU = RUNTIME_PPU;
 const MARGIN = 8;
+const GRID_N = 12;
 
 const GRID_COLORS: [number, number, number] = [0.145, 0.153, 0.173];
 const GRID_COLORS_ALT: [number, number, number] = [0.169, 0.178, 0.2];
@@ -42,12 +43,8 @@ function toPx(x: number, z: number): [number, number] {
   return [originX + u * PPU, originY - v * PPU];
 }
 
-function pickCell(px: number, py: number): [number, number] | null {
-  const [x, z] = screenToGround((px - originX) / PPU, -(py - originY) / PPU);
-  const i = Math.floor(x);
-  const j = Math.floor(z);
-  if (i < 0 || j < 0 || i >= GRID_N || j >= GRID_N) return null;
-  return [i, j];
+function pickGround(px: number, py: number): [number, number] {
+  return screenToGround((px - originX) / PPU, -(py - originY) / PPU);
 }
 
 const renderer = new Renderer(canvas, sprites.layers, sprites.width, sprites.height);
@@ -88,14 +85,18 @@ world.place(5, 8, 'plane');
 
 let tool = 'cube';
 let hover: [number, number] | null = null;
-const instances = new Float32Array(GRID_N * GRID_N * 3);
+let instances = new Float32Array(256 * 3);
 const highlightData = new Float32Array(6 * 5);
 
 function renderFrame(): void {
   const scale = PPU / RUNTIME_PPU;
+  const placed = world.list();
+  if (instances.length < placed.length * 3) {
+    instances = new Float32Array(Math.max(placed.length * 3, instances.length * 2));
+  }
   let count = 0;
-  for (const p of world.list()) {
-    const [cx, cy] = toPx(p.i, p.j);
+  for (const p of placed) {
+    const [cx, cy] = toPx(p.x, p.z);
     instances[count * 3] = cx - sprites.originPx[0] * scale;
     instances[count * 3 + 1] = cy - sprites.originPx[1] * scale;
     instances[count * 3 + 2] = layerOf.get(p.primId) ?? 0;
@@ -104,7 +105,7 @@ function renderFrame(): void {
 
   let highlight: Float32Array | null = null;
   if (hover) {
-    const [i, j] = hover;
+    const [gx, gz] = hover;
     highlight = highlightData;
     let o = 0;
     const push = (x: number, z: number) => {
@@ -115,49 +116,51 @@ function renderFrame(): void {
       highlight![o++] = HIGHLIGHT_COLOR[1];
       highlight![o++] = HIGHLIGHT_COLOR[2];
     };
-    push(i, j);
-    push(i + 1, j);
-    push(i + 1, j + 1);
-    push(i, j);
-    push(i + 1, j + 1);
-    push(i, j + 1);
+    push(gx - 0.5, gz - 0.5);
+    push(gx + 0.5, gz - 0.5);
+    push(gx + 0.5, gz + 0.5);
+    push(gx - 0.5, gz - 0.5);
+    push(gx + 0.5, gz + 0.5);
+    push(gx - 0.5, gz + 0.5);
   }
 
   renderer.render(instances, count, highlight);
 }
 
 function setStatus(): void {
-  const cell = hover ? `cell (${hover[0]}, ${hover[1]})` : 'outside grid';
-  statusEl.textContent = `tool: ${tool} — ${cell} — left-click/drag places, right-click erases`;
+  const pos = hover
+    ? `(${hover[0].toFixed(2)}, ${hover[1].toFixed(2)})`
+    : 'outside ground';
+  statusEl.textContent = `tool: ${tool} — ${pos} — left-click/drag places, right-click erases`;
 }
 
-function applyTool(i: number, j: number): void {
+function applyTool(gx: number, gz: number): void {
   if (tool === 'eraser') {
-    world.erase(i, j);
+    world.removeAt(gx, gz);
   } else {
-    world.place(i, j, tool);
+    world.place(gx - 0.5, gz - 0.5, tool);
   }
 }
 
-canvas.addEventListener('pointermove', (e) => {
+function pointerGround(e: PointerEvent): [number, number] {
   const rect = canvas.getBoundingClientRect();
   const px = ((e.clientX - rect.left) / rect.width) * canvas.width;
   const py = ((e.clientY - rect.top) / rect.height) * canvas.height;
-  hover = pickCell(px, py);
-  if (hover && e.buttons & 1) applyTool(hover[0], hover[1]);
+  return pickGround(px, py);
+}
+
+canvas.addEventListener('pointermove', (e) => {
+  hover = pointerGround(e);
+  if (e.buttons & 1) applyTool(hover[0], hover[1]);
   setStatus();
 });
 
 canvas.addEventListener('pointerdown', (e) => {
-  const rect = canvas.getBoundingClientRect();
-  const px = ((e.clientX - rect.left) / rect.width) * canvas.width;
-  const py = ((e.clientY - rect.top) / rect.height) * canvas.height;
-  const cell = pickCell(px, py);
-  if (!cell) return;
+  const [gx, gz] = pointerGround(e);
   if (e.button === 2) {
-    world.erase(cell[0], cell[1]);
+    world.removeAt(gx, gz);
   } else if (e.button === 0) {
-    applyTool(cell[0], cell[1]);
+    applyTool(gx, gz);
   }
   setStatus();
 });

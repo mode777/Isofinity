@@ -1,44 +1,41 @@
 import { VIEW_DIR } from '../shared/iso.js';
 
-export const GRID_N = 12;
-
 export interface Placement {
-  i: number;
-  j: number;
+  x: number;
+  z: number;
   primId: string;
   key: number;
 }
 
-export function depthOfCell(i: number, j: number): number {
-  return VIEW_DIR[0] * (i + 0.5) + VIEW_DIR[2] * (j + 0.5);
+export function depthOf(x: number, z: number): number {
+  return VIEW_DIR[0] * (x + 0.5) + VIEW_DIR[2] * (z + 0.5);
 }
 
 export class World {
-  private cells: (string | null)[] = new Array(GRID_N * GRID_N).fill(null);
+  private items: Placement[] = [];
 
-  place(i: number, j: number, primId: string): void {
-    this.cells[i * GRID_N + j] = primId;
+  place(x: number, z: number, primId: string): void {
+    this.items.push({ x, z, primId, key: depthOf(x, z) });
   }
 
-  erase(i: number, j: number): void {
-    this.cells[i * GRID_N + j] = null;
+  removeAt(x: number, z: number): Placement | null {
+    let best = -1;
+    for (let k = 0; k < this.items.length; k++) {
+      const p = this.items[k];
+      if (x >= p.x && x <= p.x + 1 && z >= p.z && z <= p.z + 1) {
+        if (best < 0 || p.key > this.items[best].key) best = k;
+      }
+    }
+    if (best < 0) return null;
+    const [removed] = this.items.splice(best, 1);
+    return removed;
   }
 
   clear(): void {
-    this.cells.fill(null);
+    this.items.length = 0;
   }
 
   list(): Placement[] {
-    const out: Placement[] = [];
-    for (let i = 0; i < GRID_N; i++) {
-      for (let j = 0; j < GRID_N; j++) {
-        const primId = this.cells[i * GRID_N + j];
-        if (primId) {
-          out.push({ i, j, primId, key: depthOfCell(i, j) });
-        }
-      }
-    }
-    out.sort((a, b) => a.key - b.key);
-    return out;
+    return [...this.items].sort((a, b) => a.key - b.key);
   }
 }
