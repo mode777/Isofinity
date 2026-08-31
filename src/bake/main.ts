@@ -5,6 +5,7 @@ import {
   getCube,
   getCylinder,
   getDonut,
+  getPlane,
   getSphere,
   type Primitive,
 } from './primitives.js';
@@ -28,6 +29,7 @@ const primitiveFactories: Record<string, () => Primitive> = {
   cube: getCube,
   cylinder: getCylinder,
   capsule: getCapsule,
+  plane: getPlane,
 };
 
 let current: Primitive = getSphere();
