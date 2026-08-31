@@ -1,0 +1,46 @@
+schema: spec-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+context: |
+  Tech stack: TypeScript, WebGL2 rendering, Vite for dev/build.
+  Site hosted on GitHub Pages (https://mode777.github.io/Isofinity/),
+  deployed by .github/workflows/deploy.yml on every push to main.
+  Commands: npm run dev | build (tsc --noEmit + vite build) | preview.
+  No test or lint setup yet.
+
+  Domain: Isofinity renders a fixed top-down isometric world of
+  pre-rendered objects (Baldur's Gate 1/2 and Pillars of Eternity style)
+  with real-time dynamic lighting on top.
+
+  Key design constraint: every pre-rendered asset carries per-pixel
+  color (albedo), baked world-space position, and baked normal data —
+  never model assets as plain RGBA images and never treat lighting as
+  purely baked or screen-space.
+
+  Reference architecture: docs/poe-rendering-baseline.md (Obsidian's
+  four-pass bake: final, depth, normal, albedo; deferred lights over
+  the prerendered plane). Design changes against that baseline.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
