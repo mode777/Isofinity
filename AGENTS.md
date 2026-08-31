@@ -46,8 +46,8 @@ it as the reference architecture; design against it.
   manifest (`format: isoinfinity-bake/2`). Conventions in
   `docs/bake-pipeline.md`.
 - Runtime editor (`index.html`, `src/runtime/`, shared math in
-  `src/shared/`): bakes sprites at page load, places them on a 12x12
-  isometric grid. Raw WebGL2 compositor, painter-sorted, no lighting or
-  per-pixel occlusion yet. See `docs/runtime.md`.
+  `src/shared/`): bakes sprites at page load, places them freely on an
+  isometric ground plane. Raw WebGL2 compositor with per-pixel sprite
+  occlusion from the baked depth; no lighting yet. See `docs/runtime.md`.
 - No released API: expect breaking changes while the architecture is under
   design.

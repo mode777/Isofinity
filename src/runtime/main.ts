@@ -1,4 +1,4 @@
-import { SCREEN_UP, groundToScreen, screenToGround } from '../shared/iso.js';
+import { SCREEN_UP, VIEW_DIR, groundToScreen, screenToGround } from '../shared/iso.js';
 import { RUNTIME_PPU, bakeSprites } from './assets.js';
 import { Renderer } from './renderer.js';
 import { World } from './world.js';
@@ -47,7 +47,13 @@ function pickGround(px: number, py: number): [number, number] {
   return screenToGround((px - originX) / PPU, -(py - originY) / PPU);
 }
 
-const renderer = new Renderer(canvas, sprites.layers, sprites.width, sprites.height);
+const renderer = new Renderer(
+  canvas,
+  sprites.albedoLayers,
+  sprites.depthLayers,
+  sprites.width,
+  sprites.height,
+);
 
 {
   const ground = new Float32Array(GRID_N * GRID_N * 6 * 5);
@@ -85,21 +91,22 @@ world.place(5, 8, 'plane');
 
 let tool = 'cube';
 let hover: [number, number] | null = null;
-let instances = new Float32Array(256 * 3);
+let instances = new Float32Array(256 * 4);
 const highlightData = new Float32Array(6 * 5);
 
 function renderFrame(): void {
   const scale = PPU / RUNTIME_PPU;
   const placed = world.list();
-  if (instances.length < placed.length * 3) {
-    instances = new Float32Array(Math.max(placed.length * 3, instances.length * 2));
+  if (instances.length < placed.length * 4) {
+    instances = new Float32Array(Math.max(placed.length * 4, instances.length * 2));
   }
   let count = 0;
   for (const p of placed) {
     const [cx, cy] = toPx(p.x, p.z);
-    instances[count * 3] = cx - sprites.originPx[0] * scale;
-    instances[count * 3 + 1] = cy - sprites.originPx[1] * scale;
-    instances[count * 3 + 2] = layerOf.get(p.primId) ?? 0;
+    instances[count * 4] = cx - sprites.originPx[0] * scale;
+    instances[count * 4 + 1] = cy - sprites.originPx[1] * scale;
+    instances[count * 4 + 2] = layerOf.get(p.primId) ?? 0;
+    instances[count * 4 + 3] = VIEW_DIR[0] * p.x + VIEW_DIR[2] * p.z;
     count++;
   }
 

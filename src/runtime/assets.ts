@@ -14,7 +14,8 @@ export interface SpriteSet {
   ids: string[];
   width: number;
   height: number;
-  layers: Uint8Array[];
+  albedoLayers: Uint8Array[];
+  depthLayers: Float32Array[];
   originPx: [number, number];
 }
 
@@ -28,7 +29,8 @@ export function bakeSprites(): SpriteSet {
     getPlane(),
   ];
   const ids: string[] = [];
-  const layers: Uint8Array[] = [];
+  const albedoLayers: Uint8Array[] = [];
+  const depthLayers: Float32Array[] = [];
   let width = 0;
   let height = 0;
   let originPx: [number, number] = [0, 0];
@@ -38,9 +40,10 @@ export function bakeSprites(): SpriteSet {
     width = result.width;
     height = result.height;
     originPx = result.originPx;
-    layers.push(albedoToBytes(result.albedo, result.width, result.height));
+    albedoLayers.push(albedoToBytes(result.albedo, result.width, result.height));
+    depthLayers.push(depthToChannel(result.depth));
   }
-  return { ids, width, height, layers, originPx };
+  return { ids, width, height, albedoLayers, depthLayers, originPx };
 }
 
 function albedoToBytes(rgba: Float32Array, w: number, h: number): Uint8Array {
@@ -55,6 +58,14 @@ function albedoToBytes(rgba: Float32Array, w: number, h: number): Uint8Array {
       out[d + 2] = quantize(rgba[s + 2]);
       out[d + 3] = quantize(rgba[s + 3]);
     }
+  }
+  return out;
+}
+
+function depthToChannel(depth: Float32Array): Float32Array {
+  const out = new Float32Array(depth.length / 4);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = depth[i * 4];
   }
   return out;
 }
