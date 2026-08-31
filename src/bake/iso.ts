@@ -1,7 +1,14 @@
 import { OrthographicCamera, Vector3 } from 'three';
+import {
+  DEPTH_RANGE,
+  ISO_AZIMUTH_DEG,
+  ISO_ELEVATION_DEG,
+  VIEW_DIR,
+} from '../shared/iso.js';
 
-export const ISO_AZIMUTH_DEG = 45;
-export const ISO_ELEVATION_DEG = 30;
+export { DEPTH_RANGE, ISO_AZIMUTH_DEG, ISO_ELEVATION_DEG };
+
+export const ISO_VIEW_DIR = new Vector3(VIEW_DIR[0], VIEW_DIR[1], VIEW_DIR[2]);
 
 const DEG2RAD = Math.PI / 180;
 const CAMERA_DISTANCE = 4;
@@ -22,13 +29,6 @@ export function isoDirection(azimuthDeg: number, elevationDeg: number): Vector3 
     Math.cos(el) * Math.sin(az),
   );
 }
-
-export const ISO_VIEW_DIR = isoDirection(ISO_AZIMUTH_DEG, ISO_ELEVATION_DEG);
-
-export const DEPTH_RANGE: [number, number] = [
-  0,
-  Math.abs(ISO_VIEW_DIR.x) + Math.abs(ISO_VIEW_DIR.y) + Math.abs(ISO_VIEW_DIR.z),
-];
 
 export function reconstructWorldPos(
   frame: IsoFrame,

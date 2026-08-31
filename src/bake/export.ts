@@ -1,7 +1,7 @@
 import { DataTexture, FloatType, RGBAFormat, Vector3 } from 'three';
 import { EXRExporter, NO_COMPRESSION } from 'three/examples/jsm/exporters/EXRExporter.js';
-import { getBakeFrame, type BakeResult } from './bake.js';
-import { DEPTH_RANGE, reconstructWorldPos } from './iso.js';
+import { PAD_PX, type BakeResult } from './bake.js';
+import { DEPTH_RANGE, frameIsoCube, reconstructWorldPos } from './iso.js';
 
 export function download(name: string, data: BlobPart, mime: string): void {
   const url = URL.createObjectURL(new Blob([data], { type: mime }));
@@ -126,7 +126,7 @@ export function buildManifest(result: BakeResult): BakeManifest {
 const debugPos = new Vector3();
 
 export function debugPositionCanvas(result: BakeResult): HTMLCanvasElement {
-  const frame = getBakeFrame();
+  const frame = frameIsoCube(result.pxPerUnit, PAD_PX);
   return rgbaToCanvas(result.depth, result.width, result.height, (r, _g, _b, a, x, y) => {
     if (a === 0) return [0, 0, 0, 0];
     const p = reconstructWorldPos(frame, x + 0.5, y + 0.5, r, debugPos);

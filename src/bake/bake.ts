@@ -17,7 +17,6 @@ import {
   ISO_ELEVATION_DEG,
   ISO_VIEW_DIR,
   frameIsoCube,
-  type IsoFrame,
 } from './iso.js';
 import type { Primitive } from './primitives.js';
 
@@ -110,13 +109,9 @@ function halfToFloat(h: number): number {
   return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
 }
 
-export function getBakeFrame(): IsoFrame {
-  return frameIsoCube(PX_PER_UNIT, PAD_PX);
-}
-
-export function bakePrimitive(prim: Primitive): BakeResult {
+export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT): BakeResult {
   const r = getRenderer();
-  const frame = getBakeFrame();
+  const frame = frameIsoCube(pxPerUnit, PAD_PX);
   const { width, height } = frame;
 
   const target = new WebGLRenderTarget(width, height, {
@@ -165,7 +160,7 @@ export function bakePrimitive(prim: Primitive): BakeResult {
     albedoHex: prim.albedoHex,
     width,
     height,
-    pxPerUnit: PX_PER_UNIT,
+    pxPerUnit,
     originPx: frame.originPx,
     camera: {
       azimuthDeg: ISO_AZIMUTH_DEG,

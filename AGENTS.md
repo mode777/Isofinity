@@ -40,7 +40,14 @@ it as the reference architecture; design against it.
 
 ## Current state
 
-- No engine code yet — placeholder page (`index.html` + `src/main.ts`) that
-  verifies a WebGL2 context.
+- Bake tool (`bake.html`, `src/bake/`): bakes test primitives (sphere,
+  donut, cube, cylinder, capsule, plane) into per-cube sprite passes —
+  albedo (PNG), linear ray depth + world normals (float EXR) — plus a
+  manifest (`format: isoinfinity-bake/2`). Conventions in
+  `docs/bake-pipeline.md`.
+- Runtime editor (`index.html`, `src/runtime/`, shared math in
+  `src/shared/`): bakes sprites at page load, places them on a 12x12
+  isometric grid. Raw WebGL2 compositor, painter-sorted, no lighting or
+  per-pixel occlusion yet. See `docs/runtime.md`.
 - No released API: expect breaking changes while the architecture is under
   design.

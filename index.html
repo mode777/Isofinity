@@ -7,28 +7,74 @@
     <style>
       body {
         font-family: system-ui, sans-serif;
-        max-width: 42rem;
-        margin: 3rem auto;
+        max-width: 78rem;
+        margin: 2rem auto;
         padding: 0 1rem;
         color: #ddd;
         background: #14161a;
       }
-      canvas {
-        display: block;
-        border: 1px solid #333;
-        image-rendering: pixelated;
+      .controls {
+        display: flex;
+        gap: 0.5rem;
+        margin: 1rem 0;
+        flex-wrap: wrap;
+      }
+      button {
+        background: #23262d;
+        color: #ddd;
+        border: 1px solid #3a3f4a;
+        border-radius: 4px;
+        padding: 0.4rem 0.9rem;
+        cursor: pointer;
+        font-size: 0.95rem;
+      }
+      button:hover {
+        background: #2d313a;
+      }
+      button.active {
+        background: #3b4252;
+        border-color: #6f7a8f;
       }
       #status {
         color: #8a8f98;
+        min-height: 1.4em;
+      }
+      canvas {
+        display: block;
+        max-width: 100%;
+        border: 1px solid #333;
+        cursor: crosshair;
+        touch-action: none;
+      }
+      a {
+        color: #8ab4f8;
       }
     </style>
   </head>
   <body>
     <h1>Isofinity</h1>
-    <p>A 2D renderer for pre-rendered graphics with dynamic lighting.</p>
-    <p>Placeholder page — engine under construction.</p>
-    <canvas id="gl" width="320" height="180"></canvas>
+    <p>
+      A 2D renderer for pre-rendered graphics with dynamic lighting. First
+      runtime milestone: place baked primitives on an isometric grid.
+    </p>
+    <div class="controls" id="toolbar">
+      <button data-tool="sphere">Sphere</button>
+      <button data-tool="donut">Donut</button>
+      <button data-tool="cube" class="active">Cube</button>
+      <button data-tool="cylinder">Cylinder</button>
+      <button data-tool="capsule">Capsule</button>
+      <button data-tool="plane">Plane</button>
+      <button data-tool="eraser">Eraser</button>
+      <button id="clear">Clear all</button>
+    </div>
+    <canvas id="view"></canvas>
     <p id="status"></p>
-    <script type="module" src="/src/main.ts"></script>
+    <p>
+      Sprites are baked at load time from the
+      <a href="./bake.html">bake tool</a> pipeline (albedo + coverage).
+      Lighting and occlusion come later — see
+      <code>docs/bake-pipeline.md</code>.
+    </p>
+    <script type="module" src="/src/runtime/main.ts"></script>
   </body>
 </html>
