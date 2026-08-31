@@ -12,6 +12,12 @@ uploads the **albedo + coverage** and the **linear ray depth** into two
 WebGL2 `TEXTURE_2D_ARRAY`s (RGBA8 and R32F, one layer per primitive). The
 normal pass is not consumed yet — dynamic lighting is the next milestone.
 
+Row-order warning: GL pixel readback is bottom-up and both texture arrays
+are sampled with the same UV, so **every** uploaded pass must be flipped to
+top-down (`albedoToBytes` and `depthToChannel` both flip). A pass uploaded
+unflipped pairs each pixel's data with its mirrored twin — this exact bug
+made baked-depth occlusion look vertically mirrored on the live site.
+
 ## Renderer
 
 Raw WebGL2, no scene graph, no matrices. Because the camera is fixed and

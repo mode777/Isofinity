@@ -41,7 +41,7 @@ export function bakeSprites(): SpriteSet {
     height = result.height;
     originPx = result.originPx;
     albedoLayers.push(albedoToBytes(result.albedo, result.width, result.height));
-    depthLayers.push(depthToChannel(result.depth));
+    depthLayers.push(depthToChannel(result.depth, result.width, result.height));
   }
   return { ids, width, height, albedoLayers, depthLayers, originPx };
 }
@@ -62,10 +62,13 @@ function albedoToBytes(rgba: Float32Array, w: number, h: number): Uint8Array {
   return out;
 }
 
-function depthToChannel(depth: Float32Array): Float32Array {
-  const out = new Float32Array(depth.length / 4);
-  for (let i = 0; i < out.length; i++) {
-    out[i] = depth[i * 4];
+function depthToChannel(depth: Float32Array, w: number, h: number): Float32Array {
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const srcRow = (h - 1 - y) * w;
+    for (let x = 0; x < w; x++) {
+      out[y * w + x] = depth[(srcRow + x) * 4];
+    }
   }
   return out;
 }
