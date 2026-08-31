@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Isofinity</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 42rem;
+        margin: 3rem auto;
+        padding: 0 1rem;
+        color: #ddd;
+        background: #14161a;
+      }
+      canvas {
+        display: block;
+        border: 1px solid #333;
+        image-rendering: pixelated;
+      }
+      #status {
+        color: #8a8f98;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Isofinity</h1>
+    <p>A 2D renderer for pre-rendered graphics with dynamic lighting.</p>
+    <p>Placeholder page — engine under construction.</p>
+    <canvas id="gl" width="320" height="180"></canvas>
+    <p id="status"></p>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
