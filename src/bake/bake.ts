@@ -12,7 +12,13 @@ import {
   WebGLRenderTarget,
   WebGLRenderer,
 } from 'three';
-import { ISO_AZIMUTH_DEG, ISO_ELEVATION_DEG, frameIsoCube } from './iso.js';
+import {
+  ISO_AZIMUTH_DEG,
+  ISO_ELEVATION_DEG,
+  ISO_VIEW_DIR,
+  frameIsoCube,
+  type IsoFrame,
+} from './iso.js';
 import type { Primitive } from './primitives.js';
 
 export const PX_PER_UNIT = 128;
@@ -28,9 +34,9 @@ export interface BakeResult {
   height: number;
   pxPerUnit: number;
   originPx: [number, number];
-  camera: { azimuthDeg: number; elevationDeg: number };
+  camera: { azimuthDeg: number; elevationDeg: number; viewDir: [number, number, number] };
   albedo: Float32Array;
-  position: Float32Array;
+  depth: Float32Array;
   normal: Float32Array;
 }
 
@@ -53,9 +59,10 @@ in vec3 vWorldNormal;
 uniform vec3 uAlbedo;
 uniform vec3 uCubeMin;
 uniform vec3 uCubeMax;
+uniform vec3 uViewDir;
 
 layout(location = 0) out vec4 outAlbedo;
-layout(location = 1) out vec4 outPosition;
+layout(location = 1) out vec4 outDepth;
 layout(location = 2) out vec4 outNormal;
 
 void main() {
@@ -64,7 +71,7 @@ void main() {
     discard;
   }
   outAlbedo = vec4(uAlbedo, 1.0);
-  outPosition = vec4(clamp(cubePos, 0.0, 1.0), 1.0);
+  outDepth = vec4(dot(vWorldPos, uViewDir), 0.0, 0.0, 1.0);
   outNormal = vec4(normalize(vWorldNormal), 1.0);
 }
 `;
@@ -103,9 +110,13 @@ function halfToFloat(h: number): number {
   return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
 }
 
+export function getBakeFrame(): IsoFrame {
+  return frameIsoCube(PX_PER_UNIT, PAD_PX);
+}
+
 export function bakePrimitive(prim: Primitive): BakeResult {
   const r = getRenderer();
-  const frame = frameIsoCube(PX_PER_UNIT, PAD_PX);
+  const frame = getBakeFrame();
   const { width, height } = frame;
 
   const target = new WebGLRenderTarget(width, height, {
@@ -125,6 +136,7 @@ export function bakePrimitive(prim: Primitive): BakeResult {
       uAlbedo: { value: new Color(prim.albedoHex) },
       uCubeMin: { value: new Vector3(0, 0, 0) },
       uCubeMax: { value: new Vector3(1, 1, 1) },
+      uViewDir: { value: ISO_VIEW_DIR.clone() },
     },
   });
 
@@ -139,7 +151,7 @@ export function bakePrimitive(prim: Primitive): BakeResult {
   r.render(scene, frame.camera);
 
   const albedo = readAttachment(r, target, 0, width, height);
-  const position = readAttachment(r, target, 1, width, height);
+  const depth = readAttachment(r, target, 1, width, height);
   const normal = readAttachment(r, target, 2, width, height);
 
   r.setRenderTarget(null);
@@ -155,9 +167,13 @@ export function bakePrimitive(prim: Primitive): BakeResult {
     height,
     pxPerUnit: PX_PER_UNIT,
     originPx: frame.originPx,
-    camera: { azimuthDeg: ISO_AZIMUTH_DEG, elevationDeg: ISO_ELEVATION_DEG },
+    camera: {
+      azimuthDeg: ISO_AZIMUTH_DEG,
+      elevationDeg: ISO_ELEVATION_DEG,
+      viewDir: [ISO_VIEW_DIR.x, ISO_VIEW_DIR.y, ISO_VIEW_DIR.z],
+    },
     albedo,
-    position,
+    depth,
     normal,
   };
 }

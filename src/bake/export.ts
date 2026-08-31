@@ -1,6 +1,7 @@
-import { DataTexture, FloatType, RGBAFormat } from 'three';
+import { DataTexture, FloatType, RGBAFormat, Vector3 } from 'three';
 import { EXRExporter, NO_COMPRESSION } from 'three/examples/jsm/exporters/EXRExporter.js';
-import type { BakeResult } from './bake.js';
+import { getBakeFrame, type BakeResult } from './bake.js';
+import { DEPTH_RANGE, reconstructWorldPos } from './iso.js';
 
 export function download(name: string, data: BlobPart, mime: string): void {
   const url = URL.createObjectURL(new Blob([data], { type: mime }));
@@ -19,7 +20,7 @@ export function rgbaToCanvas(
   rgba: Float32Array,
   width: number,
   height: number,
-  map: (r: number, g: number, b: number, a: number) => [number, number, number, number],
+  map: (r: number, g: number, b: number, a: number, x: number, y: number) => [number, number, number, number],
 ): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -31,7 +32,7 @@ export function rgbaToCanvas(
     for (let x = 0; x < width; x++) {
       const s = (srcRow + x) * 4;
       const d = (y * width + x) * 4;
-      const [r, g, b, a] = map(rgba[s], rgba[s + 1], rgba[s + 2], rgba[s + 3]);
+      const [r, g, b, a] = map(rgba[s], rgba[s + 1], rgba[s + 2], rgba[s + 3], x, y);
       out.data[d] = Math.round(clamp01(r) * 255);
       out.data[d + 1] = Math.round(clamp01(g) * 255);
       out.data[d + 2] = Math.round(clamp01(b) * 255);
@@ -62,7 +63,13 @@ export interface BakeManifest {
   format: string;
   id: string;
   cube: { size: [number, number, number]; origin: [number, number, number] };
-  camera: { projection: string; azimuthDeg: number; elevationDeg: number };
+  camera: {
+    projection: string;
+    azimuthDeg: number;
+    elevationDeg: number;
+    viewDir: [number, number, number];
+  };
+  depth: { definition: string; range: [number, number] };
   pxPerUnit: number;
   sprite: { width: number; height: number; originPx: [number, number] };
   passes: Record<string, { file: string; encoding: string; channels: string }>;
@@ -70,13 +77,22 @@ export interface BakeManifest {
 
 export function buildManifest(result: BakeResult): BakeManifest {
   return {
-    format: 'isoinfinity-bake/1',
+    format: 'isoinfinity-bake/2',
     id: result.id,
     cube: { size: [1, 1, 1], origin: [0, 0, 0] },
     camera: {
       projection: 'orthographic',
       azimuthDeg: result.camera.azimuthDeg,
       elevationDeg: result.camera.elevationDeg,
+      viewDir: [
+        Math.round(result.camera.viewDir[0] * 1e6) / 1e6,
+        Math.round(result.camera.viewDir[1] * 1e6) / 1e6,
+        Math.round(result.camera.viewDir[2] * 1e6) / 1e6,
+      ],
+    },
+    depth: {
+      definition: 'r = dot(worldPos, viewDir), reference plane through world origin',
+      range: [Math.round(DEPTH_RANGE[0] * 1e6) / 1e6, Math.round(DEPTH_RANGE[1] * 1e6) / 1e6],
     },
     pxPerUnit: result.pxPerUnit,
     sprite: {
@@ -93,10 +109,10 @@ export function buildManifest(result: BakeResult): BakeManifest {
         encoding: 'png-r8-srgb',
         channels: 'rgb=albedo a=coverage',
       },
-      position: {
-        file: `${result.id}-position.exr`,
+      depth: {
+        file: `${result.id}-depth.exr`,
         encoding: 'exr-f32-linear',
-        channels: 'rgb=normalized-position-in-cube a=coverage',
+        channels: 'r=ray-depth gb=unused a=coverage',
       },
       normal: {
         file: `${result.id}-normal.exr`,
@@ -105,4 +121,15 @@ export function buildManifest(result: BakeResult): BakeManifest {
       },
     },
   };
+}
+
+const debugPos = new Vector3();
+
+export function debugPositionCanvas(result: BakeResult): HTMLCanvasElement {
+  const frame = getBakeFrame();
+  return rgbaToCanvas(result.depth, result.width, result.height, (r, _g, _b, a, x, y) => {
+    if (a === 0) return [0, 0, 0, 0];
+    const p = reconstructWorldPos(frame, x + 0.5, y + 0.5, r, debugPos);
+    return [p.x, p.y, p.z, 1];
+  });
 }

@@ -69,8 +69,10 @@
     <h1>Isofinity — Bake Tool</h1>
     <p>
       Bakes a primitive into per-cube sprite passes: albedo (sRGB PNG),
-      cube-space position and world-space normal (float EXR), each with a
-      coverage alpha channel.
+      linear ray depth and world-space normal (float EXR), each with a
+      coverage alpha channel. World position is reconstructible from pixel +
+      depth via the fixed camera; a debug PNG dumps the reconstructed
+      cube-space position for validation.
     </p>
     <div class="controls">
       <button id="prim-sphere" class="prim active" data-primitive="sphere">Sphere</button>
@@ -88,8 +90,8 @@
         <figcaption>albedo.png — sRGB color + coverage</figcaption>
       </figure>
       <figure>
-        <canvas id="pass-position"></canvas>
-        <figcaption>position.exr — normalized cube-space [0,1]³</figcaption>
+        <canvas id="pass-depth"></canvas>
+        <figcaption>depth.exr — linear ray depth dot(p, viewDir)</figcaption>
       </figure>
       <figure>
         <canvas id="pass-normal"></canvas>
@@ -98,8 +100,9 @@
     </div>
     <div class="controls">
       <button id="dl-albedo" disabled>Download albedo.png</button>
-      <button id="dl-position" disabled>Download position.exr</button>
+      <button id="dl-depth" disabled>Download depth.exr</button>
       <button id="dl-normal" disabled>Download normal.exr</button>
+      <button id="dl-debug" disabled>Download position-debug.png</button>
       <button id="dl-manifest" disabled>Download bake.json</button>
     </div>
     <script type="module" src="/src/bake/main.ts"></script>

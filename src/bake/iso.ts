@@ -23,6 +23,29 @@ export function isoDirection(azimuthDeg: number, elevationDeg: number): Vector3 
   );
 }
 
+export const ISO_VIEW_DIR = isoDirection(ISO_AZIMUTH_DEG, ISO_ELEVATION_DEG);
+
+export const DEPTH_RANGE: [number, number] = [
+  0,
+  Math.abs(ISO_VIEW_DIR.x) + Math.abs(ISO_VIEW_DIR.y) + Math.abs(ISO_VIEW_DIR.z),
+];
+
+export function reconstructWorldPos(
+  frame: IsoFrame,
+  pixelX: number,
+  pixelY: number,
+  depth: number,
+  out = new Vector3(),
+): Vector3 {
+  const ndcX = (pixelX / frame.width) * 2 - 1;
+  const ndcY = 1 - (pixelY / frame.height) * 2;
+  const vx = (ndcX * (frame.camera.right - frame.camera.left) + (frame.camera.right + frame.camera.left)) / 2;
+  const vy = (ndcY * (frame.camera.top - frame.camera.bottom) + (frame.camera.top + frame.camera.bottom)) / 2;
+  out.set(vx, vy, 0).applyMatrix4(frame.camera.matrixWorld);
+  const t = depth - out.dot(ISO_VIEW_DIR);
+  return out.addScaledVector(ISO_VIEW_DIR, t);
+}
+
 export function frameIsoCube(pxPerUnit: number, padPx: number): IsoFrame {
   const camera = new OrthographicCamera(-1, 1, 1, -1, 1, CAMERA_DISTANCE * 2 + 1);
   const dir = isoDirection(ISO_AZIMUTH_DEG, ISO_ELEVATION_DEG);

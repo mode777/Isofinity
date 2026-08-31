@@ -1,5 +1,12 @@
 import { bakePrimitive, type BakeResult } from './bake.js';
-import { buildManifest, download, exportExr, rgbaToCanvas } from './export.js';
+import {
+  buildManifest,
+  debugPositionCanvas,
+  download,
+  exportExr,
+  rgbaToCanvas,
+} from './export.js';
+import { DEPTH_RANGE } from './iso.js';
 import {
   getCapsule,
   getCube,
@@ -13,13 +20,14 @@ import {
 const statusEl = document.getElementById('status')!;
 const canvases = {
   albedo: document.getElementById('pass-albedo') as HTMLCanvasElement,
-  position: document.getElementById('pass-position') as HTMLCanvasElement,
+  depth: document.getElementById('pass-depth') as HTMLCanvasElement,
   normal: document.getElementById('pass-normal') as HTMLCanvasElement,
 };
 const downloadButtons = {
   albedo: document.getElementById('dl-albedo') as HTMLButtonElement,
-  position: document.getElementById('dl-position') as HTMLButtonElement,
+  depth: document.getElementById('dl-depth') as HTMLButtonElement,
   normal: document.getElementById('dl-normal') as HTMLButtonElement,
+  debug: document.getElementById('dl-debug') as HTMLButtonElement,
   manifest: document.getElementById('dl-manifest') as HTMLButtonElement,
 };
 
@@ -44,10 +52,14 @@ function showPass(
   rgba: Float32Array,
   width: number,
   height: number,
-  mode: 'albedo' | 'normal' | 'position',
+  mode: 'albedo' | 'depth' | 'normal',
 ): void {
   const shown = rgbaToCanvas(rgba, width, height, (r, g, b, a) => {
     if (mode === 'normal') return [r * 0.5 + 0.5, g * 0.5 + 0.5, b * 0.5 + 0.5, a];
+    if (mode === 'depth') {
+      const t = (r - DEPTH_RANGE[0]) / (DEPTH_RANGE[1] - DEPTH_RANGE[0]);
+      return [t, t, t, a];
+    }
     return [r, g, b, a];
   });
   const ctx = canvas.getContext('2d')!;
@@ -61,7 +73,7 @@ function bake(): void {
   try {
     result = bakePrimitive(current);
     showPass(canvases.albedo, result.albedo, result.width, result.height, 'albedo');
-    showPass(canvases.position, result.position, result.width, result.height, 'position');
+    showPass(canvases.depth, result.depth, result.width, result.height, 'depth');
     showPass(canvases.normal, result.normal, result.width, result.height, 'normal');
     for (const b of Object.values(downloadButtons)) b.disabled = false;
     setStatus(
@@ -98,13 +110,19 @@ downloadButtons.albedo.addEventListener('click', () => {
     if (blob) download(`${result!.id}-albedo.png`, blob, 'image/png');
   });
 });
-downloadButtons.position.addEventListener('click', () => {
+downloadButtons.depth.addEventListener('click', () => {
   if (!result) return;
-  void exportExr(result.position, result.width, result.height, `${result.id}-position.exr`);
+  void exportExr(result.depth, result.width, result.height, `${result.id}-depth.exr`);
 });
 downloadButtons.normal.addEventListener('click', () => {
   if (!result) return;
   void exportExr(result.normal, result.width, result.height, `${result.id}-normal.exr`);
+});
+downloadButtons.debug.addEventListener('click', () => {
+  if (!result) return;
+  debugPositionCanvas(result).toBlob((blob) => {
+    if (blob) download(`${result!.id}-position-debug.png`, blob, 'image/png');
+  });
 });
 downloadButtons.manifest.addEventListener('click', () => {
   if (!result) return;

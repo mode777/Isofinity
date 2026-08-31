@@ -28,20 +28,46 @@ Pick a primitive, hit Bake, inspect the passes, download the files.
 
 - One asset cell is a 1×1×1 world-space cube spanning `[0,1]³` with the
   minimum corner at `(0,0,0)`. Bigger assets are grids of cubes.
-- The **position pass** stores position *normalized within the cube*, so
-  cubes tile losslessly; world position is reconstructed as
-  `cubeOrigin + cubePos * cubeSize`.
+- Cube-space position is **not stored**; it is derived from pixel + depth
+  (see below). The per-cube origin is tracked by the asset layout, so
+  cubes tile losslessly.
 - The **normal pass** stores world-space normals. Cubes are axis-aligned, so
   cube-local and world normals are identical; only the position offset
   differs per cube.
 
+### Depth instead of position
+
+The stored format does **not** contain a position pass. With the fixed
+orthographic camera, every pixel's ray has the same known direction and a
+known origin, so full 3D position is exactly reconstructible from the pixel
+coordinate plus a single scalar depth — the standard deferred-rendering
+trade (store depth, unproject), and it saves two channels per pixel.
+
+- Definition: `depth = dot(worldPos, viewDir)` — linear ray distance from
+  the global reference plane through the world origin, perpendicular to the
+  view direction. Chosen over distance-from-camera so that depths stay
+  comparable **across cube sprites** in multi-cube assets (the camera is
+  repositioned per cube, the reference plane is not).
+- Range for the unit cube: `DEPTH_RANGE = [0, |viewDir|₁] ≈ [0, 1.725]`
+  (`src/bake/iso.ts` — the L1 norm of the view direction over a unit cube).
+- Reconstruction: `worldPos = rayOrigin(pixel) + (depth - dot(rayOrigin,
+  viewDir)) * viewDir`, implemented in `reconstructWorldPos()` next to the
+  camera constants so bake-time and runtime can never drift apart.
+- Cube-space position is derived, never stored: `cubePos = worldPos -
+  cubeOrigin` with the per-cube origin known to the compositor.
+- A debug-only `position-debug.png` (reconstructed cube-space position,
+  8-bit) is exported for golden-image diffs; sub-pixel lateral error (~half
+  a pixel) is expected and harmless there.
+- Normals remain baked — deriving them from depth derivatives breaks at
+  silhouettes and interior edges (the donut hole).
+
 ### Passes (one MRT draw call, `count: 3`, half-float RGBA targets)
 
-| Pass     | RGB                                | A        | File                  |
-| -------- | ---------------------------------- | -------- | --------------------- |
-| albedo   | surface color, **sRGB-encoded**    | coverage | `<id>-albedo.png`     |
-| position | normalized cube-space pos `[0,1]³` | coverage | `<id>-position.exr`   |
-| normal   | world-space normal                 | coverage | `<id>-normal.exr`     |
+| Pass     | RGB                                   | A        | File                |
+| -------- | ------------------------------------- | -------- | ------------------- |
+| albedo   | surface color, **sRGB-encoded**       | coverage | `<id>-albedo.png`   |
+| depth    | r = linear ray depth, gb unused       | coverage | `<id>-depth.exr`    |
+| normal   | world-space normal                    | coverage | `<id>-normal.exr`   |
 
 - Coverage: `a = 1` on rendered pixels, `0` on background (clear color
   `(0,0,0,0)` lands in every MRT attachment). The engine uses this for
@@ -62,14 +88,17 @@ asset alignment work is needed.
 
 ### Manifest (`<id>-bake.json`)
 
-Records camera angles, `pxPerUnit`, sprite size, origin and per-pass channel
-semantics (`format: "isoinfinity-bake/1"`).
+Records camera angles and view direction, `pxPerUnit`, sprite size, origin,
+depth semantics/range and per-pass channel semantics
+(`format: "isoinfinity-bake/2"`; v1 stored a redundant cube-space position
+pass instead of depth).
 
 ## Current state / next steps
 
-- Done: sphere + donut test primitives, cube-frame camera math, MRT bake,
-  PNG + EXR export, manifest, visual pass preview.
+- Done: sphere, donut, cube, cylinder, capsule and plane test primitives,
+  cube-frame camera math, MRT bake (albedo + depth + normal), PNG + EXR
+  export, debug position dump, manifest, visual pass preview.
 - Planned: supersampling (render at N× and box-downsample), multi-cube
   composite assets, geometry-level clipping (CSG) instead of shader discard,
-  KTX2/UASTC packaging for delivery, raytraced golden-image diff as a
-  validator.
+  KTX2/UASTC packaging for delivery (depth packs to a single 16-bit
+  channel), raytraced golden-image diff as a validator.
