@@ -6,7 +6,7 @@ import {
   RepeatWrapping,
   SRGBColorSpace,
 } from 'three';
-import type { BufferGeometry, Material, Mesh, SkinnedMesh, Texture } from 'three';
+import type { BufferGeometry, Material, Mesh, MeshStandardMaterial, SkinnedMesh, Texture } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -328,6 +328,14 @@ export async function loadGltf(files: File[]): Promise<GltfSource> {
       baseColorFactor: [color.r, color.g, color.b, material.opacity],
       alphaMode: isMasked(material) ? 'mask' : 'opaque',
       alphaCutoff: material.alphaTest > 0 ? material.alphaTest : 0,
+      // The path-traced render stage consumes the full PBR material.
+      // GLTFLoader can yield MeshPhysicalMaterial (extends Standard) for
+      // transmission-style extensions; non-standard materials (unlit) fall
+      // back to the base-color fields in the render stage.
+      pbrMaterial: (material as Material & { isMeshStandardMaterial?: boolean })
+        .isMeshStandardMaterial
+        ? (material as MeshStandardMaterial)
+        : null,
     });
   }
   // The un-merged, world-baked clones are no longer needed once merged.
@@ -354,7 +362,22 @@ export async function loadGltf(files: File[]): Promise<GltfSource> {
       };
     },
     dispose(): void {
-      for (const group of groups) group.geometry.dispose();
+      for (const group of groups) {
+        group.geometry.dispose();
+        const pbr = group.pbrMaterial;
+        if (pbr) {
+          for (const tex of [
+            pbr.map,
+            pbr.normalMap,
+            pbr.roughnessMap,
+            pbr.metalnessMap,
+            pbr.aoMap,
+            pbr.emissiveMap,
+          ]) {
+            if (tex) tex.dispose();
+          }
+        }
+      }
       for (const texture of textures) texture.dispose();
     },
   };

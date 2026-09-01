@@ -7,7 +7,7 @@ import {
   SphereGeometry,
   TorusGeometry,
 } from 'three';
-import type { Texture } from 'three';
+import type { MeshStandardMaterial, Texture } from 'three';
 import type { Vec3 } from '../shared/iso.js';
 
 /**
@@ -24,6 +24,13 @@ export interface MaterialGroup {
   /** `mask` discards texels below `alphaCutoff`; `opaque` bakes everything. */
   alphaMode: 'opaque' | 'mask';
   alphaCutoff: number;
+  /**
+   * Full glTF material (base color, metallic-roughness, normal map) for the
+   * path-traced render stage; the raster passes ignore it. Null/absent for
+   * sources without PBR data — the render stage then falls back to the
+   * base-color fields above.
+   */
+  pbrMaterial?: MeshStandardMaterial | null;
 }
 
 export interface Primitive {

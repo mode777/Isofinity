@@ -29,6 +29,11 @@ export interface SpriteLayer {
   originPx: [number, number];
   albedo: Uint8Array;
   gbuffer: Uint16Array;
+  /**
+   * Path-traced lit render (sRGB RGBA, top-down), when the bundle carries
+   * one. Boot bakes have none — those sprites display unlit only.
+   */
+  render?: Uint8Array;
 }
 
 export interface SpriteSet {
@@ -40,6 +45,8 @@ export interface SpriteSet {
   ppus: number[];
   albedoLayers: Uint8Array[];
   gbufferLayers: Uint16Array[];
+  /** null = no baked render for this layer (uploads as transparent). */
+  renderLayers: (Uint8Array | null)[];
 }
 
 export function bakeSpriteLayers(): SpriteLayer[] {
@@ -78,11 +85,14 @@ export function layersToSet(layers: SpriteLayer[]): SpriteSet {
     ppus: layers.map((l) => l.pxPerUnit),
     albedoLayers: layers.map((l) => padBytes(l.albedo, l.width, l.height, maxW, maxH)),
     gbufferLayers: layers.map((l) => padHalf(l.gbuffer, l.width, l.height, maxW, maxH)),
+    renderLayers: layers.map((l) =>
+      l.render ? padBytes(l.render, l.width, l.height, maxW, maxH) : null,
+    ),
   };
 }
 
 export async function layerFromBundle(buffer: ArrayBuffer): Promise<SpriteLayer> {
-  const { manifest, albedo, gbuffer } = parseBake(buffer);
+  const { manifest, albedo, gbuffer, render } = parseBake(buffer);
   const w = manifest.sprite.width;
   const h = manifest.sprite.height;
   return {
@@ -93,6 +103,7 @@ export async function layerFromBundle(buffer: ArrayBuffer): Promise<SpriteLayer>
     originPx: manifest.sprite.originPx,
     albedo: await decodePng(albedo, w, h),
     gbuffer: decodeExrGbuffer(await gbuffer.arrayBuffer(), w, h),
+    render: render ? await decodePng(render, w, h) : undefined,
   };
 }
 

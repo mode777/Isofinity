@@ -23,19 +23,22 @@ bleeds across the padding boundary.
 ### Loading zip bundles
 
 The editor's **Load zip** button ingests bundles downloaded from the bake
-tool: `parseBake()` unpacks manifest + passes, the PNG decodes via
-`createImageBitmap` and the EXR via `EXRLoader.parse`. Row order differs
-per decoder and both must end top-down (row 0 = sprite top) for upload:
-the PNG decodes top-down and is padded **as-is**, while `EXRLoader`
-writes rows bottom-up in GL texture order (it re-flips the file's
-top-down scanlines for `flipY:false` DataTextures) — so the EXR gets the
-**same flip as a boot bake**. Getting this wrong mirrors the object
-vertically; the two decoders are deliberately asymmetric. Loaded
-layers re-pad the whole set (max size may grow, `Renderer.setSprites`
-rebuilds both texture arrays), get a toolbar tool button, and are placed
-once immediately. Per-layer `pxPerUnit` from the manifest drives the
-instance scale, so bundles baked at any resolution land at the correct
-world size.
+tool: `parseBake()` unpacks manifest + passes (formats `isoinfinity-bake/3`
+and `/4` accepted; anything else is rejected by name), the PNG decodes via
+`createImageBitmap` and the EXR via `EXRLoader.parse`. A `/4` bundle may
+carry the optional path-traced passes; when `render` is present it is
+decoded and uploaded as a third per-layer texture so the sprite can display
+**baked** (see Display modes). Row order differs per decoder and both must
+end top-down (row 0 = sprite top) for upload: the PNG decodes top-down and
+is padded **as-is**, while `EXRLoader` writes rows bottom-up in GL texture
+order (it re-flips the file's top-down scanlines for `flipY:false`
+DataTextures) — so the EXR gets the **same flip as a boot bake**. Getting
+this wrong mirrors the object vertically; the two decoders are deliberately
+asymmetric. Loaded layers re-pad the whole set (max size may grow,
+`Renderer.setSprites` rebuilds all texture arrays), get a toolbar tool
+button, and are placed once immediately. Per-layer `pxPerUnit` from the
+manifest drives the instance scale, so bundles baked at any resolution land
+at the correct world size.
 
 Row-order warning: GL pixel readback is bottom-up and all texture arrays
 are sampled with the same UV, so **every** uploaded pass must be flipped to
@@ -44,10 +47,29 @@ A pass uploaded unflipped pairs each pixel's data with its mirrored twin —
 this exact bug made baked-depth occlusion look vertically mirrored on the
 live site.
 
+## Display modes
+
+Each placement carries a display mode (**unlit** — default — or **baked**),
+set per sprite with the **Bake toggle** tool and via a default for new
+placements in the Display panel:
+
+- **unlit** — today's behavior: albedo shaded per pixel by the key +
+  ambient dynamic lights over the baked g-buffer normal.
+- **baked** — samples the path-traced `render` pass; blending uses that
+  pass's (antialiased) alpha. Sprites whose layer has no render pass
+  (v3 bundles, boot bakes) always display unlit regardless of mode.
+
+The **Dynamic light** checkbox disables the key/ambient lights globally:
+baked sprites are unaffected, unlit sprites show raw albedo (and the ground
+goes flat). Occlusion, `gl_FragDepth`, and cursor hit-testing are identical
+in every mode — depth always comes from the baked g-buffer and coverage
+always from the raster albedo alpha, never from the render pass's soft
+edges. Display mode changes shading only.
+
 ## Lighting
 
 POE-style key + ambient over the baked G-buffer, shaded per pixel in the
-fragment shader:
+fragment shader (unlit display mode; see Display modes):
 
 - `color = linearToSrgb(srgbToLinear(albedo) * (ambient + key * max(dot(N, L), 0)))`
   — albedo is sRGB-encoded (bake convention), shading happens in linear
@@ -55,7 +77,9 @@ fragment shader:
 - `L` is a world-space direction toward the key light, parametrized by
   azimuth/elevation sliders; key color (color picker) and intensity, plus a
   linear ambient scalar, are uploaded as uniforms every frame — all
-  realtime-tweakable in the "Key light" panel.
+  realtime-tweakable in the "Key light" panel. The **Dynamic light**
+  checkbox zeroes both terms (unlit sprites render raw albedo; baked
+  sprites are untouched).
 - The ground shades with `N = (0,1,0)` so it responds to the same light.
 
 ## Renderer

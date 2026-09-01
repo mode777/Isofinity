@@ -1,10 +1,13 @@
 import { VIEW_DIR } from '../shared/iso.js';
 
+export type DisplayMode = 'baked' | 'unlit';
+
 export interface Placement {
   x: number;
   z: number;
   primId: string;
   key: number;
+  displayMode: DisplayMode;
 }
 
 export function depthOf(x: number, z: number): number {
@@ -14,8 +17,8 @@ export function depthOf(x: number, z: number): number {
 export class World {
   private items: Placement[] = [];
 
-  place(x: number, z: number, primId: string): void {
-    this.items.push({ x, z, primId, key: depthOf(x, z) });
+  place(x: number, z: number, primId: string, displayMode: DisplayMode = 'unlit'): void {
+    this.items.push({ x, z, primId, key: depthOf(x, z), displayMode });
   }
 
   removeAt(x: number, z: number): Placement | null {
@@ -29,6 +32,21 @@ export class World {
     if (best < 0) return null;
     const [removed] = this.items.splice(best, 1);
     return removed;
+  }
+
+  /** Flips the display mode of the topmost placement containing the point. */
+  toggleModeAt(x: number, z: number): Placement | null {
+    let best = -1;
+    for (let k = 0; k < this.items.length; k++) {
+      const p = this.items[k];
+      if (x >= p.x && x <= p.x + 1 && z >= p.z && z <= p.z + 1) {
+        if (best < 0 || p.key > this.items[best].key) best = k;
+      }
+    }
+    if (best < 0) return null;
+    const p = this.items[best];
+    p.displayMode = p.displayMode === 'baked' ? 'unlit' : 'baked';
+    return p;
   }
 
   clear(): void {

@@ -5,6 +5,10 @@
  */
 import { bakePrimitive, PAD_PX, type BakeResult } from './bake.js';
 import { buildBundle, parseBake } from './bundle.js';
+import {
+  strToU8,
+  zipSync,
+} from 'three/examples/jsm/libs/fflate.module.js';
 import { frameIsoBox } from './iso.js';
 import { loadGltf } from './gltf.js';
 import {
@@ -16,7 +20,21 @@ import {
   getSlab,
   getSphere,
 } from './primitives.js';
-import { OrthographicCamera, Vector3 } from 'three';
+import {
+  GradientEquirectTexture,
+  WebGLPathTracer,
+} from 'three-gpu-pathtracer';
+import {
+  Mesh,
+  MeshStandardMaterial,
+  Scene,
+  SRGBColorSpace,
+  Vector3,
+  WebGLRenderer,
+  type OrthographicCamera,
+  type WebGLRenderTarget,
+} from 'three';
+import { DEFAULT_PT_SETTINGS, PtBaker } from './pt.js';
 
 const out = document.getElementById('out')!;
 let passed = 0;
@@ -373,6 +391,210 @@ function countPixels(result: BakeResult, pred: (s: ReturnType<typeof sample>) =>
   return n;
 }
 
+// ---------- path-tracer spike (ortho camera + transparent background) ----------
+
+/** Render to a WebGL target, don't touch the DOM, one full sample per call. */
+function spikePathTracer(
+  renderer: WebGLRenderer,
+  scene: Scene,
+  camera: OrthographicCamera,
+): WebGLPathTracer {
+  const pt = new WebGLPathTracer(renderer);
+  pt.renderToCanvas = false;
+  pt.rasterizeScene = false;
+  pt.renderDelay = 0;
+  pt.minSamples = 1;
+  pt.bounces = 3;
+  pt.renderScale = 1;
+  pt.tiles.set(1, 1);
+  pt.setScene(scene, camera);
+  return pt;
+}
+
+async function accumulate(pt: WebGLPathTracer, samples: number): Promise<void> {
+  const t0 = performance.now();
+  while (pt.samples < samples && performance.now() - t0 < 60_000) {
+    pt.renderSample();
+    // Yield so the async shader compile can resolve before sampling continues.
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  if (pt.samples < samples) {
+    throw new Error(`path tracer stalled at ${pt.samples}/${samples} samples`);
+  }
+}
+
+function readTarget(renderer: WebGLRenderer, target: WebGLRenderTarget): Float32Array {
+  const px = new Float32Array(target.width * target.height * 4);
+  renderer.readRenderTargetPixels(target, 0, 0, target.width, target.height, px);
+  return px;
+}
+
+function pixelAt(px: Float32Array, w: number, x: number, yBottomUp: number): [number, number, number, number] {
+  const i = (yBottomUp * w + x) * 4;
+  return [px[i], px[i + 1], px[i + 2], px[i + 3]];
+}
+
+async function runPtSpike(): Promise<void> {
+  const PRIM = 128;
+  const frame = frameIsoBox([1, 1, 1], PRIM, PAD_PX);
+  const w = frame.width;
+  const h = frame.height;
+
+  const renderer = new WebGLRenderer({ antialias: false, stencil: false });
+  renderer.setSize(w, h, false);
+  renderer.outputColorSpace = SRGBColorSpace;
+
+  const scene = new Scene();
+  const mesh = new Mesh(getCube().geometry, new MeshStandardMaterial({ color: 0x4f9e5c }));
+  mesh.position.set(0.5, 0.5, 0.5);
+  scene.add(mesh);
+  scene.background = null;
+  const env = new GradientEquirectTexture(16);
+  env.topColor.set(0xffffff);
+  env.bottomColor.set(0x202020);
+  env.update();
+  scene.environment = env;
+  scene.environmentIntensity = 1;
+
+  log('test: PT spike — ortho camera + transparent background');
+  const pt = spikePathTracer(renderer, scene, frame.camera);
+  ok(pt.target.width === w && pt.target.height === h,
+    `PT target is the sprite rect ${w}x${h} (got ${pt.target.width}x${pt.target.height})`);
+
+  await accumulate(pt, 32);
+  const read32 = readTarget(renderer, pt.target);
+  await accumulate(pt, 128);
+  const read128 = readTarget(renderer, pt.target);
+
+  // Determinism: reset and re-accumulate to 32 must reproduce read32.
+  pt.reset();
+  await accumulate(pt, 32);
+  const read32again = readTarget(renderer, pt.target);
+  let maxDelta = 0;
+  for (let i = 0; i < read32.length; i++) {
+    maxDelta = Math.max(maxDelta, Math.abs(read32[i] - read32again[i]));
+  }
+  ok(maxDelta === 0, `deterministic re-accumulation (max delta ${maxDelta})`);
+
+  // Background: corners alpha 0 (GL readback is bottom-up).
+  const corners: [number, number, number, number][] = [
+    pixelAt(read128, w, 0, 0),
+    pixelAt(read128, w, w - 1, 0),
+    pixelAt(read128, w, 0, h - 1),
+    pixelAt(read128, w, w - 1, h - 1),
+  ];
+  ok(corners.every(([r, g, b, a]) => a === 0 && r === 0 && g === 0 && b === 0),
+    `corners fully transparent black (got ${JSON.stringify(corners[0])})`);
+
+  // Object: center pixel opaque and lit.
+  const center = pixelAt(read128, w, w >> 1, h >> 1);
+  ok(center[3] > 0.99, `center pixel opaque (alpha ${center[3].toFixed(3)})`);
+  ok(center[0] + center[1] + center[2] > 0.1,
+    `center pixel lit (rgb sum ${sum(center).toFixed(3)})`);
+
+  // AA: partial-coverage pixels exist on silhouettes and convergence improves.
+  const partial = (px: Float32Array): number => {
+    let n = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const a = pixelAt(px, w, x, y)[3];
+        if (a > 0.02 && a < 0.98) n++;
+      }
+    }
+    return n;
+  };
+  ok(partial(read128) > 5, `soft AA edge pixels present (${partial(read128)})`);
+
+  // Convergence: 32 -> 128 samples moves the alpha field.
+  let alphaDiff = 0;
+  for (let i = 3; i < read32.length; i += 4) {
+    alphaDiff += Math.abs(read32[i] - read128[i]);
+  }
+  alphaDiff /= w * h;
+  ok(alphaDiff > 0.0005 && alphaDiff < 0.05,
+    `32->128 samples refines edges (mean alpha delta ${alphaDiff.toFixed(4)})`);
+
+  // Alignment with the raster bake: same rect, matching coverage footprint.
+  const raster = bakePrimitive(getCube(), PRIM);
+  ok(raster.width === w && raster.height === h, 'raster bake shares the sprite rect');
+  let massPt = 0;
+  let cxPt = 0;
+  let cyPt = 0;
+  let massRa = 0;
+  let cxRa = 0;
+  let cyRa = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const a = pixelAt(read128, w, x, y)[3];
+      massPt += a;
+      cxPt += x * a;
+      cyPt += y * a;
+      const ra = pixelAt(raster.albedo, w, x, y)[3];
+      massRa += ra;
+      cxRa += x * ra;
+      cyRa += y * ra;
+    }
+  }
+  const relMass = Math.abs(massPt - massRa) / massRa;
+  const centroidPx = Math.hypot(cxPt / massPt - cxRa / massRa, cyPt / massPt - cyRa / massRa);
+  ok(relMass < 0.02, `coverage mass within 2% of raster (got ${(relMass * 100).toFixed(2)}%)`);
+  ok(centroidPx < 1.5, `coverage centroid within 1.5 px of raster (got ${centroidPx.toFixed(2)} px)`);
+
+  pt.dispose();
+  renderer.dispose();
+}
+
+async function runAoSpike(): Promise<void> {
+  log('test: PT AO spike — donut creases occlude, deterministic, transparent background');
+  const baker = new PtBaker({ ...DEFAULT_PT_SETTINGS, aoSamples: 32 }, 128);
+  baker.setPrimitive(getDonut());
+  const image = await baker.aoPass();
+  ok(image.width > 100 && image.height > 100, `AO image sized (${image.width}x${image.height})`);
+
+  const at = (x: number, yTopDown: number): [number, number, number, number] => {
+    // Image bytes are GL readback order (bottom-up).
+    const i = ((image.height - 1 - yTopDown) * image.width + x) * 4;
+    return [image.rgba[i], image.rgba[i + 1], image.rgba[i + 2], image.rgba[i + 3]];
+  };
+  const corners: [number, number, number, number][] = [
+    at(0, 0),
+    at(image.width - 1, 0),
+    at(0, image.height - 1),
+    at(image.width - 1, image.height - 1),
+  ];
+  ok(corners.every(([, , , a]) => a === 0), 'AO background fully transparent');
+
+  let minV = 1;
+  let maxV = 0;
+  let coverage = 0;
+  for (let i = 0; i < image.width * image.height; i++) {
+    const a = image.rgba[i * 4 + 3];
+    if (a > 0) {
+      coverage++;
+      const v = image.rgba[i * 4] / 255;
+      minV = Math.min(minV, v);
+      maxV = Math.max(maxV, v);
+    }
+  }
+  ok(coverage > 1000, `AO rendered coverage (${coverage} px)`);
+  ok(minV < 0.98 && maxV > 0.5, `AO varies across the shape (range ${minV.toFixed(2)}..${maxV.toFixed(2)})`);
+
+  const image2 = await baker.aoPass();
+  let identical = true;
+  for (let i = 0; i < image.rgba.length; i++) {
+    if (image.rgba[i] !== image2.rgba[i]) {
+      identical = false;
+      break;
+    }
+  }
+  ok(identical, 'AO re-bake byte-identical (deterministic)');
+  baker.dispose();
+}
+
+function sum(v: [number, number, number, number]): number {
+  return v[0] + v[1] + v[2];
+}
+
 // ---------- tests ----------
 
 async function main(): Promise<void> {
@@ -437,10 +659,61 @@ async function main(): Promise<void> {
     ok(approx(result.size[0], 6, 1e-3) && approx(result.size[1], 2, 1e-3), `scale-2 size [6,2,0] (got [${result.size}])`);
     const bytes = await buildBundle(result);
     const parsed = parseBake(bytes.buffer as ArrayBuffer);
-    ok(parsed.manifest.format === 'isoinfinity-bake/3', `manifest format (got ${parsed.manifest.format})`);
+    ok(parsed.manifest.format === 'isoinfinity-bake/4', `manifest format (got ${parsed.manifest.format})`);
+    ok(parsed.render === null && parsed.ao === null, 'no optional passes in a raster-only bundle');
     ok(approx(parsed.manifest.cube.size[0], 6, 1e-3) && approx(parsed.manifest.cube.size[1], 2, 1e-3),
       `manifest cube.size records scaled box (got [${parsed.manifest.cube.size}])`);
     ok(parsed.albedo.size > 0 && parsed.gbuffer.size > 0, 'albedo + gbuffer entries present');
+  }
+
+  // 3b. Hand-built fixtures: /3, /4 with optional passes, unknown format.
+  {
+    log('test: parseBake v3/v4 fixtures + unknown format rejection');
+    const pngRed2x2 = await pngBytes(SOLID_RED);
+    const makeZip = (manifest: Record<string, unknown>, extra: Record<string, Uint8Array> = {}): Uint8Array =>
+      zipSync({
+        'manifest.json': strToU8(JSON.stringify(manifest)),
+        'x-albedo.png': pngRed2x2,
+        'x-gbuffer.exr': new Uint8Array(4),
+        ...extra,
+      });
+
+    const base = (format: string, passes: Record<string, unknown>): Record<string, unknown> => ({
+      format,
+      id: 'x',
+      pxPerUnit: 128,
+      sprite: { width: 2, height: 2, originPx: [0, 0] },
+      passes,
+    });
+    const rasterPasses = {
+      albedo: { file: 'x-albedo.png', encoding: 'png-r8-srgb', channels: 'rgb=albedo a=coverage' },
+      gbuffer: { file: 'x-gbuffer.exr', encoding: 'exr-f32-linear', channels: 'rgb=world-normal a=ray-depth' },
+    };
+
+    const v3 = parseBake(makeZip(base('isoinfinity-bake/3', rasterPasses)).buffer as ArrayBuffer);
+    ok(v3.render === null && v3.ao === null, 'v3 bundle parses without optional passes');
+
+    const v4Passes = {
+      ...rasterPasses,
+      render: { file: 'x-render.png', encoding: 'png-r8-srgb', channels: 'rgb=tonemapped-render a=coverage' },
+      ao: { file: 'x-ao.png', encoding: 'png-r8-linear', channels: 'rgb=ambient-occlusion a=coverage' },
+    };
+    const v4 = parseBake(
+      makeZip(base('isoinfinity-bake/4', v4Passes), {
+        'x-render.png': pngRed2x2,
+        'x-ao.png': pngRed2x2,
+      }).buffer as ArrayBuffer,
+    );
+    ok(v4.render !== null && v4.ao !== null, 'v4 bundle exposes optional pass blobs when present');
+
+    const broken = base('isoinfinity-bake/5', rasterPasses);
+    let threw = '';
+    try {
+      parseBake(makeZip(broken).buffer as ArrayBuffer);
+    } catch (err) {
+      threw = err instanceof Error ? err.message : String(err);
+    }
+    ok(threw.includes('isoinfinity-bake/5'), `unknown format rejected by name (got "${threw}")`);
   }
 
   // 4. Smooth curved glTF geometry bakes unit-length varying normals.
@@ -490,6 +763,10 @@ async function main(): Promise<void> {
       log(`  ${name}: sha256 ${await sha256(bytes)}`);
     }
   }
+
+  // 6. Path-tracer spike: ortho + transparent background + AA + determinism.
+  await runPtSpike();
+  await runAoSpike();
 
   log(`\n${passed} passed, ${failed} failed`, failed === 0 ? 'pass' : 'fail');
 }

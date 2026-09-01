@@ -95,10 +95,12 @@
     <h1>Isofinity — Bake Tool</h1>
     <p>
       Bakes a primitive or glTF model into per-asset sprite passes: albedo
-      (sRGB PNG) and a merged g-buffer (float EXR: rgb = world-space normal,
-      a = linear ray depth). World position is reconstructible from pixel +
-      depth via the fixed camera; a debug PNG dumps the reconstructed
-      cube-space position for validation.
+      (sRGB PNG), a merged g-buffer (float EXR: rgb = world-space normal,
+      a = linear ray depth), and — path traced over the same camera — an
+      optional HDRI-lit <b>render</b> pass (ACES) and <b>AO</b> pass.
+      World position is reconstructible from pixel + depth via the fixed
+      camera; a debug PNG dumps the reconstructed cube-space position for
+      validation.
     </p>
     <div class="controls">
       <button id="prim-sphere" class="prim active" data-primitive="sphere">Sphere</button>
@@ -117,11 +119,53 @@
       <span id="source-name"></span>
       <button id="bake">Bake</button>
     </div>
+    <div class="controls">
+      <span class="gltf-extra">path-traced passes:</span>
+      <button id="load-hdri" title="Pick an equirectangular .hdr environment; it lights the render pass (drag-drop works too)">Load HDRI…</button>
+      <input id="hdri-file" type="file" accept=".hdr" hidden />
+      <span id="hdri-name"></span>
+      <button id="bake-render" disabled title="Path-traced HDRI-lit render pass (ACES tone-mapped)">Bake render</button>
+      <button id="bake-ao" disabled title="Path-traced ambient occlusion pass (no HDRI needed)">Bake AO</button>
+    </div>
+    <div class="controls">
+      <label class="gltf-extra">env rotate°
+        <input id="env-rotate" type="number" value="0" min="0" max="360" step="5" />
+      </label>
+      <label class="gltf-extra">env intensity
+        <input id="env-intensity" type="number" value="1" min="0" max="10" step="0.1" />
+      </label>
+      <label class="gltf-extra">exposure
+        <input id="env-exposure" type="number" value="1" min="0.1" max="4" step="0.05" />
+      </label>
+      <label class="gltf-extra">samples
+        <input id="pt-samples" type="number" value="256" min="16" max="4096" step="16" />
+      </label>
+      <label class="gltf-extra">bounces
+        <input id="pt-bounces" type="number" value="5" min="1" max="16" step="1" />
+      </label>
+      <label class="gltf-extra">tex-size
+        <input id="pt-texturesize" type="number" value="1024" min="256" max="4096" step="256" />
+      </label>
+      <label class="gltf-extra">ao-samples
+        <input id="ao-samples" type="number" value="64" min="4" max="1024" step="4" />
+      </label>
+      <label class="gltf-extra">ao-radius
+        <input id="ao-radius" type="number" value="0.4" min="0.05" max="2" step="0.05" />
+      </label>
+    </div>
     <p id="status"></p>
     <div class="passes">
       <figure>
         <canvas id="pass-albedo"></canvas>
         <figcaption>albedo.png — sRGB color + coverage</figcaption>
+      </figure>
+      <figure>
+        <canvas id="pass-render"></canvas>
+        <figcaption>render.png — path-traced HDRI-lit beauty (ACES)</figcaption>
+      </figure>
+      <figure>
+        <canvas id="pass-ao"></canvas>
+        <figcaption>ao.png — path-traced ambient occlusion</figcaption>
       </figure>
       <figure>
         <canvas id="pass-gbuffer"></canvas>

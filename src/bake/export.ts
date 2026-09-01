@@ -2,6 +2,8 @@ import { DataTexture, FloatType, RGBAFormat, Vector3 } from 'three';
 import { EXRExporter, NO_COMPRESSION } from 'three/examples/jsm/exporters/EXRExporter.js';
 import { PAD_PX, type BakeResult } from './bake.js';
 import { depthRange, frameIsoBox, reconstructWorldPos } from './iso.js';
+import type { PtExtras } from './pt.js';
+import { PT_NAME } from './pt-version.js';
 
 export function download(name: string, data: BlobPart, mime: string): void {
   const url = URL.createObjectURL(new Blob([data], { type: mime }));
@@ -43,6 +45,34 @@ export function rgbaToCanvas(
   return canvas;
 }
 
+/**
+ * 8-bit RGBA in GL readback order (rows bottom-up) -> top-down canvas.
+ * Same flip rgbaToCanvas applies to float data.
+ */
+export function rgbaBytesToCanvas(rgba: Uint8Array, width: number, height: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d')!;
+  const out = ctx.createImageData(width, height);
+  for (let y = 0; y < height; y++) {
+    const srcRow = (height - 1 - y) * width * 4;
+    out.data.set(rgba.subarray(srcRow, srcRow + width * 4), y * width * 4);
+  }
+  ctx.putImageData(out, 0, 0);
+  return canvas;
+}
+
+export async function encodePngBytes(rgba: Uint8Array, width: number, height: number): Promise<Uint8Array> {
+  const blob = await new Promise<Blob | null>((resolve) =>
+    rgbaBytesToCanvas(rgba, width, height).toBlob(resolve, 'image/png'),
+  );
+  if (!blob) {
+    throw new Error('PNG encoding failed');
+  }
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
 export async function encodeExr(
   rgba: Float32Array,
   width: number,
@@ -72,11 +102,28 @@ export interface BakeManifest {
   pxPerUnit: number;
   sprite: { width: number; height: number; originPx: [number, number] };
   passes: Record<string, { file: string; encoding: string; channels: string }>;
+  /** Present when the render pass is baked: the environment used for it. */
+  environment?: {
+    hdri: string;
+    rotationDeg: number;
+    intensity: number;
+    exposure: number;
+  };
+  /** Present when any path-traced pass is baked: renderer provenance. */
+  renderer?: {
+    name: string;
+    samples: number;
+    bounces: number;
+    denoise: boolean;
+    seed: number;
+    aoSamples?: number;
+    aoRadius?: number;
+  };
 }
 
-export function buildManifest(result: BakeResult): BakeManifest {
-  return {
-    format: 'isoinfinity-bake/3',
+export function buildManifest(result: BakeResult, pt?: PtExtras): BakeManifest {
+  const manifest: BakeManifest = {
+    format: 'isoinfinity-bake/4',
     id: result.id,
     cube: { size: [result.size[0], result.size[1], result.size[2]], origin: [0, 0, 0] },
     camera: {
@@ -115,6 +162,41 @@ export function buildManifest(result: BakeResult): BakeManifest {
       },
     },
   };
+  if (pt?.render) {
+    manifest.passes.render = {
+      file: `${result.id}-render.png`,
+      encoding: 'png-r8-srgb',
+      channels: 'rgb=tonemapped-render a=coverage',
+    };
+    if (pt.environment) {
+      manifest.environment = {
+        hdri: pt.environment.name,
+        rotationDeg: pt.environment.rotationDeg,
+        intensity: pt.environment.intensity,
+        exposure: pt.environment.exposure,
+      };
+    }
+  }
+  if (pt?.ao) {
+    manifest.passes.ao = {
+      file: `${result.id}-ao.png`,
+      encoding: 'png-r8-linear',
+      channels: 'rgb=ambient-occlusion a=coverage',
+    };
+  }
+  if (pt?.render || pt?.ao) {
+    const settings = pt.settings;
+    manifest.renderer = {
+      name: PT_NAME,
+      samples: settings?.samples ?? 0,
+      bounces: settings?.bounces ?? 0,
+      denoise: settings?.denoise ?? false,
+      seed: 0,
+      aoSamples: pt.ao ? (settings?.aoSamples ?? 0) : undefined,
+      aoRadius: pt.ao ? (settings?.aoRadius ?? 0) : undefined,
+    };
+  }
+  return manifest;
 }
 
 const debugPos = new Vector3();
