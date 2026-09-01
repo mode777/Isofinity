@@ -8,6 +8,7 @@ import {
 } from './export.js';
 import { depthRange, type Vec3 } from './iso.js';
 import { loadGltf, type GltfSource } from './gltf.js';
+import type { DataTextureLoaderTexData } from 'three';
 import { DEFAULT_ENVIRONMENT, DEFAULT_PT_SETTINGS, PtBaker, type PtEnvironment, type PtImage, type PtSettings } from './pt.js';
 import {
   getCapsule,
@@ -94,7 +95,13 @@ function readEnv(): void {
 }
 
 function getPtBaker(): PtBaker {
-  if (!ptBaker) ptBaker = new PtBaker(ptSettings);
+  if (!ptBaker) {
+    ptBaker = new PtBaker(ptSettings);
+    // The baker is created lazily (first pass click), long after the boot
+    // bake — target the current source and environment explicitly.
+    ptBaker.setPrimitive(current);
+    ptBaker.setEnvironment(env);
+  }
   return ptBaker;
 }
 
@@ -184,12 +191,21 @@ async function runAoPass(): Promise<void> {
 async function loadHdriFile(file: File): Promise<void> {
   setStatus(`Loading ${file.name}…`);
   try {
-    const { HDRLoader } = await import('three/examples/jsm/loaders/HDRLoader.js');
-    const { DataTexture } = await import('three');
-    const texData = new HDRLoader().parse(await file.arrayBuffer());
-    if (!texData.data || !texData.width || !texData.height || !texData.format || !texData.type) {
-      throw new Error(`${file.name}: not an equirectangular RGBE/HDRI file`);
+    const buffer = await file.arrayBuffer();
+    // RGBE .hdr and (float) EXR environments both load as equirect
+    // DataTextures for scene.environment.
+    let texData: DataTextureLoaderTexData;
+    if (/\.exr$/i.test(file.name)) {
+      const { EXRLoader } = await import('three/examples/jsm/loaders/EXRLoader.js');
+      texData = new EXRLoader().parse(buffer);
+    } else {
+      const { HDRLoader } = await import('three/examples/jsm/loaders/HDRLoader.js');
+      texData = new HDRLoader().parse(buffer);
     }
+    if (!texData.data || !texData.width || !texData.height || !texData.format || !texData.type) {
+      throw new Error(`${file.name}: not an equirectangular HDRI file (.hdr/.exr)`);
+    }
+    const { DataTexture } = await import('three');
     const texture = new DataTexture(texData.data, texData.width, texData.height, texData.format, texData.type);
     if (texData.colorSpace) texture.colorSpace = texData.colorSpace;
     texture.wrapS = texData.wrapS ?? texture.wrapS;
