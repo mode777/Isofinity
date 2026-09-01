@@ -49,7 +49,8 @@ it as the reference architecture; design against it.
   `docs/bake-pipeline.md`.
 - Runtime editor (`index.html`, `src/runtime/`, shared math in
   `src/shared/`): bakes sprites at page load, places them freely on an
-  isometric ground plane. Raw WebGL2 compositor with per-pixel sprite
+  isometric ground plane, and loads extra objects from bake zip bundles.
+  Raw WebGL2 compositor with per-pixel sprite
   occlusion and deferred-style directional lighting (key + ambient, shades
   the baked albedo/normal G-buffer) with realtime light controls. See
   `docs/runtime.md`.

@@ -1,5 +1,11 @@
 import { SCREEN_UP, VIEW_DIR, groundToScreen, screenToGround } from '../shared/iso.js';
-import { RUNTIME_PPU, bakeSprites } from './assets.js';
+import {
+  RUNTIME_PPU,
+  bakeSpriteLayers,
+  layerFromBundle,
+  layersToSet,
+  type SpriteLayer,
+} from './assets.js';
 import { Renderer } from './renderer.js';
 import { World } from './world.js';
 
@@ -14,7 +20,8 @@ const HIGHLIGHT_COLOR: [number, number, number] = [0.55, 0.62, 0.75];
 const statusEl = document.getElementById('status')!;
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 
-const sprites = bakeSprites();
+const layers: SpriteLayer[] = bakeSpriteLayers();
+let sprites = layersToSet(layers);
 const layerOf = new Map(sprites.ids.map((id, k) => [id, k]));
 
 let minU = Infinity;
@@ -157,7 +164,6 @@ const highlightData = new Float32Array(6 * 5);
 
 function renderFrame(): void {
   updateLightUniforms();
-  const scale = PPU / RUNTIME_PPU;
   const placed = world.list();
   if (instances.length < placed.length * 8) {
     instances = new Float32Array(Math.max(placed.length * 8, instances.length * 2));
@@ -165,6 +171,7 @@ function renderFrame(): void {
   let count = 0;
   for (const p of placed) {
     const layer = layerOf.get(p.primId) ?? 0;
+    const scale = PPU / sprites.ppus[layer];
     const [ox, oy] = sprites.origins[layer];
     const [w, h] = sprites.sizes[layer];
     const [cx, cy] = toPx(p.x, p.z);
@@ -251,17 +258,59 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 const toolbar = document.getElementById('toolbar')!;
 toolbar.addEventListener('click', (e) => {
   const target = e.target as HTMLElement;
-  if (!target.dataset.tool) return;
   if (target.id === 'clear') {
     world.clear();
     return;
   }
-  tool = target.dataset.tool;
+  if (!target.dataset.tool) return;
+  activateTool(target);
+});
+
+function activateTool(target: HTMLElement): void {
+  tool = target.dataset.tool!;
   for (const el of toolbar.querySelectorAll('button')) {
     el.classList.toggle('active', el === target);
   }
   setStatus();
+}
+
+const fileInput = document.getElementById('load-zip') as HTMLInputElement;
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files?.[0];
+  fileInput.value = '';
+  if (file) void loadBundle(file);
 });
+
+function uniqueId(base: string): string {
+  if (!layerOf.has(base)) return base;
+  for (let n = 2; ; n++) {
+    const id = `${base}-${n}`;
+    if (!layerOf.has(id)) return id;
+  }
+}
+
+async function loadBundle(file: File): Promise<void> {
+  statusEl.textContent = `Loading ${file.name}…`;
+  try {
+    const layer = await layerFromBundle(await file.arrayBuffer());
+    layer.id = uniqueId(layer.id);
+    layers.push(layer);
+    sprites = layersToSet(layers);
+    layerOf.set(layer.id, sprites.ids.length - 1);
+    renderer.setSprites(sprites.albedoLayers, sprites.gbufferLayers, sprites.maxW, sprites.maxH);
+    const button = document.createElement('button');
+    button.dataset.tool = layer.id;
+    button.textContent = layer.id;
+    toolbar.insertBefore(button, toolbar.querySelector('[data-tool="eraser"]'));
+    activateTool(button);
+    world.place(9.5, 5.5, layer.id);
+    const [w, h] = sprites.sizes[layerOf.get(layer.id)!];
+    statusEl.textContent = `Loaded ${layer.id} — ${w}x${h} px @ ${layer.pxPerUnit} px/unit`;
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = `Load failed: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
 
 setStatus();
 const raf = () => {

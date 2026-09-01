@@ -20,6 +20,20 @@ per-instance/per-layer data now. UVs are computed from texel centers
 (`mix(0.5, size - 0.5, corner) / maxSize`) so LINEAR-filtered albedo never
 bleeds across the padding boundary.
 
+### Loading zip bundles
+
+The editor's **Load zip** button ingests bundles downloaded from the bake
+tool: `parseBake()` unpacks manifest + passes, the PNG decodes via
+`createImageBitmap` and the EXR via `EXRLoader.parse`. Both decoders return
+rows in file order — top-down, row 0 = sprite top — which is exactly the
+upload orientation, so loaded passes are padded **without flipping**
+(boot-time bakes flip because the raw GL readback is bottom-up). Loaded
+layers re-pad the whole set (max size may grow, `Renderer.setSprites`
+rebuilds both texture arrays), get a toolbar tool button, and are placed
+once immediately. Per-layer `pxPerUnit` from the manifest drives the
+instance scale, so bundles baked at any resolution land at the correct
+world size.
+
 Row-order warning: GL pixel readback is bottom-up and all texture arrays
 are sampled with the same UV, so **every** uploaded pass must be flipped to
 top-down (`albedoToBytes` and `gbufferToHalf` both flip).

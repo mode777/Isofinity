@@ -35,6 +35,18 @@
         background: #3b4252;
         border-color: #6f7a8f;
       }
+      label.filebtn {
+        background: #23262d;
+        color: #ddd;
+        border: 1px solid #3a3f4a;
+        border-radius: 4px;
+        padding: 0.4rem 0.9rem;
+        cursor: pointer;
+        font-size: 0.95rem;
+      }
+      label.filebtn:hover {
+        background: #2d313a;
+      }
       #status {
         color: #8a8f98;
         min-height: 1.4em;
@@ -111,8 +123,10 @@
       <button data-tool="cylinder">Cylinder</button>
       <button data-tool="capsule">Capsule</button>
       <button data-tool="plane">Plane</button>
+      <button data-tool="slab">Slab</button>
       <button data-tool="eraser">Eraser</button>
       <button id="clear">Clear all</button>
+      <label class="filebtn">Load zip<input type="file" id="load-zip" accept=".zip,application/zip" hidden></label>
     </div>
     <canvas id="view"></canvas>
     <div class="panel" id="light-panel">
@@ -127,7 +141,9 @@
     <p>
       Sprites are baked at load time from the
       <a href="./bake.html">bake tool</a> pipeline (albedo + merged
-      g-buffer passes) and lit per-pixel in real time — tweak the key light above.
+      g-buffer passes) and lit per-pixel in real time — tweak the key light
+      above. Use <b>Load zip</b> to place any bundle downloaded from the
+      bake tool.
       See <code>docs/runtime.md</code>.
     </p>
     <script type="module" src="/src/runtime/main.ts"></script>

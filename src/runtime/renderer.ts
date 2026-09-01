@@ -110,8 +110,8 @@ export class Renderer {
   private gl: WebGL2RenderingContext;
   private flatProg: WebGLProgram;
   private spriteProg: WebGLProgram;
-  private tex: WebGLTexture;
-  private gbufferTex: WebGLTexture;
+  private tex: WebGLTexture | null = null;
+  private gbufferTex: WebGLTexture | null = null;
   private groundVao: WebGLVertexArrayObject;
   private groundVbo: WebGLBuffer;
   private highlightVao: WebGLVertexArrayObject;
@@ -170,7 +170,74 @@ export class Renderer {
     gl.useProgram(this.spriteProg);
     gl.uniform1f(this.uDepthA, -1 / (2 * DEPTH_LINEAR_RANGE));
     gl.uniform1f(this.uDepthB, 0.5);
-    gl.uniform2f(this.uSpriteMaxSize, maxW, maxH);
+
+    this.setSprites(albedoLayers, gbufferLayers, maxW, maxH);
+
+    this.groundVao = gl.createVertexArray()!;
+    this.groundVbo = gl.createBuffer()!;
+    gl.bindVertexArray(this.groundVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.groundVbo);
+    const aFlatPos = gl.getAttribLocation(this.flatProg, 'aPos');
+    const aFlatColor = gl.getAttribLocation(this.flatProg, 'aColor');
+    gl.enableVertexAttribArray(aFlatPos);
+    gl.vertexAttribPointer(aFlatPos, 2, gl.FLOAT, false, 20, 0);
+    gl.enableVertexAttribArray(aFlatColor);
+    gl.vertexAttribPointer(aFlatColor, 3, gl.FLOAT, false, 20, 8);
+
+    this.highlightVao = gl.createVertexArray()!;
+    this.highlightVbo = gl.createBuffer()!;
+    gl.bindVertexArray(this.highlightVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.highlightVbo);
+    gl.enableVertexAttribArray(aFlatPos);
+    gl.vertexAttribPointer(aFlatPos, 2, gl.FLOAT, false, 20, 0);
+    gl.enableVertexAttribArray(aFlatColor);
+    gl.vertexAttribPointer(aFlatColor, 3, gl.FLOAT, false, 20, 8);
+
+    this.spriteVao = gl.createVertexArray()!;
+    this.instVbo = gl.createBuffer()!;
+    gl.bindVertexArray(this.spriteVao);
+    const cornerVbo = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, cornerVbo);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]),
+      gl.STATIC_DRAW,
+    );
+    const aCorner = gl.getAttribLocation(this.spriteProg, 'aCorner');
+    gl.enableVertexAttribArray(aCorner);
+    gl.vertexAttribPointer(aCorner, 2, gl.FLOAT, false, 8, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.instVbo);
+    const aInst = gl.getAttribLocation(this.spriteProg, 'aInst');
+    gl.enableVertexAttribArray(aInst);
+    gl.vertexAttribPointer(aInst, 4, gl.FLOAT, false, 32, 0);
+    gl.vertexAttribDivisor(aInst, 1);
+    const aInst2 = gl.getAttribLocation(this.spriteProg, 'aInst2');
+    gl.enableVertexAttribArray(aInst2);
+    gl.vertexAttribPointer(aInst2, 4, gl.FLOAT, false, 32, 16);
+    gl.vertexAttribDivisor(aInst2, 1);
+
+    gl.bindVertexArray(null);
+    gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uSprites')!, 0);
+    gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uGbuffer')!, 1);
+
+    gl.disable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.disable(gl.CULL_FACE);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.clearColor(0.078, 0.086, 0.102, 1);
+    gl.clearDepth(1);
+  }
+
+  /** (Re)builds the sprite texture arrays; callable again after loading new layers. */
+  setSprites(
+    albedoLayers: Uint8Array[],
+    gbufferLayers: Uint16Array[],
+    maxW: number,
+    maxH: number,
+  ): void {
+    const gl = this.gl;
+    if (this.tex !== null) gl.deleteTexture(this.tex);
+    if (this.gbufferTex !== null) gl.deleteTexture(this.gbufferTex);
 
     this.tex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex);
@@ -240,59 +307,8 @@ export class Renderer {
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-    this.groundVao = gl.createVertexArray()!;
-    this.groundVbo = gl.createBuffer()!;
-    gl.bindVertexArray(this.groundVao);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.groundVbo);
-    const aFlatPos = gl.getAttribLocation(this.flatProg, 'aPos');
-    const aFlatColor = gl.getAttribLocation(this.flatProg, 'aColor');
-    gl.enableVertexAttribArray(aFlatPos);
-    gl.vertexAttribPointer(aFlatPos, 2, gl.FLOAT, false, 20, 0);
-    gl.enableVertexAttribArray(aFlatColor);
-    gl.vertexAttribPointer(aFlatColor, 3, gl.FLOAT, false, 20, 8);
-
-    this.highlightVao = gl.createVertexArray()!;
-    this.highlightVbo = gl.createBuffer()!;
-    gl.bindVertexArray(this.highlightVao);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.highlightVbo);
-    gl.enableVertexAttribArray(aFlatPos);
-    gl.vertexAttribPointer(aFlatPos, 2, gl.FLOAT, false, 20, 0);
-    gl.enableVertexAttribArray(aFlatColor);
-    gl.vertexAttribPointer(aFlatColor, 3, gl.FLOAT, false, 20, 8);
-
-    this.spriteVao = gl.createVertexArray()!;
-    this.instVbo = gl.createBuffer()!;
-    gl.bindVertexArray(this.spriteVao);
-    const cornerVbo = gl.createBuffer()!;
-    gl.bindBuffer(gl.ARRAY_BUFFER, cornerVbo);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]),
-      gl.STATIC_DRAW,
-    );
-    const aCorner = gl.getAttribLocation(this.spriteProg, 'aCorner');
-    gl.enableVertexAttribArray(aCorner);
-    gl.vertexAttribPointer(aCorner, 2, gl.FLOAT, false, 8, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.instVbo);
-    const aInst = gl.getAttribLocation(this.spriteProg, 'aInst');
-    gl.enableVertexAttribArray(aInst);
-    gl.vertexAttribPointer(aInst, 4, gl.FLOAT, false, 32, 0);
-    gl.vertexAttribDivisor(aInst, 1);
-    const aInst2 = gl.getAttribLocation(this.spriteProg, 'aInst2');
-    gl.enableVertexAttribArray(aInst2);
-    gl.vertexAttribPointer(aInst2, 4, gl.FLOAT, false, 32, 16);
-    gl.vertexAttribDivisor(aInst2, 1);
-
-    gl.bindVertexArray(null);
-    gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uSprites')!, 0);
-    gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uGbuffer')!, 1);
-
-    gl.disable(gl.DEPTH_TEST);
-    gl.depthFunc(gl.LEQUAL);
-    gl.disable(gl.CULL_FACE);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.clearColor(0.078, 0.086, 0.102, 1);
-    gl.clearDepth(1);
+    gl.useProgram(this.spriteProg);
+    gl.uniform2f(this.uSpriteMaxSize, maxW, maxH);
   }
 
   setLight(light: LightParams): void {
@@ -330,9 +346,9 @@ export class Renderer {
       gl.uniform2f(this.uSpriteRes, canvas.width, canvas.height);
       uploadLight(gl, this.uSpriteLight, this.light);
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex!);
       gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.gbufferTex);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.gbufferTex!);
       gl.bindVertexArray(this.spriteVao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.instVbo);
       gl.bufferData(gl.ARRAY_BUFFER, instances, gl.DYNAMIC_DRAW);
