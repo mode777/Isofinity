@@ -202,11 +202,18 @@ async function loadHdriFile(file: File): Promise<void> {
       const { HDRLoader } = await import('three/examples/jsm/loaders/HDRLoader.js');
       texData = new HDRLoader().parse(buffer);
     }
-    if (!texData.data || !texData.width || !texData.height || !texData.format || !texData.type) {
+    // HDRLoader's TexData carries no `format` (always RGBA); EXR's does.
+    if (!texData.data || !texData.width || !texData.height || !texData.type) {
       throw new Error(`${file.name}: not an equirectangular HDRI file (.hdr/.exr)`);
     }
-    const { DataTexture } = await import('three');
-    const texture = new DataTexture(texData.data, texData.width, texData.height, texData.format, texData.type);
+    const { DataTexture, RGBAFormat } = await import('three');
+    const texture = new DataTexture(
+      texData.data,
+      texData.width,
+      texData.height,
+      texData.format ?? RGBAFormat,
+      texData.type,
+    );
     if (texData.colorSpace) texture.colorSpace = texData.colorSpace;
     texture.wrapS = texData.wrapS ?? texture.wrapS;
     texture.wrapT = texData.wrapT ?? texture.wrapT;

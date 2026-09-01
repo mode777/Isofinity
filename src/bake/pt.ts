@@ -26,7 +26,7 @@ import { PathTracingSceneGenerator, WebGLPathTracer } from 'three-gpu-pathtracer
 import { AmbientOcclusionMaterial } from 'three-gpu-pathtracer/src/materials/surface/AmbientOcclusionMaterial.js';
 import type { AmbientOcclusionMaterial as AmbientOcclusionMaterialType } from 'three-gpu-pathtracer/src/materials/surface/AmbientOcclusionMaterial.js';
 import { MeshBVHUniformStruct } from 'three-mesh-bvh';
-import { PAD_PX, PX_PER_UNIT } from './bake.js';
+import { halfToFloat, PAD_PX, PX_PER_UNIT } from './bake.js';
 import { frameIsoBox, type IsoFrame } from './iso.js';
 import type { MaterialGroup, Primitive } from './primitives.js';
 
@@ -405,15 +405,18 @@ export class PtBaker {
       bvhUniform.dispose();
     }
 
-    const linear = new Float32Array(width * height * 4);
-    renderer.readRenderTargetPixels(accumTarget, 0, 0, width, height, linear);
+    // Half-float targets must be read back as half bits (Uint16Array); a
+    // Float32Array read is an INVALID_OPERATION and leaves the buffer at
+    // zero — the "empty AO image" bug class.
+    const half = new Uint16Array(width * height * 4);
+    renderer.readRenderTargetPixels(accumTarget, 0, 0, width, height, half);
     const rgba = new Uint8Array(width * height * 4);
     for (let i = 0; i < width * height; i++) {
-      const v = Math.round(Math.min(1, Math.max(0, linear[i * 4])) * 255);
+      const v = Math.round(Math.min(1, Math.max(0, halfToFloat(half[i * 4]))) * 255);
       rgba[i * 4] = v;
       rgba[i * 4 + 1] = v;
       rgba[i * 4 + 2] = v;
-      rgba[i * 4 + 3] = Math.round(Math.min(1, Math.max(0, linear[i * 4 + 3])) * 255);
+      rgba[i * 4 + 3] = Math.round(Math.min(1, Math.max(0, halfToFloat(half[i * 4 + 3]))) * 255);
     }
     return { width, height, rgba };
   }

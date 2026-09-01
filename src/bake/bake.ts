@@ -159,6 +159,9 @@ function halfToFloat(h: number): number {
   return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
 }
 
+/** Decode one half-float bit pattern; shared by MRT and PT-AO readbacks. */
+export { halfToFloat };
+
 interface DrawGroup {
   group: MaterialGroup;
   mesh: Mesh;
