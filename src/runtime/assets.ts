@@ -1,4 +1,4 @@
-import { DataUtils, FloatType, RGBAFormat } from 'three';
+import { DataUtils, HalfFloatType, RGBAFormat } from 'three';
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import { bakePrimitive } from '../bake/bake.js';
 import { parseBake } from '../bake/bundle.js';
@@ -114,24 +114,25 @@ async function decodePng(blob: Blob, w: number, h: number): Promise<Uint8Array> 
 }
 
 function decodeExrGbuffer(buffer: ArrayBuffer, w: number, h: number): Uint16Array {
-  const texData = new EXRLoader().parse(buffer) as {
+  // Decode straight to half floats: EXRLoader converts the float32 scanlines
+  // to its configured `type`, and HalfFloatType output (Uint16Array of half
+  // bits) is exactly the texture upload format.
+  const loader = new EXRLoader();
+  loader.type = HalfFloatType;
+  const texData = loader.parse(buffer) as {
     width: number;
     height: number;
     format: number;
     type: number;
-    data: Float32Array;
+    data: Uint16Array;
   };
   if (texData.width !== w || texData.height !== h) {
     throw new Error(`g-buffer is ${texData.width}x${texData.height}, manifest says ${w}x${h}`);
   }
-  if (texData.type !== FloatType || texData.format !== RGBAFormat) {
-    throw new Error(`g-buffer must be float32 RGBA (got type=${texData.type} format=${texData.format})`);
+  if (texData.type !== HalfFloatType || texData.format !== RGBAFormat) {
+    throw new Error(`g-buffer must decode to half-float RGBA (got type=${texData.type} format=${texData.format})`);
   }
-  const out = new Uint16Array(w * h * 4);
-  for (let i = 0; i < out.length; i++) {
-    out[i] = DataUtils.toHalfFloat(texData.data[i]);
-  }
-  return out;
+  return texData.data;
 }
 
 // GL readback is bottom-up; uploads want top-down (row 0 = sprite top).
