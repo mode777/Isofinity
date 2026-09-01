@@ -24,10 +24,13 @@ bleeds across the padding boundary.
 
 The editor's **Load zip** button ingests bundles downloaded from the bake
 tool: `parseBake()` unpacks manifest + passes, the PNG decodes via
-`createImageBitmap` and the EXR via `EXRLoader.parse`. Both decoders return
-rows in file order — top-down, row 0 = sprite top — which is exactly the
-upload orientation, so loaded passes are padded **without flipping**
-(boot-time bakes flip because the raw GL readback is bottom-up). Loaded
+`createImageBitmap` and the EXR via `EXRLoader.parse`. Row order differs
+per decoder and both must end top-down (row 0 = sprite top) for upload:
+the PNG decodes top-down and is padded **as-is**, while `EXRLoader`
+writes rows bottom-up in GL texture order (it re-flips the file's
+top-down scanlines for `flipY:false` DataTextures) — so the EXR gets the
+**same flip as a boot bake**. Getting this wrong mirrors the object
+vertically; the two decoders are deliberately asymmetric. Loaded
 layers re-pad the whole set (max size may grow, `Renderer.setSprites`
 rebuilds both texture arrays), get a toolbar tool button, and are placed
 once immediately. Per-layer `pxPerUnit` from the manifest drives the

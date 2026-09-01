@@ -15,9 +15,11 @@ import {
 export const RUNTIME_PPU = 64;
 
 /**
- * One sprite in file orientation: rows top-down, row 0 = sprite top.
- * Bundle passes decode to exactly this order (bake exports compensate for
- * the bottom-up GL readback order), so no flip is needed on load.
+ * One sprite in upload orientation: rows top-down, row 0 = sprite top.
+ * Boot bakes flip the raw bottom-up GL readback. Bundle PNGs decode
+ * top-down and upload as-is; the bundle EXR decodes to GL order
+ * (EXRLoader re-flips the file's top-down scanlines) and needs the same
+ * flip as a boot bake.
  */
 export interface SpriteLayer {
   id: string;
@@ -132,7 +134,15 @@ function decodeExrGbuffer(buffer: ArrayBuffer, w: number, h: number): Uint16Arra
   if (texData.type !== HalfFloatType || texData.format !== RGBAFormat) {
     throw new Error(`g-buffer must decode to half-float RGBA (got type=${texData.type} format=${texData.format})`);
   }
-  return texData.data;
+  // EXRLoader writes rows bottom-up (GL texture order), same as a raw bake
+  // readback; uploads want top-down.
+  const src = texData.data;
+  const out = new Uint16Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const s = (h - 1 - y) * w * 4;
+    out.set(src.subarray(s, s + w * 4), y * w * 4);
+  }
+  return out;
 }
 
 // GL readback is bottom-up; uploads want top-down (row 0 = sprite top).
