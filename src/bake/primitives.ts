@@ -7,11 +7,13 @@ import {
   SphereGeometry,
   TorusGeometry,
 } from 'three';
+import type { Vec3 } from '../shared/iso.js';
 
 export interface Primitive {
   id: string;
   label: string;
   albedoHex: number;
+  size: Vec3;
   geometry: BufferGeometry;
 }
 
@@ -21,6 +23,7 @@ let cube: Primitive | null = null;
 let cylinder: Primitive | null = null;
 let capsule: Primitive | null = null;
 let plane: Primitive | null = null;
+let slab: Primitive | null = null;
 
 export function getSphere(): Primitive {
   if (!sphere) {
@@ -28,6 +31,7 @@ export function getSphere(): Primitive {
       id: 'sphere',
       label: 'Sphere',
       albedoHex: 0xc0563f,
+      size: [1, 1, 1],
       geometry: new SphereGeometry(0.42, 96, 64),
     };
   }
@@ -42,6 +46,7 @@ export function getDonut(): Primitive {
       id: 'donut',
       label: 'Donut',
       albedoHex: 0x3f7fc0,
+      size: [1, 1, 1],
       geometry,
     };
   }
@@ -54,6 +59,7 @@ export function getCube(): Primitive {
       id: 'cube',
       label: 'Cube',
       albedoHex: 0x4f9e5c,
+      size: [1, 1, 1],
       geometry: new BoxGeometry(1, 1, 1),
     };
   }
@@ -66,6 +72,7 @@ export function getCylinder(): Primitive {
       id: 'cylinder',
       label: 'Cylinder',
       albedoHex: 0x9e9e3f,
+      size: [1, 1, 1],
       geometry: new CylinderGeometry(0.35, 0.35, 0.8, 64),
     };
   }
@@ -78,6 +85,7 @@ export function getCapsule(): Primitive {
       id: 'capsule',
       label: 'Capsule',
       albedoHex: 0x8a5fc0,
+      size: [1, 1, 1],
       geometry: new CapsuleGeometry(0.28, 0.34, 8, 64),
     };
   }
@@ -92,8 +100,22 @@ export function getPlane(): Primitive {
       id: 'plane',
       label: 'Plane',
       albedoHex: 0xc0973f,
+      size: [1, 1, 1],
       geometry,
     };
   }
   return plane;
+}
+
+export function getSlab(): Primitive {
+  if (!slab) {
+    slab = {
+      id: 'slab',
+      label: 'Slab',
+      albedoHex: 0x3f9e9e,
+      size: [2, 0.5, 1],
+      geometry: new BoxGeometry(2, 0.5, 1),
+    };
+  }
+  return slab;
 }

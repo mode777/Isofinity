@@ -51,8 +51,8 @@ const renderer = new Renderer(
   canvas,
   sprites.albedoLayers,
   sprites.gbufferLayers,
-  sprites.width,
-  sprites.height,
+  sprites.maxW,
+  sprites.maxH,
 );
 
 interface LightState {
@@ -148,26 +148,34 @@ world.place(7, 6, 'donut');
 world.place(2, 7, 'cylinder');
 world.place(8, 3, 'capsule');
 world.place(5, 8, 'plane');
+world.place(6, 2, 'slab');
 
 let tool = 'cube';
 let hover: [number, number] | null = null;
-let instances = new Float32Array(256 * 4);
+let instances = new Float32Array(256 * 8);
 const highlightData = new Float32Array(6 * 5);
 
 function renderFrame(): void {
   updateLightUniforms();
   const scale = PPU / RUNTIME_PPU;
   const placed = world.list();
-  if (instances.length < placed.length * 4) {
-    instances = new Float32Array(Math.max(placed.length * 4, instances.length * 2));
+  if (instances.length < placed.length * 8) {
+    instances = new Float32Array(Math.max(placed.length * 8, instances.length * 2));
   }
   let count = 0;
   for (const p of placed) {
+    const layer = layerOf.get(p.primId) ?? 0;
+    const [ox, oy] = sprites.origins[layer];
+    const [w, h] = sprites.sizes[layer];
     const [cx, cy] = toPx(p.x, p.z);
-    instances[count * 4] = cx - sprites.originPx[0] * scale;
-    instances[count * 4 + 1] = cy - sprites.originPx[1] * scale;
-    instances[count * 4 + 2] = layerOf.get(p.primId) ?? 0;
-    instances[count * 4 + 3] = VIEW_DIR[0] * p.x + VIEW_DIR[2] * p.z;
+    instances[count * 8] = cx - ox * scale;
+    instances[count * 8 + 1] = cy - oy * scale;
+    instances[count * 8 + 2] = layer;
+    instances[count * 8 + 3] = VIEW_DIR[0] * p.x + VIEW_DIR[2] * p.z;
+    instances[count * 8 + 4] = w * scale;
+    instances[count * 8 + 5] = h * scale;
+    instances[count * 8 + 6] = w;
+    instances[count * 8 + 7] = h;
     count++;
   }
 

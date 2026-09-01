@@ -1,12 +1,14 @@
 import { OrthographicCamera, Vector3 } from 'three';
 import {
-  DEPTH_RANGE,
   ISO_AZIMUTH_DEG,
   ISO_ELEVATION_DEG,
   VIEW_DIR,
+  depthRange,
+  type Vec3,
 } from '../shared/iso.js';
 
-export { DEPTH_RANGE, ISO_AZIMUTH_DEG, ISO_ELEVATION_DEG };
+export { ISO_AZIMUTH_DEG, ISO_ELEVATION_DEG, depthRange };
+export type { Vec3 };
 
 export const ISO_VIEW_DIR = new Vector3(VIEW_DIR[0], VIEW_DIR[1], VIEW_DIR[2]);
 
@@ -46,10 +48,14 @@ export function reconstructWorldPos(
   return out.addScaledVector(ISO_VIEW_DIR, t);
 }
 
-export function frameIsoCube(pxPerUnit: number, padPx: number): IsoFrame {
+export function frameIsoBox(
+  size: Vec3,
+  pxPerUnit: number,
+  padPx: number,
+): IsoFrame {
   const camera = new OrthographicCamera(-1, 1, 1, -1, 1, CAMERA_DISTANCE * 2 + 1);
   const dir = isoDirection(ISO_AZIMUTH_DEG, ISO_ELEVATION_DEG);
-  const center = new Vector3(0.5, 0.5, 0.5);
+  const center = new Vector3(size[0] / 2, size[1] / 2, size[2] / 2);
   camera.up.set(0, 1, 0);
   camera.position.copy(center).addScaledVector(dir, CAMERA_DISTANCE);
   camera.lookAt(center);
@@ -60,7 +66,11 @@ export function frameIsoCube(pxPerUnit: number, padPx: number): IsoFrame {
   let minY = Infinity;
   let maxY = -Infinity;
   for (let i = 0; i < 8; i++) {
-    const corner = new Vector3(i & 1, (i >> 1) & 1, (i >> 2) & 1);
+    const corner = new Vector3(
+      (i & 1) * size[0],
+      ((i >> 1) & 1) * size[1],
+      ((i >> 2) & 1) * size[2],
+    );
     corner.applyMatrix4(camera.matrixWorldInverse);
     minX = Math.min(minX, corner.x);
     maxX = Math.max(maxX, corner.x);

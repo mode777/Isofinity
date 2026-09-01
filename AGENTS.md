@@ -41,10 +41,12 @@ it as the reference architecture; design against it.
 ## Current state
 
 - Bake tool (`bake.html`, `src/bake/`): bakes test primitives (sphere,
-  donut, cube, cylinder, capsule, plane) into per-cube sprite passes —
-  albedo (PNG) and a merged g-buffer (float EXR: rgb = world normals,
-  a = linear ray depth) — plus a manifest (`format: isoinfinity-bake/3`).
-  Conventions in `docs/bake-pipeline.md`.
+  donut, cube, cylinder, capsule, plane, slab) into per-asset sprite
+  passes — albedo (PNG) and a merged g-buffer (float EXR: rgb = world
+  normals, a = linear ray depth) — plus a manifest
+  (`format: isoinfinity-bake/3`). Arbitrary cuboids bake directly; the
+  1×1×1 cube is just the default cell. Conventions in
+  `docs/bake-pipeline.md`.
 - Runtime editor (`index.html`, `src/runtime/`, shared math in
   `src/shared/`): bakes sprites at page load, places them freely on an
   isometric ground plane. Raw WebGL2 compositor with per-pixel sprite

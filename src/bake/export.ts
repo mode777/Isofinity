@@ -1,7 +1,7 @@
 import { DataTexture, FloatType, RGBAFormat, Vector3 } from 'three';
 import { EXRExporter, NO_COMPRESSION } from 'three/examples/jsm/exporters/EXRExporter.js';
 import { PAD_PX, type BakeResult } from './bake.js';
-import { DEPTH_RANGE, frameIsoCube, reconstructWorldPos } from './iso.js';
+import { depthRange, frameIsoBox, reconstructWorldPos } from './iso.js';
 
 export function download(name: string, data: BlobPart, mime: string): void {
   const url = URL.createObjectURL(new Blob([data], { type: mime }));
@@ -79,7 +79,7 @@ export function buildManifest(result: BakeResult): BakeManifest {
   return {
     format: 'isoinfinity-bake/3',
     id: result.id,
-    cube: { size: [1, 1, 1], origin: [0, 0, 0] },
+    cube: { size: [result.size[0], result.size[1], result.size[2]], origin: [0, 0, 0] },
     camera: {
       projection: 'orthographic',
       azimuthDeg: result.camera.azimuthDeg,
@@ -92,7 +92,7 @@ export function buildManifest(result: BakeResult): BakeManifest {
     },
     depth: {
       definition: 'dot(worldPos, viewDir), reference plane through world origin; stored in gbuffer alpha',
-      range: [Math.round(DEPTH_RANGE[0] * 1e6) / 1e6, Math.round(DEPTH_RANGE[1] * 1e6) / 1e6],
+      range: depthRange(result.size),
     },
     pxPerUnit: result.pxPerUnit,
     sprite: {
@@ -121,7 +121,7 @@ export function buildManifest(result: BakeResult): BakeManifest {
 const debugPos = new Vector3();
 
 export function debugPositionCanvas(result: BakeResult): HTMLCanvasElement {
-  const frame = frameIsoCube(result.pxPerUnit, PAD_PX);
+  const frame = frameIsoBox(result.size, result.pxPerUnit, PAD_PX);
   return rgbaToCanvas(result.gbuffer, result.width, result.height, (r, g, b, a, x, y) => {
     if (r * r + g * g + b * b < 0.5) return [0, 0, 0, 0];
     const p = reconstructWorldPos(frame, x + 0.5, y + 0.5, a, debugPos);

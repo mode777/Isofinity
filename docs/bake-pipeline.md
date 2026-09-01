@@ -24,16 +24,19 @@ Pick a primitive, hit Bake, inspect the passes, download the files.
 - The sprite rect is computed by projecting the 8 corners of the unit cube
   into view space — no hand-tuned dimensions; any camera angle keeps working.
 
-### Cube space
+### Asset bounds
 
-- One asset cell is a 1×1×1 world-space cube spanning `[0,1]³` with the
-  minimum corner at `(0,0,0)`. Bigger assets are grids of cubes.
-- Cube-space position is **not stored**; it is derived from pixel + depth
-  (see below). The per-cube origin is tracked by the asset layout, so
-  cubes tile losslessly.
-- The **normal pass** stores world-space normals. Cubes are axis-aligned, so
-  cube-local and world normals are identical; only the position offset
-  differs per cube.
+- An asset occupies an axis-aligned world-space box with the minimum corner
+  at `(0,0,0)` and its extent recorded as `cube.size` in the manifest. The
+  1×1×1 unit cube is the default cell (bigger assets can still be grids of
+  cube sprites blitted together), but any cuboid bakes directly — the test
+  set includes a 2×0.5×1 slab.
+- Asset-space position is **not stored**; it is derived from pixel + depth
+  (see below). The box origin is tracked by the asset layout, so assets
+  tile losslessly.
+- The **g-buffer pass** stores world-space normals. Boxes are axis-aligned,
+  so asset-local and world normals are identical; only the position offset
+  differs per asset.
 
 ### Depth instead of position
 
@@ -51,8 +54,10 @@ planned KTX2/UASTC delivery would carry.
   view direction. Chosen over distance-from-camera so that depths stay
   comparable **across cube sprites** in multi-cube assets (the camera is
   repositioned per cube, the reference plane is not).
-- Range for the unit cube: `DEPTH_RANGE = [0, |viewDir|₁] ≈ [0, 1.725]`
-  (`src/bake/iso.ts` — the L1 norm of the view direction over a unit cube).
+- Range for an asset of size `s`: `depthRange(s) = [0, Σ|viewDirᵢ·sᵢ|]`
+  (`src/shared/iso.ts`) — `[0, 1.725]` for the unit cube. Depths are absolute
+  (global reference plane), so they stay comparable across assets of any
+  size; the range only drives preview normalization and the manifest.
 - Reconstruction: `worldPos = rayOrigin(pixel) + (depth - dot(rayOrigin,
   viewDir)) * viewDir`, implemented in `reconstructWorldPos()` next to the
   camera constants so bake-time and runtime can never drift apart.
@@ -91,10 +96,13 @@ planned KTX2/UASTC delivery would carry.
 
 ### Sprite placement
 
-`sprite.originPx` in the manifest is the projected cube min corner `(0,0,0)`
+`sprite.originPx` in the manifest is the projected box min corner `(0,0,0)`
 in sprite pixel coordinates. Compositing a multi-cube asset = blit each
 cube's sprite offset by the projected difference of their origins; no per-
-asset alignment work is needed.
+asset alignment work is needed. Sprites of different assets may differ in
+pixel size (`pxPerUnit` is fixed, the box is not): the runtime pads every
+sprite into a shared max-size texture array (data anchored bottom-left) and
+moves quad size + sprite texel size into per-instance attributes.
 
 ### Manifest (`<id>-bake.json`)
 
@@ -105,9 +113,10 @@ pass instead of depth, v2 stored depth and normals as two separate EXRs).
 
 ## Current state / next steps
 
-- Done: sphere, donut, cube, cylinder, capsule and plane test primitives,
-  cube-frame camera math, MRT bake (albedo + merged g-buffer), PNG + EXR
-  export, debug position dump, manifest, visual pass preview.
+- Done: sphere, donut, cube, cylinder, capsule, plane and slab (2×0.5×1)
+  test primitives, box-frame camera math (arbitrary cuboids), MRT bake
+  (albedo + merged g-buffer), PNG + EXR export, debug position dump,
+  manifest, visual pass preview.
 - Planned: supersampling (render at N× and box-downsample), multi-cube
   composite assets, geometry-level clipping (CSG) instead of shader discard,
   KTX2/UASTC packaging for delivery (the merged g-buffer is already in the

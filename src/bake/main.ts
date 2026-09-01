@@ -6,13 +6,14 @@ import {
   exportExr,
   rgbaToCanvas,
 } from './export.js';
-import { DEPTH_RANGE } from './iso.js';
+import { depthRange, type Vec3 } from './iso.js';
 import {
   getCapsule,
   getCube,
   getCylinder,
   getDonut,
   getPlane,
+  getSlab,
   getSphere,
   type Primitive,
 } from './primitives.js';
@@ -36,6 +37,7 @@ const primitiveFactories: Record<string, () => Primitive> = {
   cylinder: getCylinder,
   capsule: getCapsule,
   plane: getPlane,
+  slab: getSlab,
 };
 
 let current: Primitive = getSphere();
@@ -52,12 +54,14 @@ function showPass(
   width: number,
   height: number,
   mode: 'albedo' | 'gbuffer-normal' | 'gbuffer-depth',
+  size: Vec3,
 ): void {
   const shown = rgbaToCanvas(rgba, width, height, (r, g, b, a) => {
     if (mode === 'gbuffer-normal' || mode === 'gbuffer-depth') {
       const cov = Math.min(1, Math.sqrt(r * r + g * g + b * b));
       if (mode === 'gbuffer-depth') {
-        const t = (a - DEPTH_RANGE[0]) / (DEPTH_RANGE[1] - DEPTH_RANGE[0]);
+        const [lo, hi] = depthRange(size);
+        const t = (a - lo) / (hi - lo);
         return [t, t, t, cov];
       }
       return [r * 0.5 + 0.5, g * 0.5 + 0.5, b * 0.5 + 0.5, cov];
@@ -74,8 +78,8 @@ function showPass(
 function bake(): void {
   try {
     result = bakePrimitive(current);
-    showPass(canvases.albedo, result.albedo, result.width, result.height, 'albedo');
-    showPass(canvases.gbuffer, result.gbuffer, result.width, result.height, gbufferMode);
+    showPass(canvases.albedo, result.albedo, result.width, result.height, 'albedo', result.size);
+    showPass(canvases.gbuffer, result.gbuffer, result.width, result.height, gbufferMode, result.size);
     for (const b of Object.values(downloadButtons)) b.disabled = false;
     setStatus(
       `${result.label}: ${result.width}x${result.height} px @ ${result.pxPerUnit} px/unit`,
@@ -111,7 +115,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('figcaption bu
       el.classList.toggle('active', el.id === button.id);
     }
     if (result) {
-      showPass(canvases.gbuffer, result.gbuffer, result.width, result.height, gbufferMode);
+      showPass(canvases.gbuffer, result.gbuffer, result.width, result.height, gbufferMode, result.size);
     }
   });
 }

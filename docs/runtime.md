@@ -12,6 +12,13 @@ uploads the two baked passes into WebGL2 `TEXTURE_2D_ARRAY`s: albedo +
 coverage (RGBA8, LINEAR) and the merged g-buffer (RGBA16F, NEAREST —
 `rgb = world-space normal`, `a = linear ray depth`; NEAREST keeps background
 zero-normals and neighboring depths from bleeding across silhouettes).
+Assets may be arbitrary cuboids, so sprites differ in pixel size: every
+layer is padded into a shared max-size rect (sprite data anchored
+bottom-left, zero padding elsewhere), and each sprite's pixel size + origin
+travel out of the uniforms — quad size, UV window and origin offset are
+per-instance/per-layer data now. UVs are computed from texel centers
+(`mix(0.5, size - 0.5, corner) / maxSize`) so LINEAR-filtered albedo never
+bleeds across the padding boundary.
 
 Row-order warning: GL pixel readback is bottom-up and all texture arrays
 are sampled with the same UV, so **every** uploaded pass must be flipped to
@@ -43,8 +50,9 @@ orthographic, all projection happens once on the CPU
 
 1. **Ground** — the grid's cell top faces (y=0) as a static vertex-color
    triangle batch, CPU-projected at startup. No depth interaction.
-2. **Sprites** — one instanced quad per placed object, painter-sorted by
-   `dot(cubeCenter, viewDir)` (far → near) for blend correctness,
+2. **Sprites** — one instanced quad per placed object (per-instance quad
+   size + sprite texel size, 8 floats per instance), painter-sorted by
+   `dot(origin, viewDir)` (far → near) for blend correctness,
    alpha-blended using the baked coverage alpha, with **per-pixel
    occlusion**: each fragment samples the baked g-buffer once (normals in
    rgb for shading, depth in alpha), adds the

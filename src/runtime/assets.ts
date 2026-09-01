@@ -6,6 +6,7 @@ import {
   getCylinder,
   getDonut,
   getPlane,
+  getSlab,
   getSphere,
 } from '../bake/primitives.js';
 
@@ -13,11 +14,12 @@ export const RUNTIME_PPU = 64;
 
 export interface SpriteSet {
   ids: string[];
-  width: number;
-  height: number;
+  maxW: number;
+  maxH: number;
+  sizes: [number, number][];
+  origins: [number, number][];
   albedoLayers: Uint8Array[];
   gbufferLayers: Uint16Array[];
-  originPx: [number, number];
 }
 
 export function bakeSprites(): SpriteSet {
@@ -28,32 +30,39 @@ export function bakeSprites(): SpriteSet {
     getCylinder(),
     getCapsule(),
     getPlane(),
+    getSlab(),
   ];
+  const results = prims.map((prim) => bakePrimitive(prim, RUNTIME_PPU));
+  const maxW = Math.max(...results.map((r) => r.width));
+  const maxH = Math.max(...results.map((r) => r.height));
   const ids: string[] = [];
+  const sizes: [number, number][] = [];
+  const origins: [number, number][] = [];
   const albedoLayers: Uint8Array[] = [];
   const gbufferLayers: Uint16Array[] = [];
-  let width = 0;
-  let height = 0;
-  let originPx: [number, number] = [0, 0];
-  for (const prim of prims) {
-    const result = bakePrimitive(prim, RUNTIME_PPU);
+  for (const result of results) {
     ids.push(result.id);
-    width = result.width;
-    height = result.height;
-    originPx = result.originPx;
-    albedoLayers.push(albedoToBytes(result.albedo, result.width, result.height));
-    gbufferLayers.push(gbufferToHalf(result.gbuffer, result.width, result.height));
+    sizes.push([result.width, result.height]);
+    origins.push(result.originPx);
+    albedoLayers.push(albedoToBytes(result.albedo, result.width, result.height, maxW, maxH));
+    gbufferLayers.push(gbufferToHalf(result.gbuffer, result.width, result.height, maxW, maxH));
   }
-  return { ids, width, height, albedoLayers, gbufferLayers, originPx };
+  return { ids, maxW, maxH, sizes, origins, albedoLayers, gbufferLayers };
 }
 
-function albedoToBytes(rgba: Float32Array, w: number, h: number): Uint8Array {
-  const out = new Uint8Array(w * h * 4);
+function albedoToBytes(
+  rgba: Float32Array,
+  w: number,
+  h: number,
+  maxW: number,
+  maxH: number,
+): Uint8Array {
+  const out = new Uint8Array(maxW * maxH * 4);
   for (let y = 0; y < h; y++) {
     const srcRow = (h - 1 - y) * w;
     for (let x = 0; x < w; x++) {
       const s = (srcRow + x) * 4;
-      const d = (y * w + x) * 4;
+      const d = (y * maxW + x) * 4;
       out[d] = quantize(rgba[s]);
       out[d + 1] = quantize(rgba[s + 1]);
       out[d + 2] = quantize(rgba[s + 2]);
@@ -63,13 +72,19 @@ function albedoToBytes(rgba: Float32Array, w: number, h: number): Uint8Array {
   return out;
 }
 
-function gbufferToHalf(rgba: Float32Array, w: number, h: number): Uint16Array {
-  const out = new Uint16Array(w * h * 4);
+function gbufferToHalf(
+  rgba: Float32Array,
+  w: number,
+  h: number,
+  maxW: number,
+  maxH: number,
+): Uint16Array {
+  const out = new Uint16Array(maxW * maxH * 4);
   for (let y = 0; y < h; y++) {
     const srcRow = (h - 1 - y) * w;
     for (let x = 0; x < w; x++) {
       const s = (srcRow + x) * 4;
-      const d = (y * w + x) * 4;
+      const d = (y * maxW + x) * 4;
       out[d] = DataUtils.toHalfFloat(rgba[s]);
       out[d + 1] = DataUtils.toHalfFloat(rgba[s + 1]);
       out[d + 2] = DataUtils.toHalfFloat(rgba[s + 2]);

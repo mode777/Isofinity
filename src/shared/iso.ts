@@ -14,10 +14,14 @@ export const VIEW_DIR: Vec3 = [CE * CA, SE, CE * SA];
 export const SCREEN_RIGHT: Vec3 = [SA, 0, -CA];
 export const SCREEN_UP: Vec3 = [-SE * CA, CE, -SE * SA];
 
-export const DEPTH_RANGE: [number, number] = [
-  0,
-  Math.abs(VIEW_DIR[0]) + Math.abs(VIEW_DIR[1]) + Math.abs(VIEW_DIR[2]),
-];
+export function depthRange(size: Vec3): [number, number] {
+  return [
+    0,
+    Math.abs(VIEW_DIR[0]) * size[0] +
+      Math.abs(VIEW_DIR[1]) * size[1] +
+      Math.abs(VIEW_DIR[2]) * size[2],
+  ];
+}
 
 export function groundToScreen(x: number, z: number): [number, number] {
   return [

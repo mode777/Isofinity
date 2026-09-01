@@ -39,16 +39,17 @@ void main() {
 
 const SPRITE_VERT = `#version 300 es
 in vec2 aCorner;
-in vec4 aInst;
+in vec4 aInst;   // px.xy, layer, depthOff
+in vec4 aInst2;  // quadSize px, sprite texel size
 uniform vec2 uRes;
-uniform vec2 uSize;
+uniform vec2 uMaxSize;
 out vec2 vUv;
 flat out float vLayer;
 flat out float vDepthOff;
 void main() {
-  vec2 px = aInst.xy + aCorner * uSize;
+  vec2 px = aInst.xy + aCorner * aInst2.xy;
   gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
-  vUv = aCorner;
+  vUv = mix(vec2(0.5), aInst2.zw - 0.5, aCorner) / uMaxSize;
   vLayer = aInst.z;
   vDepthOff = aInst.w;
 }
@@ -121,12 +122,10 @@ export class Renderer {
   private uFlatAlpha: WebGLUniformLocation;
   private uFlatLight: Uniforms3;
   private uSpriteRes: WebGLUniformLocation;
-  private uSpriteSize: WebGLUniformLocation;
+  private uSpriteMaxSize: WebGLUniformLocation;
   private uSpriteLight: Uniforms3;
   private uDepthA: WebGLUniformLocation;
   private uDepthB: WebGLUniformLocation;
-  private layerWidth: number;
-  private layerHeight: number;
   private light: LightParams = {
     dir: [0, 1, 0],
     key: [1, 1, 1],
@@ -137,8 +136,8 @@ export class Renderer {
     canvas: HTMLCanvasElement,
     albedoLayers: Uint8Array[],
     gbufferLayers: Uint16Array[],
-    layerWidth: number,
-    layerHeight: number,
+    maxW: number,
+    maxH: number,
   ) {
     const gl = canvas.getContext('webgl2', {
       alpha: false,
@@ -149,8 +148,6 @@ export class Renderer {
       throw new Error('WebGL2 unavailable');
     }
     this.gl = gl;
-    this.layerWidth = layerWidth;
-    this.layerHeight = layerHeight;
 
     this.flatProg = link(gl, FLAT_VERT, FLAT_FRAG);
     this.spriteProg = link(gl, SPRITE_VERT, SPRITE_FRAG);
@@ -162,7 +159,7 @@ export class Renderer {
       ambient: gl.getUniformLocation(this.flatProg, 'uAmbient')!,
     };
     this.uSpriteRes = gl.getUniformLocation(this.spriteProg, 'uRes')!;
-    this.uSpriteSize = gl.getUniformLocation(this.spriteProg, 'uSize')!;
+    this.uSpriteMaxSize = gl.getUniformLocation(this.spriteProg, 'uMaxSize')!;
     this.uSpriteLight = {
       dir: gl.getUniformLocation(this.spriteProg, 'uLightDir')!,
       key: gl.getUniformLocation(this.spriteProg, 'uKeyLight')!,
@@ -173,6 +170,7 @@ export class Renderer {
     gl.useProgram(this.spriteProg);
     gl.uniform1f(this.uDepthA, -1 / (2 * DEPTH_LINEAR_RANGE));
     gl.uniform1f(this.uDepthB, 0.5);
+    gl.uniform2f(this.uSpriteMaxSize, maxW, maxH);
 
     this.tex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex);
@@ -180,8 +178,8 @@ export class Renderer {
       gl.TEXTURE_2D_ARRAY,
       0,
       gl.RGBA8,
-      layerWidth,
-      layerHeight,
+      maxW,
+      maxH,
       albedoLayers.length,
       0,
       gl.RGBA,
@@ -195,8 +193,8 @@ export class Renderer {
         0,
         0,
         i,
-        layerWidth,
-        layerHeight,
+        maxW,
+        maxH,
         1,
         gl.RGBA,
         gl.UNSIGNED_BYTE,
@@ -214,8 +212,8 @@ export class Renderer {
       gl.TEXTURE_2D_ARRAY,
       0,
       gl.RGBA16F,
-      layerWidth,
-      layerHeight,
+      maxW,
+      maxH,
       gbufferLayers.length,
       0,
       gl.RGBA,
@@ -229,8 +227,8 @@ export class Renderer {
         0,
         0,
         i,
-        layerWidth,
-        layerHeight,
+        maxW,
+        maxH,
         1,
         gl.RGBA,
         gl.HALF_FLOAT,
@@ -278,8 +276,12 @@ export class Renderer {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instVbo);
     const aInst = gl.getAttribLocation(this.spriteProg, 'aInst');
     gl.enableVertexAttribArray(aInst);
-    gl.vertexAttribPointer(aInst, 4, gl.FLOAT, false, 16, 0);
+    gl.vertexAttribPointer(aInst, 4, gl.FLOAT, false, 32, 0);
     gl.vertexAttribDivisor(aInst, 1);
+    const aInst2 = gl.getAttribLocation(this.spriteProg, 'aInst2');
+    gl.enableVertexAttribArray(aInst2);
+    gl.vertexAttribPointer(aInst2, 4, gl.FLOAT, false, 32, 16);
+    gl.vertexAttribDivisor(aInst2, 1);
 
     gl.bindVertexArray(null);
     gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uSprites')!, 0);
@@ -326,7 +328,6 @@ export class Renderer {
       gl.enable(gl.DEPTH_TEST);
       gl.useProgram(this.spriteProg);
       gl.uniform2f(this.uSpriteRes, canvas.width, canvas.height);
-      gl.uniform2f(this.uSpriteSize, this.layerWidth, this.layerHeight);
       uploadLight(gl, this.uSpriteLight, this.light);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex);

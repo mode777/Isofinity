@@ -16,8 +16,9 @@ import {
   ISO_AZIMUTH_DEG,
   ISO_ELEVATION_DEG,
   ISO_VIEW_DIR,
-  frameIsoCube,
+  frameIsoBox,
 } from './iso.js';
+import type { Vec3 } from '../shared/iso.js';
 import type { Primitive } from './primitives.js';
 
 export const PX_PER_UNIT = 128;
@@ -29,6 +30,7 @@ export interface BakeResult {
   id: string;
   label: string;
   albedoHex: number;
+  size: Vec3;
   width: number;
   height: number;
   pxPerUnit: number;
@@ -108,7 +110,7 @@ function halfToFloat(h: number): number {
 
 export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT): BakeResult {
   const r = getRenderer();
-  const frame = frameIsoCube(pxPerUnit, PAD_PX);
+  const frame = frameIsoBox(prim.size, pxPerUnit, PAD_PX);
   const { width, height } = frame;
 
   const target = new WebGLRenderTarget(width, height, {
@@ -127,13 +129,13 @@ export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT):
     uniforms: {
       uAlbedo: { value: new Color(prim.albedoHex) },
       uCubeMin: { value: new Vector3(0, 0, 0) },
-      uCubeMax: { value: new Vector3(1, 1, 1) },
+      uCubeMax: { value: new Vector3(prim.size[0], prim.size[1], prim.size[2]) },
       uViewDir: { value: ISO_VIEW_DIR.clone() },
     },
   });
 
   const mesh = new Mesh(prim.geometry, material);
-  mesh.position.set(0.5, 0.5, 0.5);
+  mesh.position.set(prim.size[0] / 2, prim.size[1] / 2, prim.size[2] / 2);
   const scene = new Scene();
   scene.add(mesh);
 
@@ -154,6 +156,7 @@ export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT):
     id: prim.id,
     label: prim.label,
     albedoHex: prim.albedoHex,
+    size: [prim.size[0], prim.size[1], prim.size[2]],
     width,
     height,
     pxPerUnit,
