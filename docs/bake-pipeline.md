@@ -5,7 +5,7 @@ is rendered once from the fixed isometric camera into per-pixel data passes
 and stored as a sprite set plus a manifest.
 
 Run `npm run dev` and open `/bake.html` (also built to `dist/bake.html`).
-Pick a primitive, hit Bake, inspect the passes, download the files.
+Pick a primitive, hit Bake, inspect the passes, download the bundle.
 
 ## Conventions
 
@@ -111,12 +111,34 @@ depth semantics/range and per-pass channel semantics
 (`format: "isoinfinity-bake/3"`; v1 stored a redundant cube-space position
 pass instead of depth, v2 stored depth and normals as two separate EXRs).
 
+### Bundle (`<id>-bake.zip`)
+
+The bake tool ships all parts as a single deflate zip (written with fflate —
+three's vendored copy, no extra dependency):
+
+```
+<id>-bake.zip
+├─ manifest.json          deflated
+├─ <id>-albedo.png        stored (PNG is already compressed)
+└─ <id>-gbuffer.exr       deflated (raw float + zero padding compress well)
+```
+
+Entry names are exactly the file names the manifest's `passes` table
+references, and the parts are byte-identical to the loose passes — the
+container is pure transport, so any zip tool opens it and each pass stays
+individually diffable. Entries carry a fixed mtime so re-baking the same
+primitive yields identical bytes. `parseBake()` (`src/bake/bundle.ts`) is
+the matching reader: unzip, validate the `format` prefix, resolve entries
+via the manifest, return Blobs ready for the PNG/EXR decoders. The runtime
+still bakes at boot; it will switch to `fetch` + `parseBake` once assets
+ship as files.
+
 ## Current state / next steps
 
 - Done: sphere, donut, cube, cylinder, capsule, plane and slab (2×0.5×1)
   test primitives, box-frame camera math (arbitrary cuboids), MRT bake
-  (albedo + merged g-buffer), PNG + EXR export, debug position dump,
-  manifest, visual pass preview.
+  (albedo + merged g-buffer), PNG + EXR export, single-file zip bundle,
+  debug position dump, manifest, visual pass preview.
 - Planned: supersampling (render at N× and box-downsample), multi-cube
   composite assets, geometry-level clipping (CSG) instead of shader discard,
   KTX2/UASTC packaging for delivery (the merged g-buffer is already in the

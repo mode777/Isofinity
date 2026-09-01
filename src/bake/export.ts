@@ -43,20 +43,19 @@ export function rgbaToCanvas(
   return canvas;
 }
 
-export async function exportExr(
+export async function encodeExr(
   rgba: Float32Array,
   width: number,
   height: number,
-  name: string,
-): Promise<void> {
+): Promise<Uint8Array> {
   const texture = new DataTexture(rgba, width, height, RGBAFormat, FloatType);
   texture.needsUpdate = true;
   const bytes = await new EXRExporter().parse(texture, {
     type: FloatType,
     compression: NO_COMPRESSION,
   });
-  download(name, bytes, 'image/x-exr');
   texture.dispose();
+  return bytes;
 }
 
 export interface BakeManifest {

@@ -43,7 +43,7 @@ it as the reference architecture; design against it.
 - Bake tool (`bake.html`, `src/bake/`): bakes test primitives (sphere,
   donut, cube, cylinder, capsule, plane, slab) into per-asset sprite
   passes — albedo (PNG) and a merged g-buffer (float EXR: rgb = world
-  normals, a = linear ray depth) — plus a manifest
+  normals, a = linear ray depth) — shipped as a zip bundle with a manifest
   (`format: isoinfinity-bake/3`). Arbitrary cuboids bake directly; the
   1×1×1 cube is just the default cell. Conventions in
   `docs/bake-pipeline.md`.

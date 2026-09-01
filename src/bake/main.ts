@@ -1,9 +1,8 @@
 import { bakePrimitive, type BakeResult } from './bake.js';
+import { buildBundle } from './bundle.js';
 import {
-  buildManifest,
   debugPositionCanvas,
   download,
-  exportExr,
   rgbaToCanvas,
 } from './export.js';
 import { depthRange, type Vec3 } from './iso.js';
@@ -24,10 +23,8 @@ const canvases = {
   gbuffer: document.getElementById('pass-gbuffer') as HTMLCanvasElement,
 };
 const downloadButtons = {
-  albedo: document.getElementById('dl-albedo') as HTMLButtonElement,
-  gbuffer: document.getElementById('dl-gbuffer') as HTMLButtonElement,
+  bundle: document.getElementById('dl-bundle') as HTMLButtonElement,
   debug: document.getElementById('dl-debug') as HTMLButtonElement,
-  manifest: document.getElementById('dl-manifest') as HTMLButtonElement,
 };
 
 const primitiveFactories: Record<string, () => Primitive> = {
@@ -120,27 +117,21 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('figcaption bu
   });
 }
 
-downloadButtons.albedo.addEventListener('click', () => {
+downloadButtons.bundle.addEventListener('click', () => {
   if (!result) return;
-  const canvas = rgbaToCanvas(result.albedo, result.width, result.height, (r, g, b, a) => [r, g, b, a]);
-  canvas.toBlob((blob) => {
-    if (blob) download(`${result!.id}-albedo.png`, blob, 'image/png');
-  });
-});
-downloadButtons.gbuffer.addEventListener('click', () => {
-  if (!result) return;
-  void exportExr(result.gbuffer, result.width, result.height, `${result.id}-gbuffer.exr`);
+  const current = result;
+  void buildBundle(current)
+    .then((bytes) => download(`${current.id}-bake.zip`, bytes, 'application/zip'))
+    .catch((err) => {
+      console.error(err);
+      setStatus(`Bundle failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
 });
 downloadButtons.debug.addEventListener('click', () => {
   if (!result) return;
   debugPositionCanvas(result).toBlob((blob) => {
     if (blob) download(`${result!.id}-position-debug.png`, blob, 'image/png');
   });
-});
-downloadButtons.manifest.addEventListener('click', () => {
-  if (!result) return;
-  const json = JSON.stringify(buildManifest(result), null, 2);
-  download(`${result.id}-bake.json`, json, 'application/json');
 });
 
 bake();
