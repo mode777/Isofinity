@@ -42,6 +42,9 @@ orthographic camera, every pixel's ray has the same known direction and a
 known origin, so full 3D position is exactly reconstructible from the pixel
 coordinate plus a single scalar depth — the standard deferred-rendering
 trade (store depth, unproject), and it saves two channels per pixel.
+Depth lives in the **alpha channel of the g-buffer pass** (rgb = normal,
+a = depth), the classic packed-G-buffer layout and exactly the texture the
+planned KTX2/UASTC delivery would carry.
 
 - Definition: `depth = dot(worldPos, viewDir)` — linear ray distance from
   the global reference plane through the world origin, perpendicular to the
@@ -61,19 +64,26 @@ trade (store depth, unproject), and it saves two channels per pixel.
 - Normals remain baked — deriving them from depth derivatives breaks at
   silhouettes and interior edges (the donut hole).
 
-### Passes (one MRT draw call, `count: 3`, half-float RGBA targets)
+### Passes (one MRT draw call, `count: 2`, half-float RGBA targets)
 
-| Pass     | RGB                                   | A        | File                |
-| -------- | ------------------------------------- | -------- | ------------------- |
-| albedo   | surface color, **sRGB-encoded**       | coverage | `<id>-albedo.png`   |
-| depth    | r = linear ray depth, gb unused       | coverage | `<id>-depth.exr`    |
-| normal   | world-space normal                    | coverage | `<id>-normal.exr`   |
+| Pass    | RGB                             | A                | File                |
+| ------- | ------------------------------- | ---------------- | ------------------- |
+| albedo  | surface color, **sRGB-encoded** | coverage         | `<id>-albedo.png`   |
+| gbuffer | world-space normal              | linear ray depth | `<id>-gbuffer.exr`  |
 
-- Coverage: `a = 1` on rendered pixels, `0` on background (clear color
+- Coverage: `a = 1` on rendered albedo pixels, `0` on background (clear color
   `(0,0,0,0)` lands in every MRT attachment). The engine uses this for
   hit-testing and occlusion.
+- G-buffer emptiness: background pixels are all-zero, and since the g-buffer
+  alpha is depth (not coverage), empty pixels are detected as
+  `length(normal) == 0`. Testing `a == 0` alone would be wrong — depth 0 is
+  a real value at the cube's `(0,0,0)` corner.
 - Albedo is stored sRGB-encoded (standard texture convention) — the engine
-  converts to linear at sample time. Position/normal EXRs are linear float32.
+  converts to linear at sample time. The g-buffer EXR is linear float32.
+- Precision: the MRT targets are half-float, so depth carries half precision
+  through the whole pipeline regardless of the EXR's float32 container —
+  worst-case error ≈ 0.0008 units (~0.1 px at 128 px/unit), accepted for the
+  fixed-range unit-cube layout.
 - Pixels outside the cube bounds are discarded in the fragment shader — this
   is the cube-clipping rule future CSG/authoring builds on.
 - Row order: GL readback is bottom-up; PNG gets flipped to top-down, EXR
@@ -90,15 +100,15 @@ asset alignment work is needed.
 
 Records camera angles and view direction, `pxPerUnit`, sprite size, origin,
 depth semantics/range and per-pass channel semantics
-(`format: "isoinfinity-bake/2"`; v1 stored a redundant cube-space position
-pass instead of depth).
+(`format: "isoinfinity-bake/3"`; v1 stored a redundant cube-space position
+pass instead of depth, v2 stored depth and normals as two separate EXRs).
 
 ## Current state / next steps
 
 - Done: sphere, donut, cube, cylinder, capsule and plane test primitives,
-  cube-frame camera math, MRT bake (albedo + depth + normal), PNG + EXR
+  cube-frame camera math, MRT bake (albedo + merged g-buffer), PNG + EXR
   export, debug position dump, manifest, visual pass preview.
 - Planned: supersampling (render at N× and box-downsample), multi-cube
   composite assets, geometry-level clipping (CSG) instead of shader discard,
-  KTX2/UASTC packaging for delivery (depth packs to a single 16-bit
-  channel), raytraced golden-image diff as a validator.
+  KTX2/UASTC packaging for delivery (the merged g-buffer is already in the
+  packed delivery layout), raytraced golden-image diff as a validator.

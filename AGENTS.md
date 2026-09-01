@@ -42,9 +42,9 @@ it as the reference architecture; design against it.
 
 - Bake tool (`bake.html`, `src/bake/`): bakes test primitives (sphere,
   donut, cube, cylinder, capsule, plane) into per-cube sprite passes —
-  albedo (PNG), linear ray depth + world normals (float EXR) — plus a
-  manifest (`format: isoinfinity-bake/2`). Conventions in
-  `docs/bake-pipeline.md`.
+  albedo (PNG) and a merged g-buffer (float EXR: rgb = world normals,
+  a = linear ray depth) — plus a manifest (`format: isoinfinity-bake/3`).
+  Conventions in `docs/bake-pipeline.md`.
 - Runtime editor (`index.html`, `src/runtime/`, shared math in
   `src/shared/`): bakes sprites at page load, places them freely on an
   isometric ground plane. Raw WebGL2 compositor with per-pixel sprite

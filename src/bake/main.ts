@@ -20,13 +20,11 @@ import {
 const statusEl = document.getElementById('status')!;
 const canvases = {
   albedo: document.getElementById('pass-albedo') as HTMLCanvasElement,
-  depth: document.getElementById('pass-depth') as HTMLCanvasElement,
-  normal: document.getElementById('pass-normal') as HTMLCanvasElement,
+  gbuffer: document.getElementById('pass-gbuffer') as HTMLCanvasElement,
 };
 const downloadButtons = {
   albedo: document.getElementById('dl-albedo') as HTMLButtonElement,
-  depth: document.getElementById('dl-depth') as HTMLButtonElement,
-  normal: document.getElementById('dl-normal') as HTMLButtonElement,
+  gbuffer: document.getElementById('dl-gbuffer') as HTMLButtonElement,
   debug: document.getElementById('dl-debug') as HTMLButtonElement,
   manifest: document.getElementById('dl-manifest') as HTMLButtonElement,
 };
@@ -42,6 +40,7 @@ const primitiveFactories: Record<string, () => Primitive> = {
 
 let current: Primitive = getSphere();
 let result: BakeResult | null = null;
+let gbufferMode: 'gbuffer-normal' | 'gbuffer-depth' = 'gbuffer-normal';
 
 function setStatus(text: string): void {
   statusEl.textContent = text;
@@ -52,13 +51,16 @@ function showPass(
   rgba: Float32Array,
   width: number,
   height: number,
-  mode: 'albedo' | 'depth' | 'normal',
+  mode: 'albedo' | 'gbuffer-normal' | 'gbuffer-depth',
 ): void {
   const shown = rgbaToCanvas(rgba, width, height, (r, g, b, a) => {
-    if (mode === 'normal') return [r * 0.5 + 0.5, g * 0.5 + 0.5, b * 0.5 + 0.5, a];
-    if (mode === 'depth') {
-      const t = (r - DEPTH_RANGE[0]) / (DEPTH_RANGE[1] - DEPTH_RANGE[0]);
-      return [t, t, t, a];
+    if (mode === 'gbuffer-normal' || mode === 'gbuffer-depth') {
+      const cov = Math.min(1, Math.sqrt(r * r + g * g + b * b));
+      if (mode === 'gbuffer-depth') {
+        const t = (a - DEPTH_RANGE[0]) / (DEPTH_RANGE[1] - DEPTH_RANGE[0]);
+        return [t, t, t, cov];
+      }
+      return [r * 0.5 + 0.5, g * 0.5 + 0.5, b * 0.5 + 0.5, cov];
     }
     return [r, g, b, a];
   });
@@ -73,8 +75,7 @@ function bake(): void {
   try {
     result = bakePrimitive(current);
     showPass(canvases.albedo, result.albedo, result.width, result.height, 'albedo');
-    showPass(canvases.depth, result.depth, result.width, result.height, 'depth');
-    showPass(canvases.normal, result.normal, result.width, result.height, 'normal');
+    showPass(canvases.gbuffer, result.gbuffer, result.width, result.height, gbufferMode);
     for (const b of Object.values(downloadButtons)) b.disabled = false;
     setStatus(
       `${result.label}: ${result.width}x${result.height} px @ ${result.pxPerUnit} px/unit`,
@@ -103,6 +104,18 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('button.prim')
 }
 document.getElementById('bake')!.addEventListener('click', bake);
 
+for (const button of document.querySelectorAll<HTMLButtonElement>('figcaption button')) {
+  button.addEventListener('click', () => {
+    gbufferMode = button.id === 'view-depth' ? 'gbuffer-depth' : 'gbuffer-normal';
+    for (const el of document.querySelectorAll('figcaption button')) {
+      el.classList.toggle('active', el.id === button.id);
+    }
+    if (result) {
+      showPass(canvases.gbuffer, result.gbuffer, result.width, result.height, gbufferMode);
+    }
+  });
+}
+
 downloadButtons.albedo.addEventListener('click', () => {
   if (!result) return;
   const canvas = rgbaToCanvas(result.albedo, result.width, result.height, (r, g, b, a) => [r, g, b, a]);
@@ -110,13 +123,9 @@ downloadButtons.albedo.addEventListener('click', () => {
     if (blob) download(`${result!.id}-albedo.png`, blob, 'image/png');
   });
 });
-downloadButtons.depth.addEventListener('click', () => {
+downloadButtons.gbuffer.addEventListener('click', () => {
   if (!result) return;
-  void exportExr(result.depth, result.width, result.height, `${result.id}-depth.exr`);
-});
-downloadButtons.normal.addEventListener('click', () => {
-  if (!result) return;
-  void exportExr(result.normal, result.width, result.height, `${result.id}-normal.exr`);
+  void exportExr(result.gbuffer, result.width, result.height, `${result.id}-gbuffer.exr`);
 });
 downloadButtons.debug.addEventListener('click', () => {
   if (!result) return;

@@ -50,8 +50,7 @@ function pickGround(px: number, py: number): [number, number] {
 const renderer = new Renderer(
   canvas,
   sprites.albedoLayers,
-  sprites.depthLayers,
-  sprites.normalLayers,
+  sprites.gbufferLayers,
   sprites.width,
   sprites.height,
 );

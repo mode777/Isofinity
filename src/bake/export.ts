@@ -77,7 +77,7 @@ export interface BakeManifest {
 
 export function buildManifest(result: BakeResult): BakeManifest {
   return {
-    format: 'isoinfinity-bake/2',
+    format: 'isoinfinity-bake/3',
     id: result.id,
     cube: { size: [1, 1, 1], origin: [0, 0, 0] },
     camera: {
@@ -91,7 +91,7 @@ export function buildManifest(result: BakeResult): BakeManifest {
       ],
     },
     depth: {
-      definition: 'r = dot(worldPos, viewDir), reference plane through world origin',
+      definition: 'dot(worldPos, viewDir), reference plane through world origin; stored in gbuffer alpha',
       range: [Math.round(DEPTH_RANGE[0] * 1e6) / 1e6, Math.round(DEPTH_RANGE[1] * 1e6) / 1e6],
     },
     pxPerUnit: result.pxPerUnit,
@@ -109,15 +109,10 @@ export function buildManifest(result: BakeResult): BakeManifest {
         encoding: 'png-r8-srgb',
         channels: 'rgb=albedo a=coverage',
       },
-      depth: {
-        file: `${result.id}-depth.exr`,
+      gbuffer: {
+        file: `${result.id}-gbuffer.exr`,
         encoding: 'exr-f32-linear',
-        channels: 'r=ray-depth gb=unused a=coverage',
-      },
-      normal: {
-        file: `${result.id}-normal.exr`,
-        encoding: 'exr-f32-linear',
-        channels: 'rgb=world-normal a=coverage',
+        channels: 'rgb=world-normal a=ray-depth',
       },
     },
   };
@@ -127,9 +122,9 @@ const debugPos = new Vector3();
 
 export function debugPositionCanvas(result: BakeResult): HTMLCanvasElement {
   const frame = frameIsoCube(result.pxPerUnit, PAD_PX);
-  return rgbaToCanvas(result.depth, result.width, result.height, (r, _g, _b, a, x, y) => {
-    if (a === 0) return [0, 0, 0, 0];
-    const p = reconstructWorldPos(frame, x + 0.5, y + 0.5, r, debugPos);
+  return rgbaToCanvas(result.gbuffer, result.width, result.height, (r, g, b, a, x, y) => {
+    if (r * r + g * g + b * b < 0.5) return [0, 0, 0, 0];
+    const p = reconstructWorldPos(frame, x + 0.5, y + 0.5, a, debugPos);
     return [p.x, p.y, p.z, 1];
   });
 }

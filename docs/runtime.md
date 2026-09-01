@@ -8,14 +8,14 @@ an isometric grid. Camera and bake conventions are defined in
 
 There is no asset file pipeline yet. At page load the runtime calls
 `bakePrimitive(prim, RUNTIME_PPU)` (64 px/unit) for every test primitive and
-uploads all three baked passes into WebGL2 `TEXTURE_2D_ARRAY`s: albedo +
-coverage (RGBA8, LINEAR), linear ray depth (R32F, NEAREST) and world-space
-normals (RGBA16F, NEAREST — NEAREST keeps background zero-normals from
-bleeding across silhouettes).
+uploads the two baked passes into WebGL2 `TEXTURE_2D_ARRAY`s: albedo +
+coverage (RGBA8, LINEAR) and the merged g-buffer (RGBA16F, NEAREST —
+`rgb = world-space normal`, `a = linear ray depth`; NEAREST keeps background
+zero-normals and neighboring depths from bleeding across silhouettes).
 
 Row-order warning: GL pixel readback is bottom-up and all texture arrays
 are sampled with the same UV, so **every** uploaded pass must be flipped to
-top-down (`albedoToBytes`, `depthToChannel` and `normalToHalf` all flip).
+top-down (`albedoToBytes` and `gbufferToHalf` both flip).
 A pass uploaded unflipped pairs each pixel's data with its mirrored twin —
 this exact bug made baked-depth occlusion look vertically mirrored on the
 live site.
@@ -46,7 +46,8 @@ orthographic, all projection happens once on the CPU
 2. **Sprites** — one instanced quad per placed object, painter-sorted by
    `dot(cubeCenter, viewDir)` (far → near) for blend correctness,
    alpha-blended using the baked coverage alpha, with **per-pixel
-   occlusion**: each fragment samples the baked depth texture, adds the
+   occlusion**: each fragment samples the baked g-buffer once (normals in
+   rgb for shading, depth in alpha), adds the
    per-object constant `dot(origin, viewDir)` and writes `gl_FragDepth`
    (`windowZ = 0.5 - d / 128`, see `DEPTH_LINEAR_RANGE` in the renderer);
    a LEQUAL depth buffer then resolves interpenetrations pixel-accurately,
@@ -68,7 +69,8 @@ checkerboard is a visual reference only.
 
 - `src/shared/iso.ts` — dependency-free camera constants + ground-plane
   projection/picking (single source of truth, shared with the bake tool)
-- `src/runtime/assets.ts` — bake-at-boot sprite set (all three passes)
+- `src/runtime/assets.ts` — bake-at-boot sprite set (albedo + merged
+  g-buffer)
 - `src/runtime/renderer.ts` — WebGL2 batches, per-pixel occlusion + shading
 - `src/runtime/world.ts` — placement state, depth sort, footprint erase
 - `src/runtime/main.ts` — camera-to-canvas mapping, input, toolbar, light

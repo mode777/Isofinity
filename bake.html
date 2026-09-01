@@ -57,6 +57,11 @@
         font-size: 0.85rem;
         margin-top: 0.4rem;
       }
+      figcaption button {
+        padding: 0.1rem 0.5rem;
+        font-size: 0.75rem;
+        margin-left: 0.35rem;
+      }
       canvas {
         width: 240px;
         border: 1px solid #333;
@@ -68,11 +73,11 @@
   <body>
     <h1>Isofinity — Bake Tool</h1>
     <p>
-      Bakes a primitive into per-cube sprite passes: albedo (sRGB PNG),
-      linear ray depth and world-space normal (float EXR), each with a
-      coverage alpha channel. World position is reconstructible from pixel +
-      depth via the fixed camera; a debug PNG dumps the reconstructed
-      cube-space position for validation.
+      Bakes a primitive into per-cube sprite passes: albedo (sRGB PNG) and a
+      merged g-buffer (float EXR: rgb = world-space normal, a = linear ray
+      depth). World position is reconstructible from pixel + depth via the
+      fixed camera; a debug PNG dumps the reconstructed cube-space position
+      for validation.
     </p>
     <div class="controls">
       <button id="prim-sphere" class="prim active" data-primitive="sphere">Sphere</button>
@@ -90,18 +95,17 @@
         <figcaption>albedo.png — sRGB color + coverage</figcaption>
       </figure>
       <figure>
-        <canvas id="pass-depth"></canvas>
-        <figcaption>depth.exr — linear ray depth dot(p, viewDir)</figcaption>
-      </figure>
-      <figure>
-        <canvas id="pass-normal"></canvas>
-        <figcaption>normal.exr — world-space normals (visualized 0..1)</figcaption>
+        <canvas id="pass-gbuffer"></canvas>
+        <figcaption>
+          gbuffer.exr — rgb=world-normal, a=ray-depth
+          <button id="view-normal" class="active">normal</button>
+          <button id="view-depth">depth</button>
+        </figcaption>
       </figure>
     </div>
     <div class="controls">
       <button id="dl-albedo" disabled>Download albedo.png</button>
-      <button id="dl-depth" disabled>Download depth.exr</button>
-      <button id="dl-normal" disabled>Download normal.exr</button>
+      <button id="dl-gbuffer" disabled>Download gbuffer.exr</button>
       <button id="dl-debug" disabled>Download position-debug.png</button>
       <button id="dl-manifest" disabled>Download bake.json</button>
     </div>

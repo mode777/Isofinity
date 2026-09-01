@@ -58,8 +58,7 @@ const SPRITE_FRAG = `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
 uniform sampler2DArray uSprites;
-uniform sampler2DArray uDepths;
-uniform sampler2DArray uNormals;
+uniform sampler2DArray uGbuffer;
 uniform float uDepthA;
 uniform float uDepthB;
 in vec2 vUv;
@@ -70,10 +69,10 @@ ${SHADE_CHUNK}
 void main() {
   vec4 c = texture(uSprites, vec3(vUv, vLayer));
   if (c.a < 0.01) discard;
-  float d = texture(uDepths, vec3(vUv, vLayer)).r + vDepthOff;
+  vec4 g = texture(uGbuffer, vec3(vUv, vLayer));
+  float d = g.a + vDepthOff;
   gl_FragDepth = uDepthA * d + uDepthB;
-  vec3 N = texture(uNormals, vec3(vUv, vLayer)).rgb;
-  outColor = vec4(shade(c.rgb, N), c.a);
+  outColor = vec4(shade(c.rgb, g.rgb), c.a);
 }
 `;
 
@@ -111,8 +110,7 @@ export class Renderer {
   private flatProg: WebGLProgram;
   private spriteProg: WebGLProgram;
   private tex: WebGLTexture;
-  private depthTex: WebGLTexture;
-  private normalTex: WebGLTexture;
+  private gbufferTex: WebGLTexture;
   private groundVao: WebGLVertexArrayObject;
   private groundVbo: WebGLBuffer;
   private highlightVao: WebGLVertexArrayObject;
@@ -138,8 +136,7 @@ export class Renderer {
   constructor(
     canvas: HTMLCanvasElement,
     albedoLayers: Uint8Array[],
-    depthLayers: Float32Array[],
-    normalLayers: Uint16Array[],
+    gbufferLayers: Uint16Array[],
     layerWidth: number,
     layerHeight: number,
   ) {
@@ -211,55 +208,21 @@ export class Renderer {
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-    this.depthTex = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.depthTex);
-    gl.texImage3D(
-      gl.TEXTURE_2D_ARRAY,
-      0,
-      gl.R32F,
-      layerWidth,
-      layerHeight,
-      depthLayers.length,
-      0,
-      gl.RED,
-      gl.FLOAT,
-      null,
-    );
-    depthLayers.forEach((data, i) => {
-      gl.texSubImage3D(
-        gl.TEXTURE_2D_ARRAY,
-        0,
-        0,
-        0,
-        i,
-        layerWidth,
-        layerHeight,
-        1,
-        gl.RED,
-        gl.FLOAT,
-        data,
-      );
-    });
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-    this.normalTex = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.normalTex);
+    this.gbufferTex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.gbufferTex);
     gl.texImage3D(
       gl.TEXTURE_2D_ARRAY,
       0,
       gl.RGBA16F,
       layerWidth,
       layerHeight,
-      normalLayers.length,
+      gbufferLayers.length,
       0,
       gl.RGBA,
       gl.HALF_FLOAT,
       null,
     );
-    normalLayers.forEach((data, i) => {
+    gbufferLayers.forEach((data, i) => {
       gl.texSubImage3D(
         gl.TEXTURE_2D_ARRAY,
         0,
@@ -320,8 +283,7 @@ export class Renderer {
 
     gl.bindVertexArray(null);
     gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uSprites')!, 0);
-    gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uDepths')!, 1);
-    gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uNormals')!, 2);
+    gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uGbuffer')!, 1);
 
     gl.disable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
@@ -369,9 +331,7 @@ export class Renderer {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex);
       gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.depthTex);
-      gl.activeTexture(gl.TEXTURE2);
-      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.normalTex);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.gbufferTex);
       gl.bindVertexArray(this.spriteVao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.instVbo);
       gl.bufferData(gl.ARRAY_BUFFER, instances, gl.DYNAMIC_DRAW);

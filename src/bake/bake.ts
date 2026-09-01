@@ -35,8 +35,7 @@ export interface BakeResult {
   originPx: [number, number];
   camera: { azimuthDeg: number; elevationDeg: number; viewDir: [number, number, number] };
   albedo: Float32Array;
-  depth: Float32Array;
-  normal: Float32Array;
+  gbuffer: Float32Array;
 }
 
 const VERTEX_SHADER = `
@@ -61,8 +60,7 @@ uniform vec3 uCubeMax;
 uniform vec3 uViewDir;
 
 layout(location = 0) out vec4 outAlbedo;
-layout(location = 1) out vec4 outDepth;
-layout(location = 2) out vec4 outNormal;
+layout(location = 1) out vec4 outGbuffer;
 
 void main() {
   vec3 cubePos = (vWorldPos - uCubeMin) / (uCubeMax - uCubeMin);
@@ -70,8 +68,7 @@ void main() {
     discard;
   }
   outAlbedo = vec4(uAlbedo, 1.0);
-  outDepth = vec4(dot(vWorldPos, uViewDir), 0.0, 0.0, 1.0);
-  outNormal = vec4(normalize(vWorldNormal), 1.0);
+  outGbuffer = vec4(normalize(vWorldNormal), dot(vWorldPos, uViewDir));
 }
 `;
 
@@ -115,7 +112,7 @@ export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT):
   const { width, height } = frame;
 
   const target = new WebGLRenderTarget(width, height, {
-    count: 3,
+    count: 2,
     type: HalfFloatType,
     format: RGBAFormat,
     minFilter: NearestFilter,
@@ -146,8 +143,7 @@ export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT):
   r.render(scene, frame.camera);
 
   const albedo = readAttachment(r, target, 0, width, height);
-  const depth = readAttachment(r, target, 1, width, height);
-  const normal = readAttachment(r, target, 2, width, height);
+  const gbuffer = readAttachment(r, target, 1, width, height);
 
   r.setRenderTarget(null);
   target.dispose();
@@ -168,7 +164,6 @@ export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT):
       viewDir: [ISO_VIEW_DIR.x, ISO_VIEW_DIR.y, ISO_VIEW_DIR.z],
     },
     albedo,
-    depth,
-    normal,
+    gbuffer,
   };
 }
