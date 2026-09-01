@@ -7,7 +7,24 @@ import {
   SphereGeometry,
   TorusGeometry,
 } from 'three';
+import type { Texture } from 'three';
 import type { Vec3 } from '../shared/iso.js';
+
+/**
+ * One draw call of a bake: a geometry plus the albedo source for its
+ * material. Primitive sources have no `groups` (single flat-color draw);
+ * glTF sources provide one group per material.
+ */
+export interface MaterialGroup {
+  geometry: BufferGeometry;
+  /** Base-color texture in sRGB, or null to use `baseColorFactor` alone. */
+  albedoTexture: Texture | null;
+  /** Linear RGBA multiplier applied to the sampled texture texels. */
+  baseColorFactor: [number, number, number, number];
+  /** `mask` discards texels below `alphaCutoff`; `opaque` bakes everything. */
+  alphaMode: 'opaque' | 'mask';
+  alphaCutoff: number;
+}
 
 export interface Primitive {
   id: string;
@@ -15,6 +32,13 @@ export interface Primitive {
   albedoHex: number;
   size: Vec3;
   geometry: BufferGeometry;
+  /** When present, the bake draws these groups instead of `geometry`. */
+  groups?: MaterialGroup[];
+  /**
+   * Uniform scale already included in `size` (glTF sources). Applied as the
+   * mesh scale at bake time; primitives keep it at 1.
+   */
+  scale?: number;
 }
 
 let sphere: Primitive | null = null;

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Isofinity — glTF bake verification (scratch)</title>
+    <style>
+      body { font-family: system-ui, sans-serif; background: #14161a; color: #ddd; max-width: 60rem; margin: 2rem auto; padding: 0 1rem; }
+      pre { white-space: pre-wrap; }
+      .pass { color: #7dc47f; }
+      .fail { color: #e07a7a; }
+    </style>
+  </head>
+  <body>
+    <h1>glTF bake verification (scratch page)</h1>
+    <p>Run inside the bake tool's dev server (<code>npx dev</code> → <code>/scratch-verify.html</code>). Checks textured albedo, .gltf ≡ .glb, alpha masking, bundle round-trip, and glTF normal baking; prints primitive bundle hashes for the pre/post-change regression diff.</p>
+    <pre id="out"></pre>
+    <script type="module" src="/src/bake/scratch-verify.ts"></script>
+  </body>
+</html>

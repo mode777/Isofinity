@@ -1,11 +1,12 @@
 # Bake pipeline
 
-How Isofinity assets are authored: a primitive (or later, arbitrary geometry)
-is rendered once from the fixed isometric camera into per-pixel data passes
-and stored as a sprite set plus a manifest.
+How Isofinity assets are authored: a primitive (or a glTF model) is rendered
+once from the fixed isometric camera into per-pixel data passes and stored as
+a sprite set plus a manifest.
 
 Run `npm run dev` and open `/bake.html` (also built to `dist/bake.html`).
-Pick a primitive, hit Bake, inspect the passes, download the bundle.
+Pick a primitive or load a glTF file, hit Bake, inspect the passes, download
+the bundle.
 
 ## Conventions
 
@@ -37,6 +38,35 @@ Pick a primitive, hit Bake, inspect the passes, download the bundle.
 - The **g-buffer pass** stores world-space normals. Boxes are axis-aligned,
   so asset-local and world normals are identical; only the position offset
   differs per asset.
+
+### glTF sources
+
+- **Load**: a self-contained `.glb`, or a plain `.gltf` whose external
+  `.bin` buffer and texture images are provided together with it
+  (multi-select or drag-drop onto "Load glTF"); resources resolve by
+  percent-decoded relative path, falling back to a unique basename match —
+  ambiguity or absence is a named error, never a guess.
+- **Scope**: static meshes only. Skins, animations, and multi-material
+  meshes are skipped with a status note; DRACO, Meshopt, and KTX2/Basis
+  payloads are rejected by name (no decoder dependencies).
+- **Placement**: the model is translated so its bounding-box minimum corner
+  sits at `(0,0,0)`; native dimensions are preserved. A uniform scale
+  control rescales at bake time (applied as the mesh transform, so the box
+  still starts at the origin); `cube.size` records the scaled extent. A
+  projected sprite larger than 8192 px on either axis is rejected — scale
+  the model down.
+- **Geometry**: each material's meshes are merged into one draw group
+  (world transforms baked in); meshes without normals are rejected — the
+  g-buffer needs real normals and never derives them from depth.
+- **Albedo**: per pixel, the material's base-color texture (sRGB-decoded at
+  sample time) multiplied by the linear base-color factor, re-encoded to
+  sRGB before storage — matching the primitive flat-color path, which writes
+  sRGB hex values as-is. Materials without a texture bake their factor as a
+  flat color.
+- **Coverage**: glTF `MASK` materials discard fragments whose sampled alpha
+  (× factor alpha) falls below the alpha cutoff, so those pixels read as
+  empty in both passes (hit-testing/occlusion stay correct); `BLEND`
+  materials bake opaque.
 
 ### Depth instead of position
 
@@ -139,7 +169,14 @@ ship as files.
   test primitives, box-frame camera math (arbitrary cuboids), MRT bake
   (albedo + merged g-buffer), PNG + EXR export, single-file zip bundle,
   debug position dump, manifest, visual pass preview.
+- Done: glTF sources (`.glb` and `.gltf` + `.bin` + textures) — static
+  meshes only, per-material merged draw groups, textured albedo (sRGB
+  texture × linear factor), alpha-mask coverage, origin normalization with
+  a UI uniform-scale control, compressed-payload rejection, same
+  `isoinfinity-bake/3` bundle output. `scratch-verify.html` (dev server)
+  exercises the GPU-side checks and prints primitive bundle hashes.
 - Planned: supersampling (render at N× and box-downsample), multi-cube
   composite assets, geometry-level clipping (CSG) instead of shader discard,
   KTX2/UASTC packaging for delivery (the merged g-buffer is already in the
-  packed delivery layout), raytraced golden-image diff as a validator.
+  packed delivery layout), raytraced golden-image diff as a validator,
+  Draco/Meshopt/KTX2 decode for glTF inputs, skinned bind-pose extraction.

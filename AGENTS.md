@@ -27,6 +27,10 @@ it as the reference architecture; design against it.
 
 - TypeScript, rendering via WebGL2. Do not assume or introduce WebGPU or
   another backend.
+- Do not try to run headless chrome or any other browser for verification.
+  This environment cannot launch one; verify what is verifiable statically
+  (`npm run build`, Node-runnable logic) and leave browser checks to the
+  user.
 - Vite for dev/build; site hosted on GitHub Pages
   (https://mode777.github.io/Isofinity/), deployed by
   `.github/workflows/deploy.yml` on every push to `main`.

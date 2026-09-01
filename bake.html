@@ -39,6 +39,27 @@
         opacity: 0.4;
         cursor: default;
       }
+      .gltf-extra {
+        align-self: center;
+        color: #8a8f98;
+        font-size: 0.85rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+      .gltf-extra input {
+        width: 4.5rem;
+        background: #23262d;
+        color: #ddd;
+        border: 1px solid #3a3f4a;
+        border-radius: 4px;
+        padding: 0.25rem 0.4rem;
+      }
+      #source-name {
+        align-self: center;
+        color: #8a8f98;
+        font-size: 0.85rem;
+      }
       #status {
         color: #8a8f98;
         min-height: 1.4em;
@@ -73,11 +94,11 @@
   <body>
     <h1>Isofinity — Bake Tool</h1>
     <p>
-      Bakes a primitive into per-cube sprite passes: albedo (sRGB PNG) and a
-      merged g-buffer (float EXR: rgb = world-space normal, a = linear ray
-      depth). World position is reconstructible from pixel + depth via the
-      fixed camera; a debug PNG dumps the reconstructed cube-space position
-      for validation.
+      Bakes a primitive or glTF model into per-asset sprite passes: albedo
+      (sRGB PNG) and a merged g-buffer (float EXR: rgb = world-space normal,
+      a = linear ray depth). World position is reconstructible from pixel +
+      depth via the fixed camera; a debug PNG dumps the reconstructed
+      cube-space position for validation.
     </p>
     <div class="controls">
       <button id="prim-sphere" class="prim active" data-primitive="sphere">Sphere</button>
@@ -87,6 +108,13 @@
       <button id="prim-capsule" class="prim" data-primitive="capsule">Capsule</button>
       <button id="prim-plane" class="prim" data-primitive="plane">Plane</button>
       <button id="prim-slab" class="prim" data-primitive="slab">Slab</button>
+      <button id="load-gltf" title="Pick a .glb, or a .gltf together with its .bin and texture files (also accepts drag-drop)">Load glTF…</button>
+      <input id="gltf-file" type="file" accept=".glb,.gltf,.bin,.png,.jpg,.jpeg,.webp" multiple hidden />
+      <label class="gltf-extra"
+        >scale
+        <input id="gltf-scale" type="number" value="1" min="0.01" step="0.25" />
+      </label>
+      <span id="source-name"></span>
       <button id="bake">Bake</button>
     </div>
     <p id="status"></p>
