@@ -39,6 +39,22 @@
         opacity: 0.4;
         cursor: default;
       }
+      select {
+        background: #23262d;
+        color: #ddd;
+        border: 1px solid #3a3f4a;
+        border-radius: 4px;
+        padding: 0.3rem 0.4rem;
+        font-size: 0.9rem;
+        max-width: 14rem;
+      }
+      select:disabled {
+        opacity: 0.4;
+      }
+      button.refresh {
+        padding: 0.4rem 0.55rem;
+        font-size: 0.9rem;
+      }
       .gltf-extra {
         align-self: center;
         color: #8a8f98;
@@ -107,6 +123,7 @@
       camera; a debug PNG dumps the reconstructed cube-space position for
       validation.
     </p>
+    <div id="workspace" class="controls"></div>
     <div class="controls">
       <button id="prim-sphere" class="prim active" data-primitive="sphere">Sphere</button>
       <button id="prim-donut" class="prim" data-primitive="donut">Donut</button>
@@ -117,6 +134,8 @@
       <button id="prim-slab" class="prim" data-primitive="slab">Slab</button>
       <button id="load-gltf" title="Pick a .glb, or a .gltf together with its .bin and texture files (also accepts drag-drop)">Load glTF…</button>
       <input id="gltf-file" type="file" accept=".glb,.gltf,.bin,.png,.jpg,.jpeg,.webp" multiple hidden />
+      <select id="ws-model" hidden title="Models from the workspace's models/ folder"></select>
+      <button id="ws-model-refresh" class="refresh" hidden title="Re-read the workspace's models/ folder">↻</button>
       <label class="gltf-extra"
         >scale
         <input id="gltf-scale" type="number" value="1" min="0.01" step="0.25" />
@@ -128,6 +147,8 @@
       <span class="gltf-extra">path-traced passes:</span>
       <button id="load-hdri" title="Pick an equirectangular .hdr or .exr environment; it lights the render pass (drag-drop works too)">Load HDRI…</button>
       <input id="hdri-file" type="file" accept=".hdr,.exr" hidden />
+      <select id="ws-hdri" hidden title="Environments from the workspace's hdri/ folder"></select>
+      <button id="ws-hdri-refresh" class="refresh" hidden title="Re-read the workspace's hdri/ folder">↻</button>
       <span id="hdri-name"></span>
       <button id="bake-render" disabled title="Path-traced HDRI-lit render pass (ACES tone-mapped)">Bake render</button>
       <button id="bake-ao" disabled title="KNOWN BROKEN — accumulates empty output on some drivers; slated for rework with a different approach">Bake AO (broken)</button>
@@ -185,7 +206,7 @@
       </figure>
     </div>
     <div class="controls">
-      <button id="dl-bundle" disabled>Download bake.zip</button>
+      <button id="dl-bundle" disabled>Download bundle (.sprite)</button>
       <button id="dl-debug" disabled>Download position-debug.png</button>
     </div>
     <script type="module" src="/src/bake/main.ts"></script>

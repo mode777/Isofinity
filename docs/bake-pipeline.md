@@ -8,10 +8,25 @@ GPU path tracer (`three-gpu-pathtracer`) for the optional lit `render` and
 `ao` passes.
 
 Run `npm run dev` and open `/bake.html` (also built to `dist/bake.html`).
-Pick a primitive or load a glTF file, hit Bake, inspect the passes, download
-the bundle. With an HDRI environment loaded (drag-drop an equirect `.hdr`)
-you can also bake the path-traced render and AO passes; environment and pass
-settings sit below the source controls.
+Pick a primitive or load a glTF file, hit Bake, inspect the passes, save the
+bundle (into a connected workspace folder, or as a browser download). With an
+HDRI environment loaded (drag-drop an equirect `.hdr`, or pick one from the
+workspace) you can also bake the path-traced render and AO passes;
+environment and pass settings sit below the source controls.
+
+### Workspace folder
+
+Both tools can bind a local folder through the File System Access API
+("Open workspace…"): the picked folder is expected to hold (and is created
+with, if missing) the convention subfolders `hdri/`, `models/`, `sprites/`,
+`worlds/`. The connection is remembered locally (IndexedDB), so a reload
+only needs one permission click ("Reconnect workspace…"). While connected,
+"Load glTF…" and "Load HDRI…" gain dropdown listings of `models/` and
+`hdri/` (a `.gltf`'s external resources resolve against the folder's
+contents), and the bundle save writes `sprites/<id>.sprite` directly.
+Without a workspace — or in browsers without the API (Firefox/Safari) —
+everything falls back to file dialogs and downloads exactly as before
+(feature-detected, never UA-sniffed).
 
 ## Conventions
 
@@ -200,13 +215,17 @@ g-buffer; v4 adds the optional path-traced passes plus `environment` /
 `renderer` provenance blocks — the g-buffer EXR and albedo PNG keep the v3
 byte conventions exactly).
 
-### Bundle (`<id>-bake.zip`)
+### Bundle (`<id>.sprite`)
 
 The bake tool ships all parts as a single deflate zip (written with fflate —
-three's vendored copy, no extra dependency):
+three's vendored copy, no extra dependency). The file is named with the
+`.sprite` extension — the bytes are an ordinary zip — so operating systems
+(macOS in particular) do not auto-extract it on download; legacy
+`<id>-bake.zip` files from earlier versions keep loading unchanged since
+the parser never looked at extensions:
 
 ```
-<id>-bake.zip
+<id>.sprite
 ├─ manifest.json          deflated
 ├─ <id>-albedo.png        stored (PNG is already compressed)
 ├─ <id>-gbuffer.exr       deflated (raw float + zero padding compress well)
@@ -223,7 +242,8 @@ primitive with the same settings yields identical bytes. `parseBake()`
 prefix (`/3` and `/4` accepted, anything else rejected by name), resolve
 entries via the manifest, return Blobs ready for the PNG/EXR decoders, and
 expose which optional passes are present. The runtime editor consumes
-bundles through **Load zip**.
+bundles through **Load sprite** (file dialog or the workspace `sprites/`
+listing).
 
 ## Current state / next steps
 
@@ -243,6 +263,12 @@ bundles through **Load zip**.
   exposure, full PBR materials for glTF sources, ACES export identical to
   the preview, deterministic accumulation, bundle format `isoinfinity-bake/4`
   with optional passes and provenance blocks.
+- Done: workspace folders (File System Access API, shared with the runtime
+  via `src/shared/workspace.ts`) — `hdri/ models/ sprites/ worlds/`
+  convention, workspace-backed model/HDRI pickers, bundle saves to
+  `sprites/<id>.sprite`, `.sprite` bundle naming everywhere (bytes
+  unchanged), IndexedDB handle persistence with one-click reconnect,
+  graceful degradation to dialogs/downloads elsewhere.
 - Broken: the path-traced `ao` pass accumulates empty output despite healthy
   per-frame renders (see the AO section above) — labeled broken in the UI,
   slated for replacement with a different approach.

@@ -21,6 +21,16 @@ import {
   type Primitive,
 } from './primitives.js';
 import { APP_VERSION } from '../version.js';
+import {
+  BUNDLE_EXT,
+  initWorkspace,
+  listWorkspaceFiles,
+  readAllWorkspaceFiles,
+  readWorkspaceFile,
+  writeWorkspaceFile,
+  type WorkspaceState,
+} from '../shared/workspace.js';
+import { mountWorkspaceControl, fillSelect } from '../shared/workspace-ui.js';
 
 const statusEl = document.getElementById('status')!;
 document.getElementById('app-version')!.textContent = APP_VERSION;
@@ -43,6 +53,10 @@ const hdriInput = document.getElementById('hdri-file') as HTMLInputElement;
 const hdriNameEl = document.getElementById('hdri-name') as HTMLSpanElement;
 const renderButton = document.getElementById('bake-render') as HTMLButtonElement;
 const aoButton = document.getElementById('bake-ao') as HTMLButtonElement;
+const wsModelSelect = document.getElementById('ws-model') as HTMLSelectElement;
+const wsModelRefresh = document.getElementById('ws-model-refresh') as HTMLButtonElement;
+const wsHdriSelect = document.getElementById('ws-hdri') as HTMLSelectElement;
+const wsHdriRefresh = document.getElementById('ws-hdri-refresh') as HTMLButtonElement;
 
 const primitiveFactories: Record<string, () => Primitive> = {
   sphere: getSphere,
@@ -353,13 +367,17 @@ gltfButton.addEventListener('click', () => gltfInput.click());
 gltfInput.addEventListener('change', () => {
   const files = [...(gltfInput.files ?? [])];
   gltfInput.value = '';
+  wsModelSelect.value = '';
   if (files.length > 0) void loadGltfFiles(files);
 });
 gltfButton.addEventListener('dragover', (e) => e.preventDefault());
 gltfButton.addEventListener('drop', (e) => {
   e.preventDefault();
   const files = [...(e.dataTransfer?.files ?? [])];
-  if (files.length > 0) void loadGltfFiles(files);
+  if (files.length > 0) {
+    wsModelSelect.value = '';
+    void loadGltfFiles(files);
+  }
 });
 
 gltfScaleInput.addEventListener('change', () => {
@@ -379,16 +397,93 @@ hdriButton.addEventListener('click', () => hdriInput.click());
 hdriInput.addEventListener('change', () => {
   const file = hdriInput.files?.[0];
   hdriInput.value = '';
+  wsHdriSelect.value = '';
   if (file) void loadHdriFile(file);
 });
 hdriButton.addEventListener('dragover', (e) => e.preventDefault());
 hdriButton.addEventListener('drop', (e) => {
   e.preventDefault();
   const file = e.dataTransfer?.files[0];
-  if (file) void loadHdriFile(file);
+  if (file) {
+    wsHdriSelect.value = '';
+    void loadHdriFile(file);
+  }
 });
 renderButton.addEventListener('click', () => void runRenderPass());
 aoButton.addEventListener('click', () => void runAoPass());
+
+// Workspace integration: pickers browse the connected folder's assets.
+let wsConnected = false;
+
+const MODEL_EXTS = ['.glb', '.gltf'];
+const HDRI_EXTS = ['.hdr', '.exr'];
+
+async function refreshModelPicker(): Promise<void> {
+  try {
+    fillSelect(wsModelSelect, await listWorkspaceFiles('models', MODEL_EXTS), 'workspace models…');
+  } catch (err) {
+    setStatus(`Workspace: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+async function loadWorkspaceModel(): Promise<void> {
+  const name = wsModelSelect.value;
+  if (!name) return;
+  setStatus(`Loading ${name}…`);
+  try {
+    const files = await readAllWorkspaceFiles('models', MODEL_EXTS);
+    const selected = files.find((f) => f.name === name);
+    if (!selected) throw new Error(`"${name}" is no longer in the models/ folder`);
+    // Exactly one model file plus the folder's supporting files, so
+    // multi-file .gltf external resources resolve against models/.
+    const others = files.filter((f) => f !== selected && !/\.(glb|gltf)$/i.test(f.name));
+    await loadGltfFiles([selected, ...others]);
+  } catch (err) {
+    setStatus(`Model load failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(err);
+  }
+}
+
+async function refreshHdriPicker(): Promise<void> {
+  try {
+    fillSelect(wsHdriSelect, await listWorkspaceFiles('hdri', HDRI_EXTS), 'workspace hdris…');
+  } catch (err) {
+    setStatus(`Workspace: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+async function loadWorkspaceHdri(): Promise<void> {
+  const name = wsHdriSelect.value;
+  if (!name) return;
+  try {
+    await loadHdriFile(await readWorkspaceFile('hdri', name));
+  } catch (err) {
+    setStatus(`HDRI load failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(err);
+  }
+}
+
+function setWorkspaceUi(state: WorkspaceState): void {
+  wsConnected = state.kind === 'connected';
+  const show = wsConnected;
+  wsModelSelect.hidden = !show;
+  wsModelRefresh.hidden = !show;
+  wsHdriSelect.hidden = !show;
+  wsHdriRefresh.hidden = !show;
+  downloadButtons.bundle.textContent = wsConnected
+    ? 'Save bundle to workspace'
+    : `Download bundle (${BUNDLE_EXT})`;
+  if (show) {
+    void refreshModelPicker();
+    void refreshHdriPicker();
+  }
+}
+
+wsModelSelect.addEventListener('change', () => void loadWorkspaceModel());
+wsModelRefresh.addEventListener('click', () => void refreshModelPicker());
+wsHdriSelect.addEventListener('change', () => void loadWorkspaceHdri());
+wsHdriRefresh.addEventListener('click', () => void refreshHdriPicker());
+
 
 // Environment changes restart the render pass accumulation (spec) once a
 // render pass exists; pass settings apply on the next manual bake.
@@ -424,11 +519,19 @@ downloadButtons.bundle.addEventListener('click', () => {
           settings: ptRender || ptAo ? ptSettings : undefined,
         }
       : undefined;
+  const name = `${current.id}${BUNDLE_EXT}`;
   void buildBundle(current, extras)
-    .then((bytes) => download(`${current.id}-bake.zip`, bytes, 'application/zip'))
+    .then(async (bytes) => {
+      if (wsConnected) {
+        await writeWorkspaceFile('sprites', name, bytes);
+        setStatus(`Saved sprites/${name} to the workspace`);
+      } else {
+        download(name, bytes, 'application/zip');
+      }
+    })
     .catch((err) => {
       console.error(err);
-      setStatus(`Bundle failed: ${err instanceof Error ? err.message : String(err)}`);
+      setStatus(`Bundle save failed: ${err instanceof Error ? err.message : String(err)}`);
     });
 });
 downloadButtons.debug.addEventListener('click', () => {
@@ -437,5 +540,11 @@ downloadButtons.debug.addEventListener('click', () => {
     if (blob) download(`${result!.id}-position-debug.png`, blob, 'image/png');
   });
 });
+
+mountWorkspaceControl(document.getElementById('workspace')!, {
+  onStatus: setStatus,
+  onState: setWorkspaceUi,
+});
+void initWorkspace();
 
 bake();

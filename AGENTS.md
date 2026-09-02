@@ -64,18 +64,23 @@ it as the reference architecture; design against it.
   donut, cube, cylinder, capsule, plane, slab) and glTF models into
   per-asset sprite passes — albedo (PNG), a merged g-buffer (float EXR:
   rgb = world normals, a = linear ray depth), and an optional path-traced
-  `render` pass (HDRI-lit, ACES) — shipped as a zip bundle with a
-  manifest (`format: isoinfinity-bake/4`). Arbitrary cuboids bake directly;
-  the 1×1×1 cube is just the default cell. Conventions in
-  `docs/bake-pipeline.md`. The path-traced `ao` pass is KNOWN BROKEN
-  (accumulates empty output) and will be replaced with a different
-  approach in a future change.
+  `render` pass (HDRI-lit, ACES) — shipped as a zip-byte bundle named
+  `<id>.sprite` with a manifest (`format: isoinfinity-bake/4`). Arbitrary
+  cuboids bake directly; the 1×1×1 cube is just the default cell. Both
+  tools can bind a workspace folder (File System Access API,
+  `src/shared/workspace.ts`; convention: `hdri/`, `models/`, `sprites/`,
+  `worlds/`) to load and save assets in place, with dialogs/downloads as
+  fallback. Conventions in `docs/bake-pipeline.md`. The path-traced `ao`
+  pass is KNOWN BROKEN (accumulates empty output) and will be replaced
+  with a different approach in a future change.
 - Runtime editor (`index.html`, `src/runtime/`, shared math in
   `src/shared/`): bakes sprites at page load, places them freely on an
-  isometric ground plane, and loads extra objects from bake zip bundles.
-  Raw WebGL2 compositor with per-pixel sprite occlusion, deferred-style
-  directional lighting (key + ambient, shades the baked albedo/normal
-  G-buffer), per-sprite baked/unlit display modes, and a global
-  dynamic-light switch. See `docs/runtime.md`.
+  isometric ground plane, and loads extra objects from `.sprite` bundles
+  (dialog or workspace `sprites/` listing); worlds (placements + light
+  state) save/load as `isoinfinity-world/1` JSON in the workspace's
+  `worlds/` folder. Raw WebGL2 compositor with per-pixel sprite occlusion,
+  deferred-style directional lighting (key + ambient, shades the baked
+  albedo/normal G-buffer), per-sprite baked/unlit display modes, and a
+  global dynamic-light switch. See `docs/runtime.md`.
 - No released API: expect breaking changes while the architecture is under
   design.

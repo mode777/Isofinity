@@ -6,44 +6,70 @@ an isometric grid. Camera and bake conventions are defined in
 
 ## Assets
 
-There is no asset file pipeline yet. At page load the runtime bakes every
-test primitive itself, asynchronously ("Baking sprites…" shows in the
-status line): `bakePrimitive(prim, RUNTIME_PPU)` (64 px/unit) produces the
-merged g-buffer (RGBA16F, NEAREST — `rgb = world-space normal`, `a =
-linear ray depth`; NEAREST keeps background zero-normals and neighboring
-depths from bleeding across silhouettes), and `PtBaker` path-traces the
-lit render pass (32 samples, 5 bounces) lit by a **built-in procedural
-environment** — an equirect gradient sky with a warm sun disc aimed at the
-default key light direction, so no HDRI asset is needed and boot bakes are
-reproducible. The runtime uploads two WebGL2 `TEXTURE_2D_ARRAY`s: the
-render pass (RGBA8, LINEAR) and the g-buffer. Assets may be arbitrary
-cuboids, so sprites differ in pixel size: every layer is padded into a
-shared max-size rect (sprite data anchored bottom-left, zero padding
-elsewhere), and each sprite's pixel size + origin travel out of the
-uniforms — quad size, UV window and origin offset are per-instance/per-
-layer data now. UVs are computed from texel centers
+At page load the runtime bakes every test primitive itself, asynchronously
+("Baking sprites…" shows in the status line): `bakePrimitive(prim,
+RUNTIME_PPU)` (64 px/unit) produces the merged g-buffer (RGBA16F, NEAREST —
+`rgb = world-space normal`, `a = linear ray depth`; NEAREST keeps background
+zero-normals and neighboring depths from bleeding across silhouettes), and
+`PtBaker` path-traces the lit render pass (32 samples, 5 bounces) lit by a
+**built-in procedural environment** — an equirect gradient sky with a warm
+sun disc aimed at the default key light direction, so no HDRI asset is
+needed and boot bakes are reproducible. The runtime uploads two WebGL2
+`TEXTURE_2D_ARRAY`s: the render pass (RGBA8, LINEAR) and the g-buffer.
+Assets may be arbitrary cuboids, so sprites differ in pixel size: every
+layer is padded into a shared max-size rect (sprite data anchored
+bottom-left, zero padding elsewhere), and each sprite's pixel size + origin
+travel out of the uniforms — quad size, UV window and origin offset are
+per-instance/per-layer data now. UVs are computed from texel centers
 (`mix(0.5, size - 0.5, corner) / maxSize`) so LINEAR-filtered render texels
 never bleed across the padding boundary.
 
-### Loading zip bundles
+### Workspace folder
 
-The editor's **Load zip** button ingests bundles downloaded from the bake
-tool: `parseBake()` unpacks manifest + passes (formats `isoinfinity-bake/3`
-and `/4` accepted; anything else is rejected by name), the render PNG
-decodes via `createImageBitmap` and the EXR via `EXRLoader.parse`. A bundle
-**must** carry the render pass — `/3` bundles and `/4` bundles without one
-fail with a named error, because the runtime has no other way to display a
-sprite. Row order differs per decoder and both must end top-down (row 0 =
-sprite top) for upload: the PNG decodes top-down and is padded **as-is**,
-while `EXRLoader` writes rows bottom-up in GL texture order (it re-flips
-the file's top-down scanlines for `flipY:false` DataTextures) — so the EXR
-gets the **same flip as a boot bake**. Getting this wrong mirrors the
-object vertically; the two decoders are deliberately asymmetric. Loaded
-layers re-pad the whole set (max size may grow, `Renderer.setSprites`
-rebuilds all texture arrays), get a toolbar tool button, and are placed
-once immediately. Per-layer `pxPerUnit` from the manifest drives the
-instance scale, so bundles baked at any resolution land at the correct
-world size.
+The editor shares the bake tool's workspace convention (see
+`docs/bake-pipeline.md`; module: `src/shared/workspace.ts`): after
+"Open workspace…" (or one-click "Reconnect workspace…" on a later visit)
+the toolbar gains a listing of the `sprites/` folder (`.sprite` and `.zip`
+bundles — loading goes through exactly the same parser and rules as the
+file dialog, including the render-pass requirement and unique-id handling),
+and a worlds row offers save/load of the scene against the `worlds/`
+folder. In browsers without the File System Access API the workspace
+controls explain their absence and the file dialog keeps working.
+
+### Worlds
+
+**Save world** writes `worlds/<name>.json` (name defaults to the first free
+`world-<n>`): the format marker `isoinfinity-world/1`, every placement
+(asset id + continuous ground position) and the full light state — manual
+azimuth/elevation, intensity, key and ambient colors, dynamic-light switch,
+plus the sun-position inputs. Saving an existing name overwrites it.
+Loading a world validates the file completely first (format marker,
+placements, light/sun fields) so a corrupt file fails with a named error
+and leaves the scene untouched; a valid file then clears the scene,
+restores the sun inputs, recomputes the sun, and re-applies the saved
+manual angles (so hand-tweaked directions round-trip), and places every
+sprite whose asset id is currently loaded — placements referencing missing
+assets are skipped and named in the status line.
+
+### Loading sprite bundles
+
+The editor's **Load sprite** button ingests bundles saved or downloaded
+from the bake tool (`.sprite` and legacy `.zip` names both accepted):
+`parseBake()` unpacks manifest + passes (formats `isoinfinity-bake/3` and
+`/4` accepted; anything else is rejected by name), the render PNG decodes
+via `createImageBitmap` and the EXR via `EXRLoader.parse`. A bundle **must**
+carry the render pass — `/3` bundles and `/4` bundles without one fail with
+a named error, because the runtime has no other way to display a sprite.
+Row order differs per decoder and both must end top-down (row 0 = sprite
+top) for upload: the PNG decodes top-down and is padded **as-is**, while
+`EXRLoader` writes rows bottom-up in GL texture order (it re-flips the
+file's top-down scanlines for `flipY:false` DataTextures) — so the EXR gets
+the **same flip as a boot bake**. Getting this wrong mirrors the object
+vertically; the two decoders are deliberately asymmetric. Loaded layers
+re-pad the whole set (max size may grow, `Renderer.setSprites` rebuilds all
+texture arrays), get a toolbar tool button, and are placed once
+immediately. Per-layer `pxPerUnit` from the manifest drives the instance
+scale, so bundles baked at any resolution land at the correct world size.
 
 Row-order warning: GL pixel readback is bottom-up and all texture arrays
 are sampled with the same UV, so **every** uploaded pass must be flipped to
@@ -133,9 +159,15 @@ checkerboard is a visual reference only.
 
 - `src/shared/iso.ts` — dependency-free camera constants + ground-plane
   projection/picking (single source of truth, shared with the bake tool)
+- `src/shared/workspace.ts` — workspace folder binding (File System Access
+  connection lifecycle, IndexedDB handle persistence, convention folders,
+  list/read/write helpers, `.sprite` constant), shared with the bake tool
+- `src/shared/workspace-ui.ts` — workspace header control + picker
+  `<select>` filling, shared by both pages
 - `src/runtime/assets.ts` — bake-at-boot sprite set (merged g-buffer +
   path-traced render via a procedural environment) and bundle loading
 - `src/runtime/renderer.ts` — WebGL2 batches, per-pixel occlusion + shading
 - `src/runtime/world.ts` — placement state, depth sort, footprint erase
 - `src/runtime/main.ts` — async boot, camera-to-canvas mapping, input,
-  toolbar, light panel wiring
+  toolbar, light panel wiring, workspace sprite/world pickers and world
+  save/load

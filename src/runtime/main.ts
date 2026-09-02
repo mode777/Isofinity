@@ -11,6 +11,15 @@ import {
 import { Renderer } from './renderer.js';
 import { World } from './world.js';
 import { APP_VERSION } from '../version.js';
+import {
+  BUNDLE_EXT,
+  initWorkspace,
+  listWorkspaceFiles,
+  readWorkspaceFile,
+  writeWorkspaceFile,
+  type WorkspaceState,
+} from '../shared/workspace.js';
+import { fillSelect, mountWorkspaceControl } from '../shared/workspace-ui.js';
 
 const PPU = RUNTIME_PPU;
 const MARGIN = 8;
@@ -313,12 +322,258 @@ function activateTool(target: HTMLElement): void {
   setStatus();
 }
 
+// Workspace integration: sprite + world pickers, scene save/load.
+const wsSpriteSelect = document.getElementById('ws-sprite') as HTMLSelectElement;
+const wsSpriteRefresh = document.getElementById('ws-sprite-refresh') as HTMLButtonElement;
+const worldNameInput = document.getElementById('world-name') as HTMLInputElement;
+const saveWorldButton = document.getElementById('save-world') as HTMLButtonElement;
+const wsWorldSelect = document.getElementById('ws-world') as HTMLSelectElement;
+const wsWorldRefresh = document.getElementById('ws-world-refresh') as HTMLButtonElement;
+
 const fileInput = document.getElementById('load-zip') as HTMLInputElement;
 fileInput.addEventListener('change', () => {
   const file = fileInput.files?.[0];
   fileInput.value = '';
+  wsSpriteSelect.value = '';
   if (file) void loadBundle(file);
 });
+
+const WORLD_FORMAT = 'isoinfinity-world/1';
+const SPRITE_EXTS = [BUNDLE_EXT, '.zip'];
+const WORLD_EXTS = ['.json'];
+
+interface WorldFile {
+  format: string;
+  name?: string;
+  savedAt?: string;
+  sprites: { asset: string; x: number; z: number }[];
+  light: {
+    azimuthDeg: number;
+    elevationDeg: number;
+    intensity: number;
+    colorHex: string;
+    ambientHex: string;
+    enabled: boolean;
+  };
+  sun: { hour: number; day: number; lat: number };
+}
+
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+/** Validate a world file completely before anything is mutated. */
+function parseWorldFile(text: string, fileName: string): WorldFile {
+  const fail = (why: string): Error =>
+    new Error(`world "${fileName}": ${why}`);
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch (err) {
+    throw fail(`not valid JSON — ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const obj = data as Record<string, unknown>;
+  if (obj.format !== WORLD_FORMAT) {
+    throw fail(`unsupported format ${String(obj.format)} — expected ${WORLD_FORMAT}`);
+  }
+  const spritesRaw = obj.sprites;
+  if (!Array.isArray(spritesRaw)) throw fail('missing "sprites" array');
+  const sprites: WorldFile['sprites'] = [];
+  for (const entry of spritesRaw) {
+    const s = entry as Record<string, unknown>;
+    if (typeof s.asset !== 'string' || !isFiniteNumber(s.x) || !isFiniteNumber(s.z)) {
+      throw fail('malformed sprite placement (needs asset/x/z)');
+    }
+    sprites.push({ asset: s.asset, x: s.x, z: s.z });
+  }
+  const l = obj.light as Record<string, unknown> | undefined;
+  if (
+    !l ||
+    !isFiniteNumber(l.azimuthDeg) ||
+    !isFiniteNumber(l.elevationDeg) ||
+    !isFiniteNumber(l.intensity) ||
+    typeof l.colorHex !== 'string' ||
+    typeof l.ambientHex !== 'string' ||
+    typeof l.enabled !== 'boolean'
+  ) {
+    throw fail('malformed light state');
+  }
+  const sunRaw = obj.sun as Record<string, unknown> | undefined;
+  if (!sunRaw || !isFiniteNumber(sunRaw.hour) || !isFiniteNumber(sunRaw.day) || !isFiniteNumber(sunRaw.lat)) {
+    throw fail('malformed sun state');
+  }
+  return {
+    format: WORLD_FORMAT,
+    name: typeof obj.name === 'string' ? obj.name : fileName.replace(/\.json$/i, ''),
+    savedAt: typeof obj.savedAt === 'string' ? obj.savedAt : undefined,
+    sprites,
+    light: {
+      azimuthDeg: l.azimuthDeg,
+      elevationDeg: l.elevationDeg,
+      intensity: l.intensity,
+      colorHex: l.colorHex,
+      ambientHex: l.ambientHex,
+      enabled: l.enabled,
+    },
+    sun: { hour: sunRaw.hour, day: sunRaw.day, lat: sunRaw.lat },
+  };
+}
+
+function sanitizeWorldName(raw: string): string {
+  const name = raw
+    .trim()
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .replace(/^[-]+|[-]+$/g, '');
+  return name || 'world';
+}
+
+function nextWorldName(names: string[]): string {
+  const taken = new Set(names.map((n) => n.toLowerCase()));
+  for (let n = 1; ; n++) {
+    if (!taken.has(`world-${n}.json`)) return `world-${n}`;
+  }
+}
+
+function buildWorldFile(name: string): WorldFile {
+  return {
+    format: WORLD_FORMAT,
+    name,
+    savedAt: new Date().toISOString(),
+    sprites: world.list().map((p) => ({ asset: p.primId, x: p.x, z: p.z })),
+    light: {
+      azimuthDeg: light.azimuthDeg,
+      elevationDeg: light.elevationDeg,
+      intensity: light.intensity,
+      colorHex: light.colorHex,
+      ambientHex: light.ambientHex,
+      enabled: light.enabled,
+    },
+    sun: {
+      hour: Number(sunHourInput.value),
+      day: Number(sunDayInput.value),
+      lat: Number(sunLatInput.value),
+    },
+  };
+}
+
+async function refreshWorldPicker(): Promise<void> {
+  try {
+    const names = await listWorkspaceFiles('worlds', WORLD_EXTS);
+    fillSelect(wsWorldSelect, names, 'load world…');
+    worldNameInput.value = nextWorldName(names);
+  } catch (err) {
+    statusEl.textContent = `Workspace: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+async function saveWorld(): Promise<void> {
+  const name = sanitizeWorldName(worldNameInput.value);
+  worldNameInput.value = name;
+  const file = `${name}.json`;
+  try {
+    const json = JSON.stringify(buildWorldFile(name), null, 2);
+    await writeWorkspaceFile('worlds', file, new TextEncoder().encode(json));
+    statusEl.textContent = `Saved world "${name}" to worlds/${file}`;
+    await refreshWorldPicker();
+    wsWorldSelect.value = file;
+  } catch (err) {
+    statusEl.textContent = `World save failed: ${err instanceof Error ? err.message : String(err)}`;
+    console.error(err);
+  }
+}
+
+/** Push the restored light/sun state into the panel's inputs and outputs. */
+function restoreLight(data: WorldFile): void {
+  const sunOut = (id: string, text: string): void => {
+    document.getElementById(id)!.textContent = text;
+  };
+  sunHourInput.value = String(data.sun.hour);
+  sunDayInput.value = String(data.sun.day);
+  sunLatInput.value = String(data.sun.lat);
+  sunOut('sun-hour-v', formatHour(data.sun.hour));
+  sunOut('sun-day-v', String(data.sun.day));
+  sunOut('sun-lat-v', `${data.sun.lat}°`);
+  applySunPosition();
+  // The saved manual sliders win over the recomputed sun, so a scene
+  // saved with hand-tweaked angles restores exactly.
+  light.azimuthDeg = data.light.azimuthDeg;
+  light.elevationDeg = data.light.elevationDeg;
+  light.intensity = data.light.intensity;
+  light.colorHex = data.light.colorHex;
+  light.ambientHex = data.light.ambientHex;
+  light.enabled = data.light.enabled;
+  const set = (id: string, value: string): void => {
+    (document.getElementById(id) as HTMLInputElement).value = value;
+  };
+  set('light-color', data.light.colorHex);
+  set('light-ambient', data.light.ambientHex);
+  (document.getElementById('light-on') as HTMLInputElement).checked = data.light.enabled;
+  set('light-int', String(data.light.intensity));
+  sunOut('light-int-v', data.light.intensity.toFixed(2));
+  syncManualSliders();
+}
+
+async function loadWorld(fileName: string): Promise<void> {
+  statusEl.textContent = `Loading world ${fileName}…`;
+  try {
+    const file = await readWorkspaceFile('worlds', fileName);
+    const data = parseWorldFile(await file.text(), fileName);
+    // Everything validated — only now mutate the scene.
+    world.clear();
+    const skipped: string[] = [];
+    let placed = 0;
+    for (const s of data.sprites) {
+      if (!layerOf.has(s.asset)) {
+        if (!skipped.includes(s.asset)) skipped.push(s.asset);
+        continue;
+      }
+      world.place(s.x, s.z, s.asset);
+      placed++;
+    }
+    restoreLight(data);
+    statusEl.textContent =
+      `Loaded world "${data.name}" — ${placed} placed` +
+      (skipped.length > 0 ? `, skipped missing assets: ${skipped.join(', ')}` : '');
+  } catch (err) {
+    statusEl.textContent = `World load failed: ${err instanceof Error ? err.message : String(err)}`;
+    console.error(err);
+  }
+}
+
+async function refreshSpritePicker(): Promise<void> {
+  try {
+    fillSelect(wsSpriteSelect, await listWorkspaceFiles('sprites', SPRITE_EXTS), 'workspace sprites…');
+  } catch (err) {
+    statusEl.textContent = `Workspace: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+wsSpriteSelect.addEventListener('change', () => {
+  const name = wsSpriteSelect.value;
+  if (!name) return;
+  void readWorkspaceFile('sprites', name).then(loadBundle);
+});
+wsSpriteRefresh.addEventListener('click', () => void refreshSpritePicker());
+saveWorldButton.addEventListener('click', () => void saveWorld());
+wsWorldSelect.addEventListener('change', () => {
+  const name = wsWorldSelect.value;
+  if (name) void loadWorld(name);
+});
+wsWorldRefresh.addEventListener('click', () => void refreshWorldPicker());
+
+function setWorkspaceUi(state: WorkspaceState): void {
+  const show = state.kind === 'connected';
+  wsSpriteSelect.hidden = !show;
+  wsSpriteRefresh.hidden = !show;
+  worldNameInput.hidden = !show;
+  saveWorldButton.hidden = !show;
+  wsWorldSelect.hidden = !show;
+  wsWorldRefresh.hidden = !show;
+  if (show) {
+    void refreshSpritePicker();
+    void refreshWorldPicker();
+  }
+}
 
 function uniqueId(base: string): string {
   if (!layerOf.has(base)) return base;
@@ -416,5 +671,11 @@ async function main(): Promise<void> {
   };
   raf();
 }
+
+mountWorkspaceControl(document.getElementById('workspace')!, {
+  onStatus: (text) => (statusEl.textContent = text),
+  onState: setWorkspaceUi,
+});
+void initWorkspace();
 
 void main();

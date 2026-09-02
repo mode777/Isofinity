@@ -35,6 +35,39 @@
         background: #3b4252;
         border-color: #6f7a8f;
       }
+      button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      select {
+        background: #23262d;
+        color: #ddd;
+        border: 1px solid #3a3f4a;
+        border-radius: 4px;
+        padding: 0.3rem 0.4rem;
+        font-size: 0.9rem;
+        max-width: 14rem;
+      }
+      select:disabled {
+        opacity: 0.4;
+      }
+      button.refresh {
+        padding: 0.4rem 0.55rem;
+        font-size: 0.9rem;
+      }
+      input[type='text'] {
+        background: #23262d;
+        color: #ddd;
+        border: 1px solid #3a3f4a;
+        border-radius: 4px;
+        padding: 0.3rem 0.4rem;
+        font-size: 0.9rem;
+      }
+      .ws-label {
+        align-self: center;
+        color: #8a8f98;
+        font-size: 0.85rem;
+      }
       label.filebtn {
         background: #23262d;
         color: #ddd;
@@ -121,6 +154,7 @@
       A 2D renderer for pre-rendered graphics with dynamic lighting. First
       runtime milestone: place baked primitives on an isometric grid.
     </p>
+    <div id="workspace" class="controls"></div>
     <div class="controls" id="toolbar">
       <button data-tool="sphere">Sphere</button>
       <button data-tool="donut">Donut</button>
@@ -131,7 +165,16 @@
       <button data-tool="slab">Slab</button>
       <button data-tool="eraser">Eraser</button>
       <button id="clear">Clear all</button>
-      <label class="filebtn">Load zip<input type="file" id="load-zip" accept=".zip,application/zip" hidden></label>
+      <label class="filebtn">Load sprite<input type="file" id="load-zip" accept=".sprite,.zip,application/zip,application/octet-stream" hidden></label>
+      <select id="ws-sprite" hidden title="Bundles from the workspace's sprites/ folder"></select>
+      <button id="ws-sprite-refresh" class="refresh" hidden title="Re-read the workspace's sprites/ folder">↻</button>
+    </div>
+    <div class="controls" id="world-controls">
+      <span class="ws-label">worlds:</span>
+      <input id="world-name" type="text" placeholder="world name" maxlength="64" spellcheck="false" hidden>
+      <button id="save-world" hidden title="Save the placed sprites and light state to worlds/<name>.json">Save world</button>
+      <select id="ws-world" hidden title="Saved worlds from the workspace's worlds/ folder"></select>
+      <button id="ws-world-refresh" class="refresh" hidden title="Re-read the workspace's worlds/ folder">↻</button>
     </div>
     <canvas id="view"></canvas>
     <div class="panel" id="light-panel">
@@ -155,8 +198,10 @@
       <a href="./bake.html">bake tool</a> pipeline (merged g-buffer +
       path-traced render passes, lit by a built-in procedural sky) and
       shaded per-pixel in real time — tweak the key light above. Use
-      <b>Load zip</b> to place any bundle downloaded from the bake tool.
-      See <code>docs/runtime.md</code>.
+      <b>Load sprite</b> to place any <code>.sprite</code> bundle saved or
+      downloaded from the bake tool. Connect a workspace folder to load and
+      save assets — sprites and whole worlds — in place. See
+      <code>docs/runtime.md</code>.
     </p>
     <script type="module" src="/src/runtime/main.ts"></script>
   </body>
