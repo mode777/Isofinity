@@ -58,11 +58,13 @@ it as the reference architecture; design against it.
 - Bake tool (`bake.html`, `src/bake/`): bakes test primitives (sphere,
   donut, cube, cylinder, capsule, plane, slab) and glTF models into
   per-asset sprite passes — albedo (PNG), a merged g-buffer (float EXR:
-  rgb = world normals, a = linear ray depth), and optional path-traced
-  `render` (HDRI-lit, ACES) + `ao` passes — shipped as a zip bundle with a
+  rgb = world normals, a = linear ray depth), and an optional path-traced
+  `render` pass (HDRI-lit, ACES) — shipped as a zip bundle with a
   manifest (`format: isoinfinity-bake/4`). Arbitrary cuboids bake directly;
   the 1×1×1 cube is just the default cell. Conventions in
-  `docs/bake-pipeline.md`.
+  `docs/bake-pipeline.md`. The path-traced `ao` pass is KNOWN BROKEN
+  (accumulates empty output) and will be replaced with a different
+  approach in a future change.
 - Runtime editor (`index.html`, `src/runtime/`, shared math in
   `src/shared/`): bakes sprites at page load, places them freely on an
   isometric ground plane, and loads extra objects from bake zip bundles.

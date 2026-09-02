@@ -48,7 +48,7 @@ export interface PtSettings {
 }
 
 export const DEFAULT_PT_SETTINGS: PtSettings = {
-  samples: 256,
+  samples: 32,
   bounces: 5,
   textureSize: 1024,
   aoSamples: 64,

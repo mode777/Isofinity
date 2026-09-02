@@ -130,7 +130,7 @@
       <input id="hdri-file" type="file" accept=".hdr,.exr" hidden />
       <span id="hdri-name"></span>
       <button id="bake-render" disabled title="Path-traced HDRI-lit render pass (ACES tone-mapped)">Bake render</button>
-      <button id="bake-ao" disabled title="Path-traced ambient occlusion pass (no HDRI needed)">Bake AO</button>
+      <button id="bake-ao" disabled title="KNOWN BROKEN — accumulates empty output on some drivers; slated for rework with a different approach">Bake AO (broken)</button>
     </div>
     <div class="controls">
       <label class="gltf-extra">env rotate°
@@ -143,7 +143,7 @@
         <input id="env-exposure" type="number" value="1" min="0.1" max="4" step="0.05" />
       </label>
       <label class="gltf-extra">samples
-        <input id="pt-samples" type="number" value="256" min="16" max="4096" step="16" />
+        <input id="pt-samples" type="number" value="32" min="16" max="4096" step="16" />
       </label>
       <label class="gltf-extra">bounces
         <input id="pt-bounces" type="number" value="5" min="1" max="16" step="1" />

@@ -163,11 +163,13 @@ for anti-aliasing, so sprite edges converge to true AA.
   All scene textures are normalized to shared wrap/filter flags (library
   requirement) and repacked into a texture array capped by the
   `tex-size` setting (default 1024) — larger albedo maps downscale.
-- **AO pass**: `AmbientOcclusionMaterial` + shared BVH uniform; N
-  cosine-hemisphere rays per pixel against the asset geometry (radius
-  control), accumulated with a running average and seeded sub-pixel view
-  jitter. Grayscale, linear (not sRGB), white = unoccluded, transparent
-  background. Masked-out texels still occlude (known limitation).
+- **AO pass** (KNOWN BROKEN): `AmbientOcclusionMaterial` + shared BVH
+  uniform; N cosine-hemisphere rays per pixel against the asset geometry
+  (radius control), accumulated with a running average and seeded sub-pixel
+  view jitter. Despite per-frame renders and readbacks verifying correct
+  (audit logs in `[pt-audit]`), the accumulated output comes back empty on
+  tested hardware; this approach will be replaced in a future change, so
+  the pass ships labeled broken rather than fixed.
 - **Determinism**: the library resets its RNG seed per bake and seeds per
   sample; the AO jitter uses a fixed-seed PRNG. A fixed settings set
   reproduces a bake bit-for-bit on the same hardware/driver; cross-GPU
@@ -239,6 +241,9 @@ bundles through **Load zip**.
   exposure, full PBR materials for glTF sources, ACES export identical to
   the preview, deterministic accumulation, bundle format `isoinfinity-bake/4`
   with optional passes and provenance blocks.
+- Broken: the path-traced `ao` pass accumulates empty output despite healthy
+  per-frame renders (see the AO section above) — labeled broken in the UI,
+  slated for replacement with a different approach.
 - Planned: supersampling (render at N× and box-downsample), multi-cube
   composite assets, geometry-level clipping (CSG) instead of shader discard,
   KTX2/UASTC packaging for delivery (the merged g-buffer is already in the
