@@ -5,9 +5,9 @@ import {
   Euler,
   LinearFilter,
   Mesh,
-  MeshBasicMaterial,
   MeshStandardMaterial,
   NearestFilter,
+  NoBlending,
   RGBAFormat,
   Scene,
   SRGBColorSpace,
@@ -115,6 +115,22 @@ varying vec2 vUv;
 void main() {
   vUv = uv;
   gl_Position = vec4(position.xy, 0.0, 1.0);
+}
+`;
+
+// Running-average accumulation without hardware blending (same strategy as
+// WebGLPathTracer's own manual alpha blending): blending into half-float
+// targets proved unreliable across drivers, so each frame overwrites the
+// output by mixing the previous average with the new sample on the GPU.
+const AO_BLEND_FRAG = `
+uniform sampler2D uMap;
+uniform sampler2D uPrev;
+uniform float uWeight;
+varying vec2 vUv;
+void main() {
+  vec4 s = texture2D(uMap, vUv);
+  vec4 p = texture2D(uPrev, vUv);
+  gl_FragColor = mix(p, s, uWeight);
 }
 `;
 
@@ -384,19 +400,32 @@ export class PtBaker {
       magFilter: NearestFilter,
       depthBuffer: true,
     });
-    const accumTarget = new WebGLRenderTarget(this.frame.width, this.frame.height, {
-      format: RGBAFormat,
-      type: HalfFloatType,
-      minFilter: NearestFilter,
-      magFilter: NearestFilter,
-      depthBuffer: false,
+    const accumTargets = [0, 1].map(() =>
+      new WebGLRenderTarget(this.frame.width, this.frame.height, {
+        format: RGBAFormat,
+        type: HalfFloatType,
+        minFilter: NearestFilter,
+        magFilter: NearestFilter,
+        depthBuffer: false,
+      }),
+    );
+    const blendMaterial = new ShaderMaterial({
+      vertexShader: TONEMAP_VERT,
+      fragmentShader: AO_BLEND_FRAG,
+      uniforms: {
+        uMap: { value: null },
+        uPrev: { value: null },
+        uWeight: { value: 1 },
+      },
+      blending: NoBlending,
+      depthTest: false,
+      depthWrite: false,
     });
-    const blendMaterial = new MeshBasicMaterial({ transparent: true });
     const blendQuad = new FullScreenQuad(blendMaterial);
 
     const rng = mulberry32(0x9e3779b9);
     const { width, height, camera } = this.frame;
-    let auditFrame1: string | null = null;
+    let accumRead = 0;
     try {
       renderer.setClearColor(0x000000, 0);
       for (let n = 1; n <= frames; n++) {
@@ -414,17 +443,24 @@ export class PtBaker {
             .map((p) => JSON.stringify((p as unknown as { diagnostics?: object }).diagnostics))
             .join(' | ');
           const sampleProbe = readTargetStats(renderer, sampleTarget);
-          auditFrame1 = `drawCalls=${renderInfo.calls} tris=${renderInfo.triangles} ${sampleProbe}` +
-            (diag ? ` SHADER_DIAGNOSTICS: ${diag}` : '');
-          console.log(`[pt-audit] ao frame 1: ${auditFrame1}`);
+          console.log(
+            `[pt-audit] ao frame 1: drawCalls=${renderInfo.calls} tris=${renderInfo.triangles} ${sampleProbe}` +
+              (diag ? ` SHADER_DIAGNOSTICS: ${diag}` : ''),
+          );
         }
-        renderer.setRenderTarget(accumTarget);
+        // Overwrite the write target with mix(prevAverage, sample, 1/n).
+        // Frame 1 uses the sample as both inputs, so mix() yields the sample.
+        const accumWrite = 1 - accumRead;
+        renderer.setRenderTarget(accumTargets[accumWrite]);
         renderer.autoClear = false;
-        blendMaterial.map = sampleTarget.texture;
-        blendMaterial.opacity = 1 / n;
+        blendMaterial.uniforms.uMap.value = sampleTarget.texture;
+        blendMaterial.uniforms.uPrev.value =
+          n === 1 ? sampleTarget.texture : accumTargets[accumRead].texture;
+        blendMaterial.uniforms.uWeight.value = 1 / n;
         blendQuad.render(renderer);
         renderer.autoClear = true;
         renderer.setRenderTarget(null);
+        accumRead = accumWrite;
         onProgress?.(n / frames);
         await yieldFrame();
       }
@@ -434,13 +470,14 @@ export class PtBaker {
       blendQuad.dispose();
       blendMaterial.dispose();
       sampleTarget.dispose();
-      accumTarget.dispose();
+      accumTargets[0].dispose();
+      accumTargets[1].dispose();
       aoMaterial.dispose();
       bvhUniform.dispose();
     }
 
     const half = new Uint16Array(width * height * 4);
-    renderer.readRenderTargetPixels(accumTarget, 0, 0, width, height, half);
+    renderer.readRenderTargetPixels(accumTargets[accumRead], 0, 0, width, height, half);
     let nonzeroAlpha = 0;
     let maxValue = 0;
     for (let i = 0; i < width * height; i++) {
