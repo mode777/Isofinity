@@ -169,6 +169,26 @@ function mulberry32(seed: number): () => number {
 
 const yieldFrame = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
+/** Max-alpha / max-value summary of a render target, for console audits. */
+function readTargetStats(renderer: WebGLRenderer, target: WebGLRenderTarget): string {
+  const isHalf = target.texture.type === HalfFloatType;
+  const buffer: Uint16Array | Float32Array = isHalf
+    ? new Uint16Array(target.width * target.height * 4)
+    : new Float32Array(target.width * target.height * 4);
+  renderer.readRenderTargetPixels(target, 0, 0, target.width, target.height, buffer);
+  let maxA = 0;
+  let maxV = 0;
+  for (let i = 0; i < target.width * target.height; i++) {
+    const r = isHalf ? halfToFloat((buffer as Uint16Array)[i * 4]) : (buffer as Float32Array)[i * 4];
+    const a = isHalf
+      ? halfToFloat((buffer as Uint16Array)[i * 4 + 3])
+      : (buffer as Float32Array)[i * 4 + 3];
+    maxV = Math.max(maxV, Math.abs(r));
+    maxA = Math.max(maxA, a);
+  }
+  return `maxA=${maxA.toFixed(3)} maxR=${maxV.toFixed(3)}`;
+}
+
 let sharedRenderer: WebGLRenderer | null = null;
 
 /** One WebGL context for the page; sized per bake (PT targets follow it). */
@@ -376,6 +396,7 @@ export class PtBaker {
 
     const rng = mulberry32(0x9e3779b9);
     const { width, height, camera } = this.frame;
+    let auditFrame1: string | null = null;
     try {
       renderer.setClearColor(0x000000, 0);
       for (let n = 1; n <= frames; n++) {
@@ -384,6 +405,19 @@ export class PtBaker {
         aoMaterial.seed = n - 1;
         renderer.setRenderTarget(sampleTarget);
         renderer.render(this.scene, camera);
+        if (n === 1) {
+          // Diagnostics for the "transparent AO" failure mode: did anything
+          // rasterize, and did a shader fail to compile?
+          const renderInfo = renderer.info.render;
+          const diag = (renderer.info.programs ?? [])
+            .filter((p) => (p as unknown as { diagnostics?: object }).diagnostics !== undefined)
+            .map((p) => JSON.stringify((p as unknown as { diagnostics?: object }).diagnostics))
+            .join(' | ');
+          const sampleProbe = readTargetStats(renderer, sampleTarget);
+          auditFrame1 = `drawCalls=${renderInfo.calls} tris=${renderInfo.triangles} ${sampleProbe}` +
+            (diag ? ` SHADER_DIAGNOSTICS: ${diag}` : '');
+          console.log(`[pt-audit] ao frame 1: ${auditFrame1}`);
+        }
         renderer.setRenderTarget(accumTarget);
         renderer.autoClear = false;
         blendMaterial.map = sampleTarget.texture;
@@ -405,11 +439,16 @@ export class PtBaker {
       bvhUniform.dispose();
     }
 
-    // Half-float targets must be read back as half bits (Uint16Array); a
-    // Float32Array read is an INVALID_OPERATION and leaves the buffer at
-    // zero — the "empty AO image" bug class.
     const half = new Uint16Array(width * height * 4);
     renderer.readRenderTargetPixels(accumTarget, 0, 0, width, height, half);
+    let nonzeroAlpha = 0;
+    let maxValue = 0;
+    for (let i = 0; i < width * height; i++) {
+      const a = halfToFloat(half[i * 4 + 3]);
+      if (a > 0) nonzeroAlpha++;
+      maxValue = Math.max(maxValue, Math.abs(halfToFloat(half[i * 4])), a);
+    }
+    console.log(`[pt-audit] ao accum: frames=${frames} nonzeroAlphaPx=${nonzeroAlpha}/${width * height} maxV=${maxValue.toFixed(4)}`);
     const rgba = new Uint8Array(width * height * 4);
     for (let i = 0; i < width * height; i++) {
       const v = Math.round(Math.min(1, Math.max(0, halfToFloat(half[i * 4]))) * 255);
