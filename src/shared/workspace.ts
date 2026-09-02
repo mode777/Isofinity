@@ -196,13 +196,21 @@ function matchesExts(name: string, exts: string[]): boolean {
   return exts.some((ext) => lower.endsWith(ext.toLowerCase()));
 }
 
+/** Resolve a convention folder under the connected workspace root. */
+async function folderHandle(
+  folder: WorkspaceFolder,
+  create = false,
+): Promise<FileSystemDirectoryHandle> {
+  const root = assertConnected();
+  return root.getDirectoryHandle(folder, { create });
+}
+
 /** Flat listing of the folder's files whose name ends in one of `exts`, name-sorted. */
 export async function listWorkspaceFiles(
   folder: WorkspaceFolder,
   exts: string[],
 ): Promise<string[]> {
-  const root = assertConnected();
-  const sub = await root.getDirectoryHandle(folder);
+  const sub = await folderHandle(folder);
   const names: string[] = [];
   for await (const [name, handle] of sub.entries()) {
     if (handle.kind === 'file' && matchesExts(name, exts)) names.push(name);
@@ -215,9 +223,9 @@ export async function readWorkspaceFile(
   folder: WorkspaceFolder,
   name: string,
 ): Promise<File> {
-  const root = assertConnected();
   try {
-    const handle = await root.getFileHandle(name, { create: false });
+    const sub = await folderHandle(folder);
+    const handle = await sub.getFileHandle(name, { create: false });
     return await handle.getFile();
   } catch (err) {
     throw new Error(
@@ -241,9 +249,9 @@ export async function writeWorkspaceFile(
   name: string,
   data: Uint8Array<ArrayBuffer> | string,
 ): Promise<void> {
-  const root = assertConnected();
   try {
-    const handle = await root.getFileHandle(name, { create: true });
+    const sub = await folderHandle(folder, true);
+    const handle = await sub.getFileHandle(name, { create: true });
     const stream = await handle.createWritable();
     try {
       await stream.write(data);
