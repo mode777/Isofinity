@@ -79,13 +79,11 @@ void main() {
   float d = g.a + vDepthOff;
   gl_FragDepth = uDepthA * d + uDepthB;
   if (vBaked > 0.5) {
-    // Baked display: the pre-rendered lit image with the key light added
-    // linearly over the baked normal (no ambient); alpha comes from the
-    // render pass. Shading inputs (albedo/normals) and occlusion stay
-    // untouched.
+    // Baked display: the pre-rendered lit image shaded by the dynamic
+    // key + ambient lights (classic multiplicative lighting over the baked
+    // normal); alpha comes from the render pass. Occlusion stays untouched.
     vec4 r = texture(uRender, vec3(vUv, vLayer));
-    float ndl = max(dot(g.rgb, uLightDir), 0.0);
-    outColor = vec4(linearToSrgb(srgbToLinear(r.rgb) + uKeyLight * ndl), r.a);
+    outColor = vec4(shade(r.rgb, g.rgb), r.a);
   } else {
     outColor = vec4(shade(c.rgb, g.rgb), c.a);
   }

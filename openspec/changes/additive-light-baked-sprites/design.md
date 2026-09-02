@@ -37,65 +37,64 @@ See proposal.md for motivation; the delta spec
 
 ## Decisions
 
-### D1: Add in linear space, output through the existing sRGB encode
+### D1: Classic multiplicative shading via the existing `shade()` (revised)
 
-Baked branch becomes:
+The first experiment (commit 388862a) added the key light **additively** on
+top of the prerender; visual review rejected it. The baked branch now
+applies the same multiplicative shading as the unlit path to the render
+texel:
 
 ```glsl
-vec3 base = srgbToLinear(renderTexel.rgb);
-float ndl = max(dot(gbufferNormal, uLightDir), 0.0);
-outColor = vec4(linearToSrgb(base + uKeyLight * ndl), renderTexel.a);
+vec4 r = texture(uRender, vec3(vUv, vLayer));
+outColor = vec4(shade(r.rgb, g.rgb), r.a);
 ```
 
-The SHADE_CHUNK already exposes both transfer functions, so this is a
-branch-local change. Alternative: add directly in sRGB space (skip both
-conversions) — cheaper and softer-looking, but the added term then has a
-different perceptual weight per pixel and disagrees with how the unlit path
-computes the same light; keeping one linear-space definition of "the key
-light" makes the two modes comparable, which is the point of the
-experiment.
+One shading definition for both modes: the dynamic factor
+`(uAmbient + uKeyLight * ndl)` multiplies the linear-decoded texel. Applied
+to albedo this is POE-classic relighting; applied to the already-lit
+prerender it double-shades — the accepted trade of the experiment.
+Alternatives: additive (shipped, rejected — reads as glow, cannot darken),
+or luminance-aware/screen blends (deferred mitigation).
 
-### D2: No ambient term for baked sprites
+### D2: Ambient applies to baked sprites as the fill term (revised)
 
-`uAmbient` is a scalar floor for the albedo multiply; as an additive term it
-would just brighten the whole image uniformly with no shape. The ambient
-slider keeps affecting unlit sprites only. Alternative: repurpose ambient as
-a second additive omni term — rejected as scope creep for an experiment.
+Under multiply, `uAmbient` regains its classic POE role: the fill that
+keeps unlit sides from going black, and it must apply to baked sprites too
+or the two modes diverge in shadow. (Under additive this term was excluded
+— that decision is obsolete.)
 
-### D3: The switch works by zeroing uniforms — no new code path
+### D3: The switch pins shading to identity — ambient `(1,1,1)`, key `0`
 
-`updateLightUniforms()` already uploads `key = ambient = 0` when disabled;
-once the baked branch consumes `uKeyLight`, off = `base + 0` = pure
-prerender, and the flat program keeps the ground in sync (flat when off,
-key-lit when on) exactly as today. No new uniform, no shader recompile, no
-per-instance flag. Alternative: a dedicated `uAddStrength` uniform — only
-needed if baked sprites ever need light *independent* of the unlit path's
-light; not now.
+With multiplicative shading, the previous disabled upload (key 0, ambient
+0) is a multiply-by-zero: everything black. The disabled path now uploads
+`ambient = (1,1,1)`, `key = (0,0,0)`, making the factor `(1 + 0·ndl) = 1`:
+baked sprites show the pure prerender, unlit sprites raw albedo, the ground
+its flat vertex color. No new uniforms, no shader branches.
+
+This also fixes a pre-existing inconsistency: the archived spec already
+says unlit sprites show "albedo as-is" when disabled, but the zeroed
+uniforms rendered them black — code never matched the spec until now.
+Surfaced to the user as a deliberate fix, not a silent change.
 
 ### D4: Highlight stability is preserved by construction
 
-The additive term uses the same g-buffer normal sample the unlit branch
-uses and the same global `uLightDir`, so baked and unlit sprites respond
-identically to direction changes. Edge pixels keep blending with the render
-pass's AA alpha, unchanged from today's baked path.
+The baked branch uses the same `shade()`, g-buffer normal sample, and
+global `uLightDir` as the unlit branch, so both modes respond identically
+to light changes. Edge pixels keep blending with the render pass's AA
+alpha, unchanged.
 
 ## Risks / Trade-offs
 
-- [Double lighting / blown highlights where baked HDRI and key light agree]
-  → Accepted for this experiment; plain additive is the baseline being
-  tested. If it reads badly, luminance-aware scaling
-  (`uKeyLight * ndl * (1 - luma)`) is a two-line follow-up, deliberately
-  out of scope.
-- [After-tonemap add is physically wrong — light added to an ACES-compressed
-  image can exceed 1 and clip hard] → `linearToSrgb` clamps; accept as part
-  of the "convincing, not correct" framing.
-- [Interpenetrating baked sprites pop where the additive term differs across
-  the occlusion boundary] → Inherent to per-pixel occlusion of shaded
-  sprites; the unlit path already has this property, so behavior is
-  consistent, not new.
-- [Docs/specs drift: `docs/runtime.md` describes baked mode as passthrough
-  and the switch as not affecting baked sprites] → Doc update is a task; the
-  delta spec is the source of truth meanwhile.
+- [Double-shading: the prerender already carries baked light; multiplying
+  darkens and re-shades it, and shadowed sides go ambient-dark] → That is
+  the experiment being run, not a defect to fix here.
+- [Highlight clipping where the factor exceeds 1 over already-bright baked
+  pixels] → `linearToSrgb` clamps; accepted.
+- [Unlit sprites change behavior when the switch is turned off: black → raw
+  albedo] → Deliberate fix aligning code with the archived spec ("albedo
+  as-is"); called out in the proposal.
+- [Docs/specs drift] → Doc update is a task; the delta spec is the source
+  of truth meanwhile.
 
 ## Migration Plan
 

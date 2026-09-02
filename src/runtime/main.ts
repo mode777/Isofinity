@@ -89,11 +89,12 @@ function srgbToLinear(c: number): number {
 }
 
 function updateLightUniforms(): void {
-  // Global dynamic-light switch: zeroing key and ambient leaves unlit
-  // sprites as raw albedo and baked sprites as the pure prerendered image
-  // (the baked additive term scales with uKeyLight).
+  // Global dynamic-light switch: pin shading to identity — unlit sprites
+  // show raw albedo, baked sprites the pure prerendered image, the ground
+  // its flat vertex color. (Zeroing ambient too would multiply everything
+  // to black.)
   if (!light.enabled) {
-    renderer.setLight({ dir: [0, 1, 0], key: [0, 0, 0], ambient: [0, 0, 0] });
+    renderer.setLight({ dir: [0, 1, 0], key: [0, 0, 0], ambient: [1, 1, 1] });
     return;
   }
   const az = (light.azimuthDeg * Math.PI) / 180;
