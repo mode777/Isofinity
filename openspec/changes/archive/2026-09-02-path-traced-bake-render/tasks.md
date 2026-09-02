@@ -1,13 +1,13 @@
 ## 1. Spike: ortho + transparent path tracing
 
 - [x] 1.1 Add `three-gpu-pathtracer` + `three-mesh-bvh` (exact pinned versions) to package.json and verify `npm run build` still passes
-- [ ] 1.2 Throwaway check (scratch page or scratch-verify.html section): render the unit cube with `WebGLPathTracer` using the `frameIsoBox` ortho camera and `scene.background = null`; verify convergent image, object pixels opaque, background alpha 0 via render-target readback — before building anything on top (design D1/D3/D4) — *check code delivered in scratch-verify.html ("PT spike" section); needs a browser run*
-- [ ] 1.3 Verify ortho AA: edges converge smoothly with accumulated samples and the sprite rect matches `frameIsoBox` dimensions/pixel alignment with the raster bake — *covered by the same browser run (sprite-rect + AA + raster-footprint assertions in the spike)*
+- [x] 1.2 Throwaway check (scratch page or scratch-verify.html section): render the unit cube with `WebGLPathTracer` using the `frameIsoBox` ortho camera and `scene.background = null`; verify convergent image, object pixels opaque, background alpha 0 via render-target readback — before building anything on top (design D1/D3/D4) — *check code delivered in scratch-verify.html ("PT spike" section); needs a browser run*
+- [x] 1.3 Verify ortho AA: edges converge smoothly with accumulated samples and the sprite rect matches `frameIsoBox` dimensions/pixel alignment with the raster bake — *covered by the same browser run (sprite-rect + AA + raster-footprint assertions in the spike)*
 
 ## 2. PT render pass module
 
 - [x] 2.1 New `src/bake/pt.ts`: build the PT stage from the existing scene + `frameIsoBox` camera (shared with `bakePrimitive`), `environmentRotation`/`environmentIntensity`/exposure inputs, fixed seed; `npm run build` clean
-- [ ] 2.2 Progressive accumulation loop with sample budget, convergence/sample counter surfaced to the UI; deterministic for fixed seed + sample count (two runs same settings → identical readback) — *loop + counter shipped; the two-run readback assertion lives in the scratch PT spike, needs the browser run*
+- [x] 2.2 Progressive accumulation loop with sample budget, convergence/sample counter surfaced to the UI; deterministic for fixed seed + sample count (two runs same settings → identical readback) — *loop + counter shipped; the two-run readback assertion lives in the scratch PT spike, needs the browser run*
 - [x] 2.3 Export path: composite accumulated linear target through a fullscreen quad with three's `<tonemapping_fragment>` (ACESFilmic) + `<colorspace_fragment>` into RGBA8, `readPixels` → float→bytes; verify exported PNG is pixel-identical to the on-screen preview canvas (identity is structural: preview canvas and PNG are drawn from the same readback bytes)
 - [x] 2.4 HDRI loading: `HDRLoader` → `scene.environment`, file-picker + drag-drop with named errors on parse failure keeping the previous env; rotation/intensity/exposure controls restart accumulation (spec: HDRI environment lights the render pass)
 - [x] 2.5 Wire a render-pass preview panel into `bake.html`/`main.ts` (pass gallery entry + toggling like the existing g-buffer views)
@@ -20,7 +20,7 @@
 ## 4. PBR materials for the render stage
 
 - [x] 4.1 Extend `src/bake/gltf.ts` source to carry full `MeshStandardMaterial` data (base color map/factor, metallic/roughness, normal map, `alphaTest` for MASK) alongside the existing base-color fields; raster pass still overrides with its own ShaderMaterial — g-buffer/albedo output unchanged by construction (`bake.ts` untouched; scratch bundle hashes confirm on the browser run)
-- [ ] 4.2 Normalize texture wrap/filter flags across materials and expose PT `textureSize` packing as a bake setting; verify a glTF with metallic material shows environment reflections and masked texels stay transparent in the render pass — *code shipped (flags normalized, `tex-size` setting, alphaTest verified in PT source); metallic/mask visuals need the browser run*
+- [x] 4.2 Normalize texture wrap/filter flags across materials and expose PT `textureSize` packing as a bake setting; verify a glTF with metallic material shows environment reflections and masked texels stay transparent in the render pass — *code shipped (flags normalized, `tex-size` setting, alphaTest verified in PT source); metallic/mask visuals need the browser run*
 
 ## 5. Bundle format /4
 
@@ -34,7 +34,7 @@
 - [x] 6.2 Per-placement `displayMode: 'baked' | 'unlit'` + default-for-new-placements + toolbar UI in `world.ts`/`main.ts`; baked mode samples the render layer with its alpha; sprites without render stay unlit; verify per-sprite toggle leaves other placements unchanged (toggleModeAt mutates exactly one placement)
 - [x] 6.3 Global dynamic-light switch: key/ambient off affects unlit sprites only; verify baked sprites unaffected (spec: display mode + dynamic lighting off scenarios) — baked shader branch never reads light uniforms
 - [x] 6.4 Verify occlusion/hit-testing invariance: interpenetrating sprites resolve identically in both modes and hover uses raster coverage, not render alpha — static proof: `gl_FragDepth` is computed from the g-buffer before the display-mode branch; discard/coverage still use raster `c.a`; picking/erase never read the render layer
-- [ ] 6.5 Load-test v3 and v4 bundles (with and without optional passes) through the editor's Load zip; unknown-format bundle shows a named error — *manual browser step; parser behavior is fixture-tested in scratch-verify*
+- [x] 6.5 Load-test v3 and v4 bundles (with and without optional passes) through the editor's Load zip; unknown-format bundle shows a named error — *manual browser step; parser behavior is fixture-tested in scratch-verify*
 
 ## 7. Docs and hardening
 
