@@ -63,6 +63,8 @@ export interface PtEnvironment {
   rotationDeg: number;
   intensity: number;
   exposure: number;
+  /** Display-referred saturation multiplier (0 = gray, 1 = neutral). */
+  saturation: number;
 }
 
 export const DEFAULT_ENVIRONMENT: PtEnvironment = {
@@ -71,6 +73,7 @@ export const DEFAULT_ENVIRONMENT: PtEnvironment = {
   rotationDeg: 0,
   intensity: 1,
   exposure: 1,
+  saturation: 1,
 };
 
 /**
@@ -93,6 +96,7 @@ export interface PtExtras {
 
 const TONEMAP_FRAG = `
 uniform sampler2D uMap;
+uniform float uSaturation;
 varying vec2 vUv;
 vec3 linearToSrgb(vec3 c) {
   vec3 lo = c * 12.92;
@@ -107,6 +111,9 @@ void main() {
   // Rendering into a plain RGBA8 target leaves <colorspace_fragment> a
   // no-op, so the sRGB transfer is applied explicitly.
   gl_FragColor.rgb = linearToSrgb(max(gl_FragColor.rgb, vec3(0.0)));
+  // Display-referred saturation: mix toward Rec.709 luminance.
+  float lum = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+  gl_FragColor.rgb = mix(vec3(lum), gl_FragColor.rgb, uSaturation);
 }
 `;
 
@@ -239,7 +246,7 @@ export class PtBaker {
     this.tonemapMaterial = new ShaderMaterial({
       vertexShader: TONEMAP_VERT,
       fragmentShader: TONEMAP_FRAG,
-      uniforms: { uMap: { value: null } },
+      uniforms: { uMap: { value: null }, uSaturation: { value: 1 } },
       depthTest: false,
       depthWrite: false,
     });
@@ -290,6 +297,7 @@ export class PtBaker {
     this.scene.environmentRotation = new Euler(0, (env.rotationDeg * Math.PI) / 180, 0);
     this.scene.background = null;
     getRenderer().toneMappingExposure = env.exposure;
+    this.tonemapMaterial.uniforms.uSaturation.value = env.saturation;
   }
 
   /** Picks up new settings; texture repacking forces a scene rebuild. */

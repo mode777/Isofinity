@@ -112,7 +112,7 @@ function proceduralEnvironment(): PtEnvironment {
   texture.minFilter = LinearFilter;
   texture.magFilter = LinearFilter;
   texture.needsUpdate = true;
-  return { texture, name: 'procedural-sky', rotationDeg: 0, intensity: 1, exposure: 1 };
+  return { texture, name: 'procedural-sky', rotationDeg: 0, intensity: 1, exposure: 1, saturation: 1 };
 }
 
 export async function bakeSpriteLayers(): Promise<SpriteLayer[]> {

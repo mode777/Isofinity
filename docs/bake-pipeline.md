@@ -147,13 +147,15 @@ for anti-aliasing, so sprite edges converge to true AA.
   0/1 coverage: occlusion and hit-testing keep consuming **raster**
   coverage; only display uses the render alpha.
 - **Illumination**: `scene.environment` (equirect `.hdr` via `HDRLoader`)
-  is the sole light source, with rotation/intensity/exposure controls;
-  changing any of them restarts accumulation. No background image is ever
+  is the sole light source, with rotation/intensity/exposure/saturation
+  controls; changing any of them restarts accumulation. No background image is ever
   captured into the pass. Without an environment the render pass is simply
   not produced (AO does not need one).
 - **Tonemapping/export**: the accumulated linear float target is composited
   through a fullscreen quad using three's `<tonemapping_fragment>`
-  (ACES filmic) plus an explicit sRGB transfer into RGBA8 — the preview
+  (ACES filmic) plus an explicit sRGB transfer and a display-referred
+  saturation adjust (mix toward Rec.709 luminance, 0 = gray, 1 = neutral)
+  into RGBA8 — the preview
   canvas is drawn from exactly those bytes, so the exported PNG is
   pixel-identical to the preview by construction.
 - **Materials**: the render stage consumes full PBR materials (glTF
@@ -176,7 +178,7 @@ for anti-aliasing, so sprite edges converge to true AA.
   byte equality is not a goal.
 - **Manifest provenance**: when either path-traced pass is included, the
   manifest records an `environment` block (hdri name, rotation, intensity,
-  exposure) and a `renderer` block (name/version, samples, bounces,
+  exposure, saturation) and a `renderer` block (name/version, samples, bounces,
   denoise, seed, AO settings) so a bake is reproducible from its bundle.
 
 ### Sprite placement

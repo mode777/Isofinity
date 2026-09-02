@@ -94,6 +94,7 @@ function readEnv(): void {
   env.rotationDeg = num('env-rotate', 0, 360, 0);
   env.intensity = num('env-intensity', 0, 10, 1);
   env.exposure = num('env-exposure', 0.1, 4, 1);
+  env.saturation = num('env-saturation', 0, 2, 1);
 }
 
 function getPtBaker(): PtBaker {
@@ -391,7 +392,7 @@ aoButton.addEventListener('click', () => void runAoPass());
 
 // Environment changes restart the render pass accumulation (spec) once a
 // render pass exists; pass settings apply on the next manual bake.
-for (const id of ['env-rotate', 'env-intensity', 'env-exposure']) {
+for (const id of ['env-rotate', 'env-intensity', 'env-exposure', 'env-saturation']) {
   document.getElementById(id)!.addEventListener('change', () => {
     readEnv();
     if (ptRender) void runRenderPass();

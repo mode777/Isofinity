@@ -108,6 +108,7 @@ export interface BakeManifest {
     rotationDeg: number;
     intensity: number;
     exposure: number;
+    saturation: number;
   };
   /** Present when any path-traced pass is baked: renderer provenance. */
   renderer?: {
@@ -174,6 +175,7 @@ export function buildManifest(result: BakeResult, pt?: PtExtras): BakeManifest {
         rotationDeg: pt.environment.rotationDeg,
         intensity: pt.environment.intensity,
         exposure: pt.environment.exposure,
+        saturation: pt.environment.saturation,
       };
     }
   }
