@@ -14,4 +14,4 @@
 ## 4. Verification
 
 - [x] 4.1 `npm run build` (tsc + vite) passes clean
-- [ ] 4.2 Manual check in `npm run dev`: baked sprite shows the prerendered image re-shaded by the dynamic lights; dragging azimuth/elevation shifts shading on baked and unlit sprites alike; ambient slider affects both modes; toggling Dynamic light off returns baked sprites to the exact pure prerendered image and unlit sprites to raw albedo (no black); boot-baked primitives and interpenetrating-sprite occlusion unchanged
+- [x] 4.2 Manual check in `npm run dev`: baked sprite shows the prerendered image re-shaded by the dynamic lights; dragging azimuth/elevation shifts shading on baked and unlit sprites alike; ambient slider affects both modes; toggling Dynamic light off returns baked sprites to the exact pure prerendered image and unlit sprites to raw albedo (no black); boot-baked primitives and interpenetrating-sprite occlusion unchanged

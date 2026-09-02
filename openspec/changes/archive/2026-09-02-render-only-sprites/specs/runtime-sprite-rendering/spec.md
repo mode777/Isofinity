@@ -1,12 +1,39 @@
-## Purpose
+## MODIFIED Requirements
 
-How the runtime displays baked sprites once asset bundles may carry
-pre-rendered lit passes: each placed sprite renders either from the baked
-beauty image or via dynamic re-lighting of the unlit albedo, while
-per-pixel occlusion and hit-testing stay driven by the baked g-buffer in
-every mode.
+(none)
 
-## Requirements
+## REMOVED Requirements
+
+### Requirement: Runtime parses format /4 bundles with optional passes
+
+**Reason**: The runtime no longer has an unlit display path, so a bundle
+without a rendered pass has nothing to display; the render pass is now a
+loading requirement, not an optional extra.
+**Migration**: Re-bake with an environment to produce a `/4` bundle
+containing `<id>-render.png`; such bundles load as before. `/3` bundles are
+no longer loadable in the runtime (the bake tool still reads them).
+
+### Requirement: Occlusion and hit-testing stay g-buffer driven
+
+**Reason**: The requirement was phrased around two display modes and raster
+albedo-alpha coverage; both are gone. Coverage now comes from g-buffer
+emptiness — the identical hard raster coverage of the same bake draw — and
+the behavior continues under a fresh, mode-free requirement.
+**Migration**: Replaced by the ADDED requirement below; occlusion depth,
+coverage semantics, and footprint picking are unchanged in practice.
+
+### Requirement: Sprite display mode switches between baked image and dynamic lighting
+
+**Reason**: Display modes are gone — every sprite displays its prerendered
+lit image shaded by the dynamic key + ambient lights (the multiplicative
+path). There is no unlit appearance to switch to, so the per-sprite mode,
+the per-sprite toggle tool, and the default mode for new placements no
+longer exist.
+**Migration**: The replacement behavior is captured by the ADDED
+requirements below; the global Dynamic light switch (shading pinned to
+identity when off) is unchanged.
+
+## ADDED Requirements
 
 ### Requirement: Bundles must carry a rendered pass
 

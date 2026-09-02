@@ -130,7 +130,6 @@
       <button data-tool="plane">Plane</button>
       <button data-tool="slab">Slab</button>
       <button data-tool="eraser">Eraser</button>
-      <button data-tool="mode" title="Click a placed sprite to flip it between baked (prerender) and unlit (dynamic) display">Bake toggle</button>
       <button id="clear">Clear all</button>
       <label class="filebtn">Load zip<input type="file" id="load-zip" accept=".zip,application/zip" hidden></label>
     </div>
@@ -143,21 +142,14 @@
       <label><span>Intensity</span><input type="range" id="light-int" min="0" max="3" step="0.05" value="1.2"><output id="light-int-v">1.20</output></label>
       <label><span>Color</span><input type="color" id="light-color" value="#fff1dd"></label>
       <label><span>Ambient</span><input type="range" id="light-amb" min="0" max="1.5" step="0.05" value="0.4"><output id="light-amb-v">0.40</output></label>
-      <h2>Display</h2>
-      <label><span>New sprites</span>
-        <select id="default-mode">
-          <option value="unlit" selected>unlit (dynamic)</option>
-          <option value="baked">baked (prerender)</option>
-        </select>
-      </label>
     </div>
     <p id="status"></p>
     <p>
       Sprites are baked at load time from the
-      <a href="./bake.html">bake tool</a> pipeline (albedo + merged
-      g-buffer passes) and lit per-pixel in real time — tweak the key light
-      above. Use <b>Load zip</b> to place any bundle downloaded from the
-      bake tool.
+      <a href="./bake.html">bake tool</a> pipeline (merged g-buffer +
+      path-traced render passes, lit by a built-in procedural sky) and
+      shaded per-pixel in real time — tweak the key light above. Use
+      <b>Load zip</b> to place any bundle downloaded from the bake tool.
       See <code>docs/runtime.md</code>.
     </p>
     <script type="module" src="/src/runtime/main.ts"></script>

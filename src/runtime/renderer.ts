@@ -41,27 +41,23 @@ const SPRITE_VERT = `#version 300 es
 in vec2 aCorner;
 in vec4 aInst;   // px.xy, layer, depthOff
 in vec4 aInst2;  // quadSize px, sprite texel size
-in vec4 aInst3;  // x = baked-display flag
 uniform vec2 uRes;
 uniform vec2 uMaxSize;
 out vec2 vUv;
 flat out float vLayer;
 flat out float vDepthOff;
-flat out float vBaked;
 void main() {
   vec2 px = aInst.xy + aCorner * aInst2.xy;
   gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
   vUv = mix(vec2(0.5), aInst2.zw - 0.5, aCorner) / uMaxSize;
   vLayer = aInst.z;
   vDepthOff = aInst.w;
-  vBaked = aInst3.x;
 }
 `;
 
 const SPRITE_FRAG = `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
-uniform sampler2DArray uSprites;
 uniform sampler2DArray uRender;
 uniform sampler2DArray uGbuffer;
 uniform float uDepthA;
@@ -69,24 +65,17 @@ uniform float uDepthB;
 in vec2 vUv;
 flat in float vLayer;
 flat in float vDepthOff;
-flat in float vBaked;
 out vec4 outColor;
 ${SHADE_CHUNK}
 void main() {
-  vec4 c = texture(uSprites, vec3(vUv, vLayer));
-  if (c.a < 0.01) discard;
   vec4 g = texture(uGbuffer, vec3(vUv, vLayer));
+  // G-buffer emptiness is the hard raster coverage: background pixels are
+  // all-zero. The render pass's antialiased alpha never drops fragments.
+  if (dot(g.rgb, g.rgb) == 0.0) discard;
   float d = g.a + vDepthOff;
   gl_FragDepth = uDepthA * d + uDepthB;
-  if (vBaked > 0.5) {
-    // Baked display: the pre-rendered lit image shaded by the dynamic
-    // key + ambient lights (classic multiplicative lighting over the baked
-    // normal); alpha comes from the render pass. Occlusion stays untouched.
-    vec4 r = texture(uRender, vec3(vUv, vLayer));
-    outColor = vec4(shade(r.rgb, g.rgb), r.a);
-  } else {
-    outColor = vec4(shade(c.rgb, g.rgb), c.a);
-  }
+  vec4 r = texture(uRender, vec3(vUv, vLayer));
+  outColor = vec4(shade(r.rgb, g.rgb), r.a);
 }
 `;
 
@@ -123,7 +112,6 @@ export class Renderer {
   private gl: WebGL2RenderingContext;
   private flatProg: WebGLProgram;
   private spriteProg: WebGLProgram;
-  private tex: WebGLTexture | null = null;
   private renderTex: WebGLTexture | null = null;
   private gbufferTex: WebGLTexture | null = null;
   private groundVao: WebGLVertexArrayObject;
@@ -148,8 +136,7 @@ export class Renderer {
 
   constructor(
     canvas: HTMLCanvasElement,
-    albedoLayers: Uint8Array[],
-    renderLayers: (Uint8Array | null)[],
+    renderLayers: Uint8Array[],
     gbufferLayers: Uint16Array[],
     maxW: number,
     maxH: number,
@@ -186,7 +173,7 @@ export class Renderer {
     gl.uniform1f(this.uDepthA, -1 / (2 * DEPTH_LINEAR_RANGE));
     gl.uniform1f(this.uDepthB, 0.5);
 
-    this.setSprites(albedoLayers, renderLayers, gbufferLayers, maxW, maxH);
+    this.setSprites(renderLayers, gbufferLayers, maxW, maxH);
 
     this.groundVao = gl.createVertexArray()!;
     this.groundVbo = gl.createBuffer()!;
@@ -224,21 +211,16 @@ export class Renderer {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instVbo);
     const aInst = gl.getAttribLocation(this.spriteProg, 'aInst');
     gl.enableVertexAttribArray(aInst);
-    gl.vertexAttribPointer(aInst, 4, gl.FLOAT, false, 48, 0);
+    gl.vertexAttribPointer(aInst, 4, gl.FLOAT, false, 32, 0);
     gl.vertexAttribDivisor(aInst, 1);
     const aInst2 = gl.getAttribLocation(this.spriteProg, 'aInst2');
     gl.enableVertexAttribArray(aInst2);
-    gl.vertexAttribPointer(aInst2, 4, gl.FLOAT, false, 48, 16);
+    gl.vertexAttribPointer(aInst2, 4, gl.FLOAT, false, 32, 16);
     gl.vertexAttribDivisor(aInst2, 1);
-    const aInst3 = gl.getAttribLocation(this.spriteProg, 'aInst3');
-    gl.enableVertexAttribArray(aInst3);
-    gl.vertexAttribPointer(aInst3, 4, gl.FLOAT, false, 48, 32);
-    gl.vertexAttribDivisor(aInst3, 1);
 
     gl.bindVertexArray(null);
-    gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uSprites')!, 0);
+    gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uRender')!, 0);
     gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uGbuffer')!, 1);
-    gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uRender')!, 2);
 
     gl.disable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
@@ -250,26 +232,16 @@ export class Renderer {
 
   /** (Re)builds the sprite texture arrays; callable again after loading new layers. */
   setSprites(
-    albedoLayers: Uint8Array[],
-    renderLayers: (Uint8Array | null)[],
+    renderLayers: Uint8Array[],
     gbufferLayers: Uint16Array[],
     maxW: number,
     maxH: number,
   ): void {
     const gl = this.gl;
-    if (this.tex !== null) gl.deleteTexture(this.tex);
     if (this.renderTex !== null) gl.deleteTexture(this.renderTex);
     if (this.gbufferTex !== null) gl.deleteTexture(this.gbufferTex);
 
-    this.tex = this.byteArray(albedoLayers, maxW, maxH, gl.LINEAR);
-    // Baked render layers: absent layers upload as transparent zeros so a
-    // baked-mode lookup can never show a neighbor's texels.
-    this.renderTex = this.byteArray(
-      renderLayers.map((data) => data ?? new Uint8Array(maxW * maxH * 4)),
-      maxW,
-      maxH,
-      gl.LINEAR,
-    );
+    this.renderTex = this.byteArray(renderLayers, maxW, maxH, gl.LINEAR);
     this.gbufferTex = this.halfArray(gbufferLayers, maxW, maxH);
 
     gl.useProgram(this.spriteProg);
@@ -387,11 +359,9 @@ export class Renderer {
       gl.uniform2f(this.uSpriteRes, canvas.width, canvas.height);
       uploadLight(gl, this.uSpriteLight, this.light);
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex!);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.renderTex!);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.gbufferTex!);
-      gl.activeTexture(gl.TEXTURE2);
-      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.renderTex!);
       gl.bindVertexArray(this.spriteVao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.instVbo);
       gl.bufferData(gl.ARRAY_BUFFER, instances, gl.DYNAMIC_DRAW);

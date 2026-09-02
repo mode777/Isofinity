@@ -1,7 +1,17 @@
-import { DataUtils, HalfFloatType, RGBAFormat } from 'three';
+import {
+  ClampToEdgeWrapping,
+  DataTexture,
+  DataUtils,
+  EquirectangularReflectionMapping,
+  FloatType,
+  HalfFloatType,
+  LinearFilter,
+  RGBAFormat,
+} from 'three';
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import { bakePrimitive } from '../bake/bake.js';
 import { parseBake } from '../bake/bundle.js';
+import { DEFAULT_PT_SETTINGS, PtBaker, type PtEnvironment } from '../bake/pt.js';
 import {
   getCapsule,
   getCube,
@@ -27,13 +37,10 @@ export interface SpriteLayer {
   width: number;
   height: number;
   originPx: [number, number];
-  albedo: Uint8Array;
   gbuffer: Uint16Array;
-  /**
-   * Path-traced lit render (sRGB RGBA, top-down), when the bundle carries
-   * one. Boot bakes have none — those sprites display unlit only.
-   */
-  render?: Uint8Array;
+  /** Path-traced lit render (sRGB RGBA, top-down). Required: the runtime
+   *  only displays shaded prerendered images. */
+  render: Uint8Array;
 }
 
 export interface SpriteSet {
@@ -43,13 +50,72 @@ export interface SpriteSet {
   sizes: [number, number][];
   origins: [number, number][];
   ppus: number[];
-  albedoLayers: Uint8Array[];
   gbufferLayers: Uint16Array[];
-  /** null = no baked render for this layer (uploads as transparent). */
-  renderLayers: (Uint8Array | null)[];
+  renderLayers: Uint8Array[];
 }
 
-export function bakeSpriteLayers(): SpriteLayer[] {
+/**
+ * Built-in boot environment: equirect gradient sky with a warm sun disc.
+ * The sun sits at the runtime's default key light direction (azimuth 60°,
+ * elevation 45° — keep in sync with main.ts) so the baked light agrees
+ * with the dynamic key light. Pure function, no external HDRI asset.
+ */
+function proceduralEnvironment(): PtEnvironment {
+  const w = 128;
+  const h = 64;
+  const az = (60 * Math.PI) / 180;
+  const el = (45 * Math.PI) / 180;
+  const sun: [number, number, number] = [
+    Math.cos(el) * Math.cos(az),
+    Math.sin(el),
+    Math.cos(el) * Math.sin(az),
+  ];
+  const data = new Float32Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const theta = (((y + 0.5) / h - 0.5) * Math.PI);
+    const dy = Math.sin(theta);
+    const r = Math.cos(theta);
+    for (let x = 0; x < w; x++) {
+      const phi = ((x + 0.5) / w - 0.5) * Math.PI * 2;
+      const dx = r * Math.cos(phi);
+      const dz = r * Math.sin(phi);
+      const dot = dx * sun[0] + dy * sun[1] + dz * sun[2];
+      // Sky above the horizon, dark neutral ground below.
+      const sky = dy > 0;
+      let cr: number;
+      let cg: number;
+      let cb: number;
+      if (sky) {
+        const t = dy; // 0 at horizon, 1 at zenith
+        cr = 0.9 + (0.25 - 0.9) * t;
+        cg = 0.85 + (0.35 - 0.85) * t;
+        cb = 0.8 + (0.55 - 0.8) * t;
+      } else {
+        cr = 0.15;
+        cg = 0.12;
+        cb = 0.1;
+      }
+      // Sun disc plus a broad warm glow.
+      const disc = Math.pow(Math.max(dot, 0), 150) * 30;
+      const glow = Math.pow(Math.max(dot, 0), 4) * 0.3;
+      const o = (y * w + x) * 4;
+      data[o] = cr + (disc + glow) * 1.0;
+      data[o + 1] = cg + (disc + glow) * 0.92;
+      data[o + 2] = cb + (disc + glow) * 0.78;
+      data[o + 3] = 1;
+    }
+  }
+  const texture = new DataTexture(data, w, h, RGBAFormat, FloatType);
+  texture.mapping = EquirectangularReflectionMapping;
+  texture.wrapS = ClampToEdgeWrapping;
+  texture.wrapT = ClampToEdgeWrapping;
+  texture.minFilter = LinearFilter;
+  texture.magFilter = LinearFilter;
+  texture.needsUpdate = true;
+  return { texture, name: 'procedural-sky', rotationDeg: 0, intensity: 1, exposure: 1 };
+}
+
+export async function bakeSpriteLayers(): Promise<SpriteLayer[]> {
   const prims = [
     getSphere(),
     getDonut(),
@@ -59,18 +125,28 @@ export function bakeSpriteLayers(): SpriteLayer[] {
     getPlane(),
     getSlab(),
   ];
-  return prims.map((prim) => {
-    const result = bakePrimitive(prim, RUNTIME_PPU);
-    return {
-      id: result.id,
-      pxPerUnit: RUNTIME_PPU,
-      width: result.width,
-      height: result.height,
-      originPx: result.originPx,
-      albedo: bakeFloatToBytes(result.albedo, result.width, result.height),
-      gbuffer: bakeFloatToHalf(result.gbuffer, result.width, result.height),
-    };
-  });
+  const pt = new PtBaker(DEFAULT_PT_SETTINGS, RUNTIME_PPU);
+  pt.setEnvironment(proceduralEnvironment());
+  const layers: SpriteLayer[] = [];
+  try {
+    for (const prim of prims) {
+      const result = bakePrimitive(prim, RUNTIME_PPU);
+      pt.setPrimitive(prim, RUNTIME_PPU);
+      const image = await pt.renderPass();
+      layers.push({
+        id: result.id,
+        pxPerUnit: RUNTIME_PPU,
+        width: result.width,
+        height: result.height,
+        originPx: result.originPx,
+        gbuffer: bakeFloatToHalf(result.gbuffer, result.width, result.height),
+        render: ptImageToLayerBytes(image),
+      });
+    }
+  } finally {
+    pt.dispose();
+  }
+  return layers;
 }
 
 export function layersToSet(layers: SpriteLayer[]): SpriteSet {
@@ -83,16 +159,16 @@ export function layersToSet(layers: SpriteLayer[]): SpriteSet {
     sizes: layers.map((l) => [l.width, l.height]),
     origins: layers.map((l) => l.originPx),
     ppus: layers.map((l) => l.pxPerUnit),
-    albedoLayers: layers.map((l) => padBytes(l.albedo, l.width, l.height, maxW, maxH)),
     gbufferLayers: layers.map((l) => padHalf(l.gbuffer, l.width, l.height, maxW, maxH)),
-    renderLayers: layers.map((l) =>
-      l.render ? padBytes(l.render, l.width, l.height, maxW, maxH) : null,
-    ),
+    renderLayers: layers.map((l) => padBytes(l.render, l.width, l.height, maxW, maxH)),
   };
 }
 
 export async function layerFromBundle(buffer: ArrayBuffer): Promise<SpriteLayer> {
-  const { manifest, albedo, gbuffer, render } = parseBake(buffer);
+  const { manifest, gbuffer, render } = parseBake(buffer);
+  if (!render) {
+    throw new Error('bundle has no render pass — re-bake with an environment');
+  }
   const w = manifest.sprite.width;
   const h = manifest.sprite.height;
   return {
@@ -101,9 +177,8 @@ export async function layerFromBundle(buffer: ArrayBuffer): Promise<SpriteLayer>
     width: w,
     height: h,
     originPx: manifest.sprite.originPx,
-    albedo: await decodePng(albedo, w, h),
     gbuffer: decodeExrGbuffer(await gbuffer.arrayBuffer(), w, h),
-    render: render ? await decodePng(render, w, h) : undefined,
+    render: await decodePng(render, w, h),
   };
 }
 
@@ -115,7 +190,7 @@ async function decodePng(blob: Blob, w: number, h: number): Promise<Uint8Array> 
   if (bitmap.width !== w || bitmap.height !== h) {
     const got = `${bitmap.width}x${bitmap.height}`;
     bitmap.close();
-    throw new Error(`albedo is ${got}, manifest says ${w}x${h}`);
+    throw new Error(`render is ${got}, manifest says ${w}x${h}`);
   }
   const canvas = document.createElement('canvas');
   canvas.width = w;
@@ -157,22 +232,6 @@ function decodeExrGbuffer(buffer: ArrayBuffer, w: number, h: number): Uint16Arra
 }
 
 // GL readback is bottom-up; uploads want top-down (row 0 = sprite top).
-function bakeFloatToBytes(rgba: Float32Array, w: number, h: number): Uint8Array {
-  const out = new Uint8Array(w * h * 4);
-  for (let y = 0; y < h; y++) {
-    const srcRow = (h - 1 - y) * w;
-    for (let x = 0; x < w; x++) {
-      const s = (srcRow + x) * 4;
-      const d = (y * w + x) * 4;
-      out[d] = quantize(rgba[s]);
-      out[d + 1] = quantize(rgba[s + 1]);
-      out[d + 2] = quantize(rgba[s + 2]);
-      out[d + 3] = quantize(rgba[s + 3]);
-    }
-  }
-  return out;
-}
-
 function bakeFloatToHalf(rgba: Float32Array, w: number, h: number): Uint16Array {
   const out = new Uint16Array(w * h * 4);
   for (let y = 0; y < h; y++) {
@@ -185,6 +244,17 @@ function bakeFloatToHalf(rgba: Float32Array, w: number, h: number): Uint16Array 
       out[d + 2] = DataUtils.toHalfFloat(rgba[s + 2]);
       out[d + 3] = DataUtils.toHalfFloat(rgba[s + 3]);
     }
+  }
+  return out;
+}
+
+// PtImage bytes are in GL readback order (bottom-up); flip to top-down.
+function ptImageToLayerBytes(image: { width: number; height: number; rgba: Uint8Array }): Uint8Array {
+  const { width: w, height: h, rgba } = image;
+  const out = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const s = (h - 1 - y) * w * 4;
+    out.set(rgba.subarray(s, s + w * 4), y * w * 4);
   }
   return out;
 }
@@ -218,8 +288,4 @@ function padHalf(src: Uint16Array, w: number, h: number, maxW: number, maxH: num
     }
   }
   return out;
-}
-
-function quantize(v: number): number {
-  return Math.round(Math.min(1, Math.max(0, v)) * 255);
 }

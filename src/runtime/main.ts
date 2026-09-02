@@ -5,9 +5,10 @@ import {
   layerFromBundle,
   layersToSet,
   type SpriteLayer,
+  type SpriteSet,
 } from './assets.js';
 import { Renderer } from './renderer.js';
-import { World, type DisplayMode } from './world.js';
+import { World } from './world.js';
 import { APP_VERSION } from '../version.js';
 
 const PPU = RUNTIME_PPU;
@@ -23,9 +24,10 @@ const HIGHLIGHT_COLOR: [number, number, number] = [0.55, 0.62, 0.75];
 const statusEl = document.getElementById('status')!;
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 
-const layers: SpriteLayer[] = bakeSpriteLayers();
-let sprites = layersToSet(layers);
-const layerOf = new Map(sprites.ids.map((id, k) => [id, k]));
+let layers: SpriteLayer[] = [];
+let sprites: SpriteSet;
+let layerOf = new Map<string, number>();
+let renderer: Renderer;
 
 let minU = Infinity;
 let maxU = -Infinity;
@@ -57,15 +59,6 @@ function pickGround(px: number, py: number): [number, number] {
   return screenToGround((px - originX) / PPU, -(py - originY) / PPU);
 }
 
-const renderer = new Renderer(
-  canvas,
-  sprites.albedoLayers,
-  sprites.renderLayers,
-  sprites.gbufferLayers,
-  sprites.maxW,
-  sprites.maxH,
-);
-
 interface LightState {
   azimuthDeg: number;
   elevationDeg: number;
@@ -89,10 +82,9 @@ function srgbToLinear(c: number): number {
 }
 
 function updateLightUniforms(): void {
-  // Global dynamic-light switch: pin shading to identity — unlit sprites
-  // show raw albedo, baked sprites the pure prerendered image, the ground
-  // its flat vertex color. (Zeroing ambient too would multiply everything
-  // to black.)
+  // Global dynamic-light switch: pin shading to identity — sprites show the
+  // pure prerendered image, the ground its flat vertex color. (Zeroing
+  // ambient too would multiply everything to black.)
   if (!light.enabled) {
     renderer.setLight({ dir: [0, 1, 0], key: [0, 0, 0], ambient: [1, 1, 1] });
     return;
@@ -138,56 +130,19 @@ bindLightInput('light-amb', 'light-amb-v', (v) => v.toFixed(2), (v) => (light.am
 (document.getElementById('light-on') as HTMLInputElement).addEventListener('change', (e) => {
   light.enabled = (e.target as HTMLInputElement).checked;
 });
-(document.getElementById('default-mode') as HTMLSelectElement).addEventListener('change', (e) => {
-  defaultDisplayMode = (e.target as HTMLSelectElement).value as DisplayMode;
-});
-
-{
-  const ground = new Float32Array(GRID_N * GRID_N * 6 * 5);
-  let o = 0;
-  const push = (x: number, z: number, c: [number, number, number]) => {
-    const [px, py] = toPx(x, z);
-    ground[o++] = px;
-    ground[o++] = py;
-    ground[o++] = c[0];
-    ground[o++] = c[1];
-    ground[o++] = c[2];
-  };
-  for (let i = 0; i < GRID_N; i++) {
-    for (let j = 0; j < GRID_N; j++) {
-      const c = (i + j) % 2 === 0 ? GRID_COLORS : GRID_COLORS_ALT;
-      push(i, j, c);
-      push(i + 1, j, c);
-      push(i + 1, j + 1, c);
-      push(i, j, c);
-      push(i + 1, j + 1, c);
-      push(i, j + 1, c);
-    }
-  }
-  renderer.setGround(ground);
-}
 
 const world = new World();
-world.place(3, 3, 'cube');
-world.place(4, 4, 'cube');
-world.place(5, 4, 'sphere');
-world.place(7, 6, 'donut');
-world.place(2, 7, 'cylinder');
-world.place(8, 3, 'capsule');
-world.place(5, 8, 'plane');
-world.place(6, 2, 'slab');
 
 let tool = 'cube';
 let hover: [number, number] | null = null;
-let instances = new Float32Array(256 * 12);
+let instances = new Float32Array(256 * 8);
 const highlightData = new Float32Array(6 * 5);
-let defaultDisplayMode: DisplayMode = 'unlit';
 
 function renderFrame(): void {
   updateLightUniforms();
   const placed = world.list();
-  if (instances.length < placed.length * 12) {
-    instances = new Float32Array(Math.max(placed.length * 12, instances.length * 2));
+  if (instances.length < placed.length * 8) {
+    instances = new Float32Array(Math.max(placed.length * 8, instances.length * 2));
   }
   let count = 0;
   for (const p of placed) {
@@ -196,21 +151,14 @@ function renderFrame(): void {
     const [ox, oy] = sprites.origins[layer];
     const [w, h] = sprites.sizes[layer];
     const [cx, cy] = toPx(p.x, p.z);
-    // Baked mode silently falls back to unlit when the layer has no
-    // baked render pass (v3 bundles, boot bakes).
-    const baked = p.displayMode === 'baked' && sprites.renderLayers[layer] ? 1 : 0;
-    instances[count * 12] = cx - ox * scale;
-    instances[count * 12 + 1] = cy - oy * scale;
-    instances[count * 12 + 2] = layer;
-    instances[count * 12 + 3] = VIEW_DIR[0] * p.x + VIEW_DIR[2] * p.z;
-    instances[count * 12 + 4] = w * scale;
-    instances[count * 12 + 5] = h * scale;
-    instances[count * 12 + 6] = w;
-    instances[count * 12 + 7] = h;
-    instances[count * 12 + 8] = baked;
-    instances[count * 12 + 9] = 0;
-    instances[count * 12 + 10] = 0;
-    instances[count * 12 + 11] = 0;
+    instances[count * 8] = cx - ox * scale;
+    instances[count * 8 + 1] = cy - oy * scale;
+    instances[count * 8 + 2] = layer;
+    instances[count * 8 + 3] = VIEW_DIR[0] * p.x + VIEW_DIR[2] * p.z;
+    instances[count * 8 + 4] = w * scale;
+    instances[count * 8 + 5] = h * scale;
+    instances[count * 8 + 6] = w;
+    instances[count * 8 + 7] = h;
     count++;
   }
 
@@ -248,15 +196,9 @@ function setStatus(): void {
 function applyTool(gx: number, gz: number): void {
   if (tool === 'eraser') {
     world.removeAt(gx, gz);
-  } else if (tool !== 'mode') {
-    world.place(gx - 0.5, gz - 0.5, tool, defaultDisplayMode);
+  } else {
+    world.place(gx - 0.5, gz - 0.5, tool);
   }
-}
-
-/** The mode-toggle tool flips an existing placement on click (not drag). */
-function toggleMode(gx: number, gz: number): void {
-  const p = world.toggleModeAt(gx, gz);
-  if (p) statusEl.textContent = `${p.primId} -> ${p.displayMode}`;
 }
 
 function pointerGround(e: PointerEvent): [number, number] {
@@ -277,11 +219,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (e.button === 2) {
     world.removeAt(gx, gz);
   } else if (e.button === 0) {
-    if (tool === 'mode') {
-      toggleMode(gx, gz);
-    } else {
-      applyTool(gx, gz);
-    }
+    applyTool(gx, gz);
   }
   setStatus();
 });
@@ -336,7 +274,6 @@ async function loadBundle(file: File): Promise<void> {
     sprites = layersToSet(layers);
     layerOf.set(layer.id, sprites.ids.length - 1);
     renderer.setSprites(
-      sprites.albedoLayers,
       sprites.renderLayers,
       sprites.gbufferLayers,
       sprites.maxW,
@@ -347,18 +284,74 @@ async function loadBundle(file: File): Promise<void> {
     button.textContent = layer.id;
     toolbar.insertBefore(button, toolbar.querySelector('[data-tool="eraser"]'));
     activateTool(button);
-    world.place(9.5, 5.5, layer.id, defaultDisplayMode);
+    world.place(9.5, 5.5, layer.id);
     const [w, h] = sprites.sizes[layerOf.get(layer.id)!];
-    statusEl.textContent = `Loaded ${layer.id} — ${w}x${h} px @ ${layer.pxPerUnit} px/unit${layer.render ? ' — baked render available' : ''}`;
+    statusEl.textContent = `Loaded ${layer.id} — ${w}x${h} px @ ${layer.pxPerUnit} px/unit`;
   } catch (err) {
     console.error(err);
     statusEl.textContent = `Load failed: ${err instanceof Error ? err.message : String(err)}`;
   }
 }
 
-setStatus();
-const raf = () => {
-  renderFrame();
-  requestAnimationFrame(raf);
-};
-raf();
+async function main(): Promise<void> {
+  statusEl.textContent = 'Baking sprites…';
+  try {
+    layers = await bakeSpriteLayers();
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = `Boot bake failed: ${err instanceof Error ? err.message : String(err)}`;
+    return;
+  }
+  sprites = layersToSet(layers);
+  layerOf = new Map(sprites.ids.map((id, k) => [id, k]));
+  renderer = new Renderer(
+    canvas,
+    sprites.renderLayers,
+    sprites.gbufferLayers,
+    sprites.maxW,
+    sprites.maxH,
+  );
+
+  {
+    const ground = new Float32Array(GRID_N * GRID_N * 6 * 5);
+    let o = 0;
+    const push = (x: number, z: number, c: [number, number, number]) => {
+      const [px, py] = toPx(x, z);
+      ground[o++] = px;
+      ground[o++] = py;
+      ground[o++] = c[0];
+      ground[o++] = c[1];
+      ground[o++] = c[2];
+    };
+    for (let i = 0; i < GRID_N; i++) {
+      for (let j = 0; j < GRID_N; j++) {
+        const c = (i + j) % 2 === 0 ? GRID_COLORS : GRID_COLORS_ALT;
+        push(i, j, c);
+        push(i + 1, j, c);
+        push(i + 1, j + 1, c);
+        push(i, j, c);
+        push(i + 1, j + 1, c);
+        push(i, j + 1, c);
+      }
+    }
+    renderer.setGround(ground);
+  }
+
+  world.place(3, 3, 'cube');
+  world.place(4, 4, 'cube');
+  world.place(5, 4, 'sphere');
+  world.place(7, 6, 'donut');
+  world.place(2, 7, 'cylinder');
+  world.place(8, 3, 'capsule');
+  world.place(5, 8, 'plane');
+  world.place(6, 2, 'slab');
+
+  setStatus();
+  const raf = () => {
+    renderFrame();
+    requestAnimationFrame(raf);
+  };
+  raf();
+}
+
+void main();
