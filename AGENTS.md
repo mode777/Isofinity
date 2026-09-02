@@ -42,6 +42,11 @@ it as the reference architecture; design against it.
 - `npm run preview` — serve the built `dist/`
 - No test or lint setup yet.
 
+## Workflow
+
+- Always commit and push after implementing an OpenSpec change with
+  `/opsx-apply` (include the change's `openspec/changes/<name>/` artifacts).
+
 ## Versioning
 
 - Every tool (bake tool and runtime editor) surfaces one shared build

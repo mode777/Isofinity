@@ -75,11 +75,25 @@ fragment shader:
   trade is the accepted experiment (additive compositing was tried first
   and rejected).
 - `L` is a world-space direction toward the key light, parametrized by
-  azimuth/elevation sliders; key color (color picker) and intensity, plus a
-  linear ambient scalar (the fill term), are uploaded as uniforms every
-  frame — all realtime-tweakable in the "Key light" panel. The **Dynamic
-  light** checkbox pins the factor to identity (key zero, ambient one):
-  sprites render the pure prerendered image.
+  azimuth/elevation sliders; key color (color picker) and intensity, are
+  uploaded as uniforms every frame — all realtime-tweakable in the
+  "Key light" panel. The **Dynamic light** checkbox pins the factor to
+  identity (key zero, ambient one): sprites render the pure prerendered
+  image.
+- **Sun position** sliders (time of day 0–24 h, day of year 1–365,
+  latitude −66°…+66°) compute the sun's azimuth/elevation via
+  `src/shared/sun.ts` (NOAA-style declination + hour angle; local solar
+  time — the sun transits at 12:00, no timezone/longitude input) and
+  write through to the manual azimuth/elevation sliders and readouts.
+  Computed elevation clamps into the elevation slider's range, so nights
+  settle at the slider minimum (a grazing light) rather than pointing up
+  from underground; azimuth wraps into [0°, 360°). Manual az/el edits
+  keep overriding the direction until a sun slider moves again. The
+  sun-disc in the boot-baked procedural environment still aims at the
+  built-in default key direction — it does not follow the sliders.
+- The ambient term is a **color**: an ambient color picker (sRGB,
+  converted to linear per channel — brightness comes from the picked
+  color, there is no separate ambient scalar).
 - The ground shades with `N = (0,1,0)` so it responds to the same light.
 
 ## Renderer

@@ -1,4 +1,5 @@
 import { SCREEN_UP, VIEW_DIR, groundToScreen, screenToGround } from '../shared/iso.js';
+import { sunDirection } from '../shared/sun.js';
 import {
   RUNTIME_PPU,
   bakeSpriteLayers,
@@ -64,7 +65,7 @@ interface LightState {
   elevationDeg: number;
   intensity: number;
   colorHex: string;
-  ambient: number;
+  ambientHex: string;
   enabled: boolean;
 }
 
@@ -73,12 +74,20 @@ const light: LightState = {
   elevationDeg: 45,
   intensity: 1.2,
   colorHex: '#fff1dd',
-  ambient: 0.4,
+  ambientHex: '#a8a8a8',
   enabled: true,
 };
 
 function srgbToLinear(c: number): number {
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function srgbHexToLinearRgb(hex: string): [number, number, number] {
+  return [
+    srgbToLinear(parseInt(hex.slice(1, 3), 16) / 255),
+    srgbToLinear(parseInt(hex.slice(3, 5), 16) / 255),
+    srgbToLinear(parseInt(hex.slice(5, 7), 16) / 255),
+  ];
 }
 
 function updateLightUniforms(): void {
@@ -96,13 +105,12 @@ function updateLightUniforms(): void {
     Math.sin(el),
     Math.cos(el) * Math.sin(az),
   ];
-  const r = srgbToLinear(parseInt(light.colorHex.slice(1, 3), 16) / 255) * light.intensity;
-  const g = srgbToLinear(parseInt(light.colorHex.slice(3, 5), 16) / 255) * light.intensity;
-  const b = srgbToLinear(parseInt(light.colorHex.slice(5, 7), 16) / 255) * light.intensity;
+  const kr = srgbHexToLinearRgb(light.colorHex);
+  const intensity = light.intensity;
   renderer.setLight({
     dir,
-    key: [r, g, b],
-    ambient: [light.ambient, light.ambient, light.ambient],
+    key: [kr[0] * intensity, kr[1] * intensity, kr[2] * intensity],
+    ambient: srgbHexToLinearRgb(light.ambientHex),
   });
 }
 
@@ -123,13 +131,68 @@ function bindLightInput(
 bindLightInput('light-az', 'light-az-v', (v) => `${v}°`, (v) => (light.azimuthDeg = v));
 bindLightInput('light-el', 'light-el-v', (v) => `${v}°`, (v) => (light.elevationDeg = v));
 bindLightInput('light-int', 'light-int-v', (v) => v.toFixed(2), (v) => (light.intensity = v));
-bindLightInput('light-amb', 'light-amb-v', (v) => v.toFixed(2), (v) => (light.ambient = v));
+(document.getElementById('light-ambient') as HTMLInputElement).addEventListener('input', (e) => {
+  light.ambientHex = (e.target as HTMLInputElement).value;
+});
 (document.getElementById('light-color') as HTMLInputElement).addEventListener('input', (e) => {
   light.colorHex = (e.target as HTMLInputElement).value;
 });
 (document.getElementById('light-on') as HTMLInputElement).addEventListener('change', (e) => {
   light.enabled = (e.target as HTMLInputElement).checked;
 });
+
+const azInput = document.getElementById('light-az') as HTMLInputElement;
+const elInput = document.getElementById('light-el') as HTMLInputElement;
+const azOutput = document.getElementById('light-az-v')!;
+const elOutput = document.getElementById('light-el-v')!;
+const sunHourInput = document.getElementById('sun-hour') as HTMLInputElement;
+const sunDayInput = document.getElementById('sun-day') as HTMLInputElement;
+const sunLatInput = document.getElementById('sun-lat') as HTMLInputElement;
+
+// Sun-position sliders overwrite the manual azimuth/elevation state and
+// sync the manual sliders + readouts to the computed sun.
+function syncManualSliders(): void {
+  azInput.value = String(light.azimuthDeg);
+  elInput.value = String(light.elevationDeg);
+  azOutput.textContent = `${light.azimuthDeg}°`;
+  elOutput.textContent = `${light.elevationDeg}°`;
+}
+
+function applySunPosition(): void {
+  const sun = sunDirection(
+    Number(sunDayInput.value),
+    Number(sunHourInput.value),
+    Number(sunLatInput.value),
+  );
+  // Clamp elevation into the manual slider's range (nights become a
+  // grazing light) and keep azimuth in [0, 360).
+  const clampedEl = Math.min(
+    Number(elInput.max),
+    Math.max(Number(elInput.min), sun.elevationDeg),
+  );
+  light.azimuthDeg = Math.round(sun.azimuthDeg) % 360;
+  light.elevationDeg = Math.round(clampedEl);
+  syncManualSliders();
+}
+
+function formatHour(v: number): string {
+  const h = Math.floor(v);
+  const m = Math.round((v - h) * 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function bindSunInput(id: string, outId: string, format: (v: number) => string): void {
+  const input = document.getElementById(id) as HTMLInputElement;
+  const output = document.getElementById(outId)!;
+  input.addEventListener('input', () => {
+    output.textContent = format(Number(input.value));
+    applySunPosition();
+  });
+}
+
+bindSunInput('sun-hour', 'sun-hour-v', formatHour);
+bindSunInput('sun-day', 'sun-day-v', (v) => String(v));
+bindSunInput('sun-lat', 'sun-lat-v', (v) => `${v}°`);
 
 const world = new World();
 
