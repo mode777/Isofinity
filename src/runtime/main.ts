@@ -89,8 +89,9 @@ function srgbToLinear(c: number): number {
 }
 
 function updateLightUniforms(): void {
-  // Global dynamic-light switch: baked sprites are unaffected either way;
-  // unlit sprites receive no key or ambient light while disabled.
+  // Global dynamic-light switch: zeroing key and ambient leaves unlit
+  // sprites as raw albedo and baked sprites as the pure prerendered image
+  // (the baked additive term scales with uKeyLight).
   if (!light.enabled) {
     renderer.setLight({ dir: [0, 1, 0], key: [0, 0, 0], ambient: [0, 0, 0] });
     return;

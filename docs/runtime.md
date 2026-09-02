@@ -55,16 +55,21 @@ placements in the Display panel:
 
 - **unlit** — today's behavior: albedo shaded per pixel by the key +
   ambient dynamic lights over the baked g-buffer normal.
-- **baked** — samples the path-traced `render` pass; blending uses that
-  pass's (antialiased) alpha. Sprites whose layer has no render pass
-  (v3 bundles, boot bakes) always display unlit regardless of mode.
+- **baked** — samples the path-traced `render` pass and applies the dynamic
+  key light **additively** on top of it: the texel is decoded to linear, the
+  key contribution `keyColor × max(dot(N, L), 0)` over the baked g-buffer
+  normal is added in linear space (no ambient term), and the sum is encoded
+  back to sRGB. Blending uses that pass's (antialiased) alpha. Sprites whose
+  layer has no render pass (v3 bundles, boot bakes) always display unlit
+  regardless of mode.
 
 The **Dynamic light** checkbox disables the key/ambient lights globally:
-baked sprites are unaffected, unlit sprites show raw albedo (and the ground
-goes flat). Occlusion, `gl_FragDepth`, and cursor hit-testing are identical
-in every mode — depth always comes from the baked g-buffer and coverage
-always from the raster albedo alpha, never from the render pass's soft
-edges. Display mode changes shading only.
+unlit sprites show raw albedo, baked sprites fall back to the pure
+prerendered image (the additive term scales with the key light), and the
+ground goes flat. Occlusion, `gl_FragDepth`, and cursor hit-testing are
+identical in every mode — depth always comes from the baked g-buffer and
+coverage always from the raster albedo alpha, never from the render pass's
+soft edges. Display mode changes shading only.
 
 ## Lighting
 
@@ -74,12 +79,17 @@ fragment shader (unlit display mode; see Display modes):
 - `color = linearToSrgb(srgbToLinear(albedo) * (ambient + key * max(dot(N, L), 0)))`
   — albedo is sRGB-encoded (bake convention), shading happens in linear
   space, the default framebuffer is sRGB.
+- Baked sprites receive the same key light **additively**:
+  `linearToSrgb(srgbToLinear(render) + key * max(dot(N, L), 0))` — the
+  prerendered image already carries its own baked light, so the dynamic
+  term is layered on (an experiment in lighting the prerender as a post
+  effect); it receives no ambient term.
 - `L` is a world-space direction toward the key light, parametrized by
   azimuth/elevation sliders; key color (color picker) and intensity, plus a
   linear ambient scalar, are uploaded as uniforms every frame — all
   realtime-tweakable in the "Key light" panel. The **Dynamic light**
   checkbox zeroes both terms (unlit sprites render raw albedo; baked
-  sprites are untouched).
+  sprites render the pure prerendered image).
 - The ground shades with `N = (0,1,0)` so it responds to the same light.
 
 ## Renderer
