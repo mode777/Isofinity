@@ -42,21 +42,33 @@ it as the reference architecture; design against it.
 - `npm run preview` — serve the built `dist/`
 - No test or lint setup yet.
 
+## Versioning
+
+- Every tool (bake tool and runtime editor) surfaces one shared build
+  version, computed at build/dev time in `vite.config.ts` from git:
+  `v<commit count>+<short hash>` (e.g. `v142+9f2a1bc`). It increases by one
+  with each commit automatically — never bump it by hand.
+- The constant is injected as `__APP_VERSION__` and consumed via
+  `APP_VERSION` (`src/version.ts`); both pages show it next to their title.
+- Builds without git metadata (zip download, unusual CI) fall back to
+  `dev`. The Pages deploy uses `fetch-depth: 0` so the count is exact.
+
 ## Current state
 
 - Bake tool (`bake.html`, `src/bake/`): bakes test primitives (sphere,
-  donut, cube, cylinder, capsule, plane, slab) into per-asset sprite
-  passes — albedo (PNG) and a merged g-buffer (float EXR: rgb = world
-  normals, a = linear ray depth) — shipped as a zip bundle with a manifest
-  (`format: isoinfinity-bake/3`). Arbitrary cuboids bake directly; the
-  1×1×1 cube is just the default cell. Conventions in
+  donut, cube, cylinder, capsule, plane, slab) and glTF models into
+  per-asset sprite passes — albedo (PNG), a merged g-buffer (float EXR:
+  rgb = world normals, a = linear ray depth), and optional path-traced
+  `render` (HDRI-lit, ACES) + `ao` passes — shipped as a zip bundle with a
+  manifest (`format: isoinfinity-bake/4`). Arbitrary cuboids bake directly;
+  the 1×1×1 cube is just the default cell. Conventions in
   `docs/bake-pipeline.md`.
 - Runtime editor (`index.html`, `src/runtime/`, shared math in
   `src/shared/`): bakes sprites at page load, places them freely on an
   isometric ground plane, and loads extra objects from bake zip bundles.
-  Raw WebGL2 compositor with per-pixel sprite
-  occlusion and deferred-style directional lighting (key + ambient, shades
-  the baked albedo/normal G-buffer) with realtime light controls. See
-  `docs/runtime.md`.
+  Raw WebGL2 compositor with per-pixel sprite occlusion, deferred-style
+  directional lighting (key + ambient, shades the baked albedo/normal
+  G-buffer), per-sprite baked/unlit display modes, and a global
+  dynamic-light switch. See `docs/runtime.md`.
 - No released API: expect breaking changes while the architecture is under
   design.

@@ -20,8 +20,10 @@ import {
   getSphere,
   type Primitive,
 } from './primitives.js';
+import { APP_VERSION } from '../version.js';
 
 const statusEl = document.getElementById('status')!;
+document.getElementById('app-version')!.textContent = APP_VERSION;
 const canvases = {
   albedo: document.getElementById('pass-albedo') as HTMLCanvasElement,
   render: document.getElementById('pass-render') as HTMLCanvasElement,

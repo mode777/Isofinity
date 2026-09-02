@@ -60,6 +60,11 @@
         color: #8a8f98;
         font-size: 0.85rem;
       }
+      .version {
+        color: #8a8f98;
+        font-size: 0.85rem;
+        font-weight: normal;
+      }
       #status {
         color: #8a8f98;
         min-height: 1.4em;
@@ -92,7 +97,7 @@
     </style>
   </head>
   <body>
-    <h1>Isofinity — Bake Tool</h1>
+    <h1>Isofinity — Bake Tool <span id="app-version" class="version"></span></h1>
     <p>
       Bakes a primitive or glTF model into per-asset sprite passes: albedo
       (sRGB PNG), a merged g-buffer (float EXR: rgb = world-space normal,

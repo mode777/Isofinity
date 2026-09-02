@@ -8,10 +8,13 @@ import {
 } from './assets.js';
 import { Renderer } from './renderer.js';
 import { World, type DisplayMode } from './world.js';
+import { APP_VERSION } from '../version.js';
 
 const PPU = RUNTIME_PPU;
 const MARGIN = 8;
 const GRID_N = 12;
+
+document.getElementById('app-version')!.textContent = APP_VERSION;
 
 const GRID_COLORS: [number, number, number] = [0.145, 0.153, 0.173];
 const GRID_COLORS_ALT: [number, number, number] = [0.169, 0.178, 0.2];
