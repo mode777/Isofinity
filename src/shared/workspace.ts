@@ -105,14 +105,12 @@ export async function initWorkspace(): Promise<void> {
 
 function assertConnected(): FileSystemDirectoryHandle {
   if (state.kind !== 'connected' || !dir) {
-    throw new Error('workspace: not connected');
+    throw new Error('workspace: not connected — open a workspace first');
   }
   return dir;
 }
 
-/** Create any missing convention folders (idempotent). */
-export async function ensureConventionFolders(): Promise<void> {
-  const root = assertConnected();
+async function ensureFolders(root: FileSystemDirectoryHandle): Promise<void> {
   for (const name of WORKSPACE_FOLDERS) {
     try {
       await root.getDirectoryHandle(name, { create: true });
@@ -124,10 +122,17 @@ export async function ensureConventionFolders(): Promise<void> {
   }
 }
 
+/** Create any missing convention folders (idempotent). */
+export async function ensureConventionFolders(): Promise<void> {
+  await ensureFolders(assertConnected());
+}
+
 async function connect(handle: FileSystemDirectoryHandle): Promise<void> {
   dir = handle;
   stored = handle;
-  await ensureConventionFolders();
+  // Run against the handle directly: the connected state is only set once
+  // the convention folders exist.
+  await ensureFolders(handle);
   await setState({ kind: 'connected', name: handle.name });
 }
 
