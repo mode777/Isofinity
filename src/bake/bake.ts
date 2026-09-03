@@ -1,5 +1,4 @@
 import {
-  Color,
   ColorManagement,
   DataTexture,
   GLSL3,
@@ -34,14 +33,12 @@ ColorManagement.enabled = false;
 export interface BakeResult {
   id: string;
   label: string;
-  albedoHex: number;
   size: Vec3;
   width: number;
   height: number;
   pxPerUnit: number;
   originPx: [number, number];
   camera: { azimuthDeg: number; elevationDeg: number; viewDir: [number, number, number] };
-  albedo: Float32Array;
   gbuffer: Float32Array;
 }
 
@@ -59,10 +56,11 @@ void main() {
 }
 `;
 
-// Albedo sources, selected by uSrgb/uUseMap:
-// - uSrgb = 0 (primitives): flat uAlbedo, already sRGB-encoded, written raw.
-// - uSrgb = 1 (glTF groups): texel (or factor when uUseMap = 0) is decoded
-//   sRGB -> linear, multiplied by the linear uFactor, re-encoded to sRGB.
+// Coverage sources, selected by uSrgb/uUseMap (alpha only — color data is
+// the path-traced render pass's job):
+// - uSrgb = 0 (primitives): opaque, coverage 1.
+// - uSrgb = 1 (glTF groups): texel alpha (or 1 when uUseMap = 0) multiplied
+//   by the factor alpha.
 // Alpha: uAlphaMode = 1 (glTF MASK) discards below uAlphaCutoff; everything
 // else bakes opaque (coverage 1).
 const FRAGMENT_SHADER = `
@@ -70,7 +68,6 @@ in vec3 vWorldPos;
 in vec3 vWorldNormal;
 in vec2 vUv;
 
-uniform vec3 uAlbedo;
 uniform vec3 uCubeMin;
 uniform vec3 uCubeMax;
 uniform vec3 uViewDir;
@@ -81,20 +78,7 @@ uniform int uSrgb;
 uniform int uAlphaMode;
 uniform float uAlphaCutoff;
 
-layout(location = 0) out vec4 outAlbedo;
-layout(location = 1) out vec4 outGbuffer;
-
-vec3 srgbToLinear(vec3 c) {
-  vec3 lo = c / 12.92;
-  vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
-  return mix(lo, hi, step(vec3(0.04045), c));
-}
-
-vec3 linearToSrgb(vec3 c) {
-  vec3 lo = c * 12.92;
-  vec3 hi = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;
-  return mix(lo, hi, step(vec3(0.0031308), c));
-}
+layout(location = 0) out vec4 outGbuffer;
 
 void main() {
   vec3 cubePos = (vWorldPos - uCubeMin) / (uCubeMax - uCubeMin);
@@ -102,20 +86,15 @@ void main() {
     discard;
   }
   float alpha;
-  vec3 albedoSrgb;
   if (uSrgb == 1) {
     vec4 texel = (uUseMap == 1) ? texture(uAlbedoMap, vUv) : vec4(1.0);
-    vec4 linear = vec4(srgbToLinear(texel.rgb), texel.a) * uFactor;
-    alpha = linear.a;
-    albedoSrgb = linearToSrgb(linear.rgb);
+    alpha = texel.a * uFactor.a;
   } else {
     alpha = 1.0;
-    albedoSrgb = (uUseMap == 1) ? texture(uAlbedoMap, vUv).rgb : uAlbedo;
   }
   if (uAlphaMode == 1 && alpha < uAlphaCutoff) {
     discard;
   }
-  outAlbedo = vec4(albedoSrgb, 1.0);
   outGbuffer = vec4(normalize(vWorldNormal), dot(vWorldPos, uViewDir));
 }
 `;
@@ -159,7 +138,8 @@ function halfToFloat(h: number): number {
   return sign * Math.pow(2, exp - 15) * (1 + frac / 1024);
 }
 
-/** Decode one half-float bit pattern; shared by MRT and PT-AO readbacks. */
+/** Decode one half-float bit pattern; shared by the bake readback and the
+ *  bundle g-buffer decoder. */
 export { halfToFloat };
 
 interface DrawGroup {
@@ -203,7 +183,6 @@ export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT):
   }
 
   const target = new WebGLRenderTarget(width, height, {
-    count: 2,
     type: HalfFloatType,
     format: RGBAFormat,
     minFilter: NearestFilter,
@@ -220,7 +199,6 @@ export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT):
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
-        uAlbedo: { value: new Color(prim.albedoHex) },
         uCubeMin: { value: new Vector3(0, 0, 0) },
         uCubeMax: { value: new Vector3(prim.size[0], prim.size[1], prim.size[2]) },
         uViewDir: { value: ISO_VIEW_DIR.clone() },
@@ -240,12 +218,11 @@ export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT):
   r.setRenderTarget(target);
   r.setClearColor(0x000000, 0);
   r.clear(true, true, false);
-  // One draw call per material group into the shared MRT targets; the depth
-  // buffer resolves occlusion between groups.
+  // One draw call per material group into the shared g-buffer target; the
+  // depth buffer resolves occlusion between groups.
   r.render(scene, frame.camera);
 
-  const albedo = readAttachment(r, target, 0, width, height);
-  const gbuffer = readAttachment(r, target, 1, width, height);
+  const gbuffer = readAttachment(r, target, 0, width, height);
 
   r.setRenderTarget(null);
   target.dispose();
@@ -255,7 +232,6 @@ export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT):
   return {
     id: prim.id,
     label: prim.label,
-    albedoHex: prim.albedoHex,
     size: [prim.size[0], prim.size[1], prim.size[2]],
     width,
     height,
@@ -266,7 +242,6 @@ export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT):
       elevationDeg: ISO_ELEVATION_DEG,
       viewDir: [ISO_VIEW_DIR.x, ISO_VIEW_DIR.y, ISO_VIEW_DIR.z],
     },
-    albedo,
     gbuffer,
   };
 }

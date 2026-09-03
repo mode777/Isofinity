@@ -7,7 +7,7 @@ import {
 import { depthRange } from '../../bake/iso.js';
 import type { Vec3 } from '../../shared/iso.js';
 import { placeInWorld } from '../store/world.js';
-import { runAoPass, runRenderPass, saveSprite } from '../store/bake.js';
+import { runRenderPass, saveSprite } from '../store/bake.js';
 import { useEditor } from '../store/editor.js';
 import { EditorToolbar } from './EditorToolbar.js';
 
@@ -27,10 +27,8 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
   const { doc } = props;
   const [mode, setMode] = useState<GBufferMode>('normal');
   const setStatus = useEditor((s) => s.setStatus);
-  const albedoRef = useRef<HTMLCanvasElement>(null);
   const gbufferRef = useRef<HTMLCanvasElement>(null);
   const renderRef = useRef<HTMLCanvasElement>(null);
-  const aoRef = useRef<HTMLCanvasElement>(null);
 
   const result = doc.result;
 
@@ -44,14 +42,6 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
     }
     void saveSprite(doc.docId, name);
   };
-
-  useEffect(() => {
-    if (!result) return;
-    blit(
-      albedoRef.current,
-      rgbaToCanvas(result.albedo, result.width, result.height, (r, g, b, a) => [r, g, b, a]),
-    );
-  }, [result]);
 
   useEffect(() => {
     if (!result) return;
@@ -73,11 +63,6 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
     if (!doc.render) return;
     blit(renderRef.current, rgbaBytesToCanvas(doc.render.rgba, doc.render.width, doc.render.height));
   }, [doc.render]);
-
-  useEffect(() => {
-    if (!doc.ao) return;
-    blit(aoRef.current, rgbaBytesToCanvas(doc.ao.rgba, doc.ao.width, doc.ao.height));
-  }, [doc.ao]);
 
   return (
     <div className="sprite-editor">
@@ -101,10 +86,6 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
         <p className="viewonly">View-only — {doc.viewOnlyReason}</p>
       ) : null}
       <div className="passes">
-        <figure>
-          <canvas ref={albedoRef} />
-          <figcaption>albedo</figcaption>
-        </figure>
         <figure>
           <canvas ref={gbufferRef} />
           <figcaption>
@@ -134,19 +115,6 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
               onClick={() => void runRenderPass(doc.docId)}
             >
               {doc.busy ? 'rendering…' : doc.render ? 're-render' : 'bake'}
-            </button>
-          </figcaption>
-        </figure>
-        <figure>
-          <canvas ref={aoRef} className={doc.ao ? '' : 'empty'} />
-          <figcaption>
-            ao{' '}
-            <button
-              disabled={!result || doc.viewOnly || doc.busy}
-              title="Path-traced ambient occlusion pass"
-              onClick={() => void runAoPass(doc.docId)}
-            >
-              {doc.ao ? 're-run' : 'bake'}
             </button>
           </figcaption>
         </figure>

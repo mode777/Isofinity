@@ -82,7 +82,6 @@ export interface BakeDocument {
   settings: PtSettings;
   result: BakeResult | null;
   render: PtImage | null;
-  ao: PtImage | null;
   /** Notes about skipped glTF content for the current source. */
   notes: string[];
   /**

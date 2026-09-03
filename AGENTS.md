@@ -71,15 +71,15 @@ it as the reference architecture; design against it.
   saving; one live editor context per editor kind. See `docs/runtime.md`.
 - Bake pipeline (`src/bake/`): bakes test primitives (sphere, donut,
   cube, cylinder, capsule, plane, slab) and glTF models into per-asset
-  sprite passes — albedo (PNG), a merged g-buffer (float EXR: rgb = world
-  normals, a = linear ray depth), and an optional path-traced `render`
-  pass (HDRI-lit, ACES) — shipped as a zip-byte bundle named `<id>.sprite`
-  with a manifest (`format: isoinfinity-bake/5`, carrying `provenance`:
-  source, bake settings, environment so sprites re-bake in place; `/4`
-  opens view-only). Arbitrary cuboids bake directly; the 1×1×1 cube is
-  just the default cell. The path-traced `ao` pass is KNOWN BROKEN
-  (accumulates empty output) and will be replaced with a different
-  approach in a future change.
+  sprite passes — a merged g-buffer (float EXR: rgb = world normals,
+  a = linear ray depth) and an optional path-traced `render` pass
+  (HDRI-lit, ACES; required for placement) — shipped as a zip-byte bundle
+  named `<id>.sprite` with a manifest (`format: isoinfinity-bake/5`,
+  carrying `provenance`: source, bake settings, environment so sprites
+  re-bake in place; `/4` opens view-only). Legacy bundles that still
+  record albedo/ao pass entries load with those entries ignored.
+  Arbitrary cuboids bake directly; the 1×1×1 cube is just the default
+  cell.
 - Sprite→world handoff: a baked sprite document's passes become a world
   document layer in memory ("Place in world") — no bundle round trip.
 - Workspace binding (File System Access API, `src/shared/workspace.ts`;
@@ -90,6 +90,7 @@ it as the reference architecture; design against it.
   the workspace's `worlds/` folder.
 - Raw WebGL2 compositor (`src/runtime/renderer.ts`) with per-pixel sprite
   occlusion, deferred-style directional lighting (key + ambient, shades
-  the baked albedo/normal G-buffer), and a global dynamic-light switch.
+  the baked render image by the g-buffer normals), and a global
+  dynamic-light switch.
 - No released API: expect breaking changes while the architecture is under
   design.

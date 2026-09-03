@@ -5,7 +5,6 @@ import {
   downloadPositionDebug,
   loadHdriFile,
   loadHdriFromWorkspace,
-  runAoPass,
   runRenderPass,
   setEnvParams,
   setModelScale,
@@ -78,25 +77,6 @@ export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Elemen
           max={4096}
           step={256}
           onChange={(v) => setSettings(doc.docId, { textureSize: v })}
-          disabled={doc.viewOnly}
-        />
-        <SliderRow
-          label="AO samples"
-          value={doc.settings.aoSamples}
-          min={4}
-          max={1024}
-          step={4}
-          onChange={(v) => setSettings(doc.docId, { aoSamples: v })}
-          disabled={doc.viewOnly}
-        />
-        <SliderRow
-          label="AO radius"
-          value={doc.settings.aoRadius}
-          min={0.05}
-          max={2}
-          step={0.05}
-          format={(v) => v.toFixed(2)}
-          onChange={(v) => setSettings(doc.docId, { aoRadius: v })}
           disabled={doc.viewOnly}
         />
       </Section>
@@ -182,13 +162,6 @@ export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Elemen
           onClick={() => void runRenderPass(doc.docId)}
         >
           {doc.busy ? 'Rendering…' : doc.render ? 'Re-render pass' : 'Bake render pass'}
-        </button>
-        <button
-          disabled={!doc.result || doc.viewOnly || doc.busy}
-          title="Ambient occlusion pass"
-          onClick={() => void runAoPass(doc.docId)}
-        >
-          {doc.ao ? 'Re-run AO pass' : 'Bake AO pass'}
         </button>
       </Section>
 

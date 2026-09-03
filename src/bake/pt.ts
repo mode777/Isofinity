@@ -7,26 +7,20 @@ import {
   Mesh,
   MeshStandardMaterial,
   NearestFilter,
-  NoBlending,
   RGBAFormat,
   Scene,
   SRGBColorSpace,
   ShaderMaterial,
   UnsignedByteType,
   Vector2,
-  FloatType,
-  HalfFloatType,
   WebGLRenderTarget,
   WebGLRenderer,
   type Material,
   type Texture,
 } from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
-import { PathTracingSceneGenerator, WebGLPathTracer } from 'three-gpu-pathtracer';
-import { AmbientOcclusionMaterial } from 'three-gpu-pathtracer/src/materials/surface/AmbientOcclusionMaterial.js';
-import type { AmbientOcclusionMaterial as AmbientOcclusionMaterialType } from 'three-gpu-pathtracer/src/materials/surface/AmbientOcclusionMaterial.js';
-import { MeshBVHUniformStruct } from 'three-mesh-bvh';
-import { halfToFloat, PAD_PX, PX_PER_UNIT } from './bake.js';
+import { WebGLPathTracer } from 'three-gpu-pathtracer';
+import { PAD_PX, PX_PER_UNIT } from './bake.js';
 import { frameIsoBox, type IsoFrame } from './iso.js';
 import type { MaterialGroup, Primitive } from './primitives.js';
 
@@ -39,10 +33,6 @@ export interface PtSettings {
   bounces: number;
   /** Edge length of the packed texture array the PT repacks materials into. */
   textureSize: number;
-  /** AO hemisphere ray count per pixel (total across accumulation frames). */
-  aoSamples: number;
-  /** AO occlusion radius in world units. */
-  aoRadius: number;
   /** Recorded in the manifest; the screen-space denoiser ships disabled. */
   denoise: boolean;
 }
@@ -51,8 +41,6 @@ export const DEFAULT_PT_SETTINGS: PtSettings = {
   samples: 32,
   bounces: 5,
   textureSize: 1024,
-  aoSamples: 64,
-  aoRadius: 0.4,
   denoise: false,
 };
 
@@ -89,7 +77,6 @@ export interface PtImage {
 /** Path-traced passes plus the provenance recorded alongside them. */
 export interface PtExtras {
   render?: PtImage;
-  ao?: PtImage;
   environment?: PtEnvironment;
   settings?: PtSettings;
 }
@@ -122,22 +109,6 @@ varying vec2 vUv;
 void main() {
   vUv = uv;
   gl_Position = vec4(position.xy, 0.0, 1.0);
-}
-`;
-
-// Running-average accumulation without hardware blending (same strategy as
-// WebGLPathTracer's own manual alpha blending): blending into half-float
-// targets proved unreliable across drivers, so each frame overwrites the
-// output by mixing the previous average with the new sample on the GPU.
-const AO_BLEND_FRAG = `
-uniform sampler2D uMap;
-uniform sampler2D uPrev;
-uniform float uWeight;
-varying vec2 vUv;
-void main() {
-  vec4 s = texture2D(uMap, vUv);
-  vec4 p = texture2D(uPrev, vUv);
-  gl_FragColor = mix(p, s, uWeight);
 }
 `;
 
@@ -180,37 +151,7 @@ function fallbackMaterialForGroup(group: MaterialGroup): MeshStandardMaterial {
   return material;
 }
 
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 const yieldFrame = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
-
-/** Max-alpha / max-value summary of a render target, for console audits. */
-function readTargetStats(renderer: WebGLRenderer, target: WebGLRenderTarget): string {
-  const isHalf = target.texture.type === HalfFloatType;
-  const buffer: Uint16Array | Float32Array = isHalf
-    ? new Uint16Array(target.width * target.height * 4)
-    : new Float32Array(target.width * target.height * 4);
-  renderer.readRenderTargetPixels(target, 0, 0, target.width, target.height, buffer);
-  let maxA = 0;
-  let maxV = 0;
-  for (let i = 0; i < target.width * target.height; i++) {
-    const r = isHalf ? halfToFloat((buffer as Uint16Array)[i * 4]) : (buffer as Float32Array)[i * 4];
-    const a = isHalf
-      ? halfToFloat((buffer as Uint16Array)[i * 4 + 3])
-      : (buffer as Float32Array)[i * 4 + 3];
-    maxV = Math.max(maxV, Math.abs(r));
-    maxA = Math.max(maxA, a);
-  }
-  return `maxA=${maxA.toFixed(3)} maxR=${maxV.toFixed(3)}`;
-}
 
 let sharedRenderer: WebGLRenderer | null = null;
 
@@ -374,135 +315,6 @@ export class PtBaker {
     target.dispose();
     this.tonemapMaterial.uniforms.uMap.value = null;
     return { width: w, height: h, rgba };
-  }
-
-  /**
-   * Accumulates the AO pass (aoRender pattern: hemisphere rays through a
-   * BVH, running average in a second target). Independent of the
-   * environment; returns grayscale bytes with coverage alpha.
-   */
-  async aoPass(onProgress?: (fraction: number) => void): Promise<PtImage> {
-    const renderer = getRenderer();
-    renderer.setSize(this.frame.width, this.frame.height, false);
-
-    const generator = new PathTracingSceneGenerator();
-    generator.setObjects(this.scene);
-    const { bvh } = generator.generate();
-    const bvhUniform = new MeshBVHUniformStruct();
-    bvhUniform.updateFrom(bvh);
-
-    const aoMaterial: AmbientOcclusionMaterialType = new AmbientOcclusionMaterial();
-    aoMaterial.bvh = bvhUniform;
-    aoMaterial.radius = this.settings.aoRadius;
-    const raysPerFrame = 4;
-    aoMaterial.setDefine('SAMPLES', raysPerFrame);
-    const frames = Math.max(1, Math.round(this.settings.aoSamples / raysPerFrame));
-
-    const saved = this.meshes.map((mesh) => mesh.material);
-    for (const mesh of this.meshes) mesh.material = aoMaterial;
-
-    const sampleTarget = new WebGLRenderTarget(this.frame.width, this.frame.height, {
-      format: RGBAFormat,
-      type: FloatType,
-      minFilter: NearestFilter,
-      magFilter: NearestFilter,
-      depthBuffer: true,
-    });
-    const accumTargets = [0, 1].map(() =>
-      new WebGLRenderTarget(this.frame.width, this.frame.height, {
-        format: RGBAFormat,
-        type: HalfFloatType,
-        minFilter: NearestFilter,
-        magFilter: NearestFilter,
-        depthBuffer: false,
-      }),
-    );
-    const blendMaterial = new ShaderMaterial({
-      vertexShader: TONEMAP_VERT,
-      fragmentShader: AO_BLEND_FRAG,
-      uniforms: {
-        uMap: { value: null },
-        uPrev: { value: null },
-        uWeight: { value: 1 },
-      },
-      blending: NoBlending,
-      depthTest: false,
-      depthWrite: false,
-    });
-    const blendQuad = new FullScreenQuad(blendMaterial);
-
-    const rng = mulberry32(0x9e3779b9);
-    const { width, height, camera } = this.frame;
-    let accumRead = 0;
-    try {
-      renderer.setClearColor(0x000000, 0);
-      for (let n = 1; n <= frames; n++) {
-        // Seeded sub-pixel jitter: deterministic AA for the raster pass.
-        camera.setViewOffset(width, height, rng() - 0.5, rng() - 0.5, width, height);
-        aoMaterial.seed = n - 1;
-        renderer.setRenderTarget(sampleTarget);
-        renderer.render(this.scene, camera);
-        if (n === 1) {
-          // Diagnostics for the "transparent AO" failure mode: did anything
-          // rasterize, and did a shader fail to compile?
-          const renderInfo = renderer.info.render;
-          const diag = (renderer.info.programs ?? [])
-            .filter((p) => (p as unknown as { diagnostics?: object }).diagnostics !== undefined)
-            .map((p) => JSON.stringify((p as unknown as { diagnostics?: object }).diagnostics))
-            .join(' | ');
-          const sampleProbe = readTargetStats(renderer, sampleTarget);
-          console.log(
-            `[pt-audit] ao frame 1: drawCalls=${renderInfo.calls} tris=${renderInfo.triangles} ${sampleProbe}` +
-              (diag ? ` SHADER_DIAGNOSTICS: ${diag}` : ''),
-          );
-        }
-        // Overwrite the write target with mix(prevAverage, sample, 1/n).
-        // Frame 1 uses the sample as both inputs, so mix() yields the sample.
-        const accumWrite = 1 - accumRead;
-        renderer.setRenderTarget(accumTargets[accumWrite]);
-        renderer.autoClear = false;
-        blendMaterial.uniforms.uMap.value = sampleTarget.texture;
-        blendMaterial.uniforms.uPrev.value =
-          n === 1 ? sampleTarget.texture : accumTargets[accumRead].texture;
-        blendMaterial.uniforms.uWeight.value = 1 / n;
-        blendQuad.render(renderer);
-        renderer.autoClear = true;
-        renderer.setRenderTarget(null);
-        accumRead = accumWrite;
-        onProgress?.(n / frames);
-        await yieldFrame();
-      }
-    } finally {
-      camera.clearViewOffset();
-      for (let i = 0; i < this.meshes.length; i++) this.meshes[i].material = saved[i];
-      blendQuad.dispose();
-      blendMaterial.dispose();
-      sampleTarget.dispose();
-      accumTargets[0].dispose();
-      accumTargets[1].dispose();
-      aoMaterial.dispose();
-      bvhUniform.dispose();
-    }
-
-    const half = new Uint16Array(width * height * 4);
-    renderer.readRenderTargetPixels(accumTargets[accumRead], 0, 0, width, height, half);
-    let nonzeroAlpha = 0;
-    let maxValue = 0;
-    for (let i = 0; i < width * height; i++) {
-      const a = halfToFloat(half[i * 4 + 3]);
-      if (a > 0) nonzeroAlpha++;
-      maxValue = Math.max(maxValue, Math.abs(halfToFloat(half[i * 4])), a);
-    }
-    console.log(`[pt-audit] ao accum: frames=${frames} nonzeroAlphaPx=${nonzeroAlpha}/${width * height} maxV=${maxValue.toFixed(4)}`);
-    const rgba = new Uint8Array(width * height * 4);
-    for (let i = 0; i < width * height; i++) {
-      const v = Math.round(Math.min(1, Math.max(0, halfToFloat(half[i * 4]))) * 255);
-      rgba[i * 4] = v;
-      rgba[i * 4 + 1] = v;
-      rgba[i * 4 + 2] = v;
-      rgba[i * 4 + 3] = Math.round(Math.min(1, Math.max(0, halfToFloat(half[i * 4 + 3]))) * 255);
-    }
-    return { width, height, rgba };
   }
 
   dispose(): void {

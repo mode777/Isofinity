@@ -102,8 +102,6 @@ export interface BakeProvenance {
     samples: number;
     bounces: number;
     textureSize: number;
-    aoSamples: number;
-    aoRadius: number;
   };
   environment:
     | { procedural: true }
@@ -138,15 +136,13 @@ export interface BakeManifest {
     exposure: number;
     saturation: number;
   };
-  /** Present when any path-traced pass is baked: renderer provenance. */
+  /** Present when the render pass is baked: renderer provenance. */
   renderer?: {
     name: string;
     samples: number;
     bounces: number;
     denoise: boolean;
     seed: number;
-    aoSamples?: number;
-    aoRadius?: number;
   };
   /** Present when the producing tool knows the sprite's full provenance. */
   provenance?: BakeProvenance;
@@ -185,11 +181,6 @@ export function buildManifest(
       ],
     },
     passes: {
-      albedo: {
-        file: `${result.id}-albedo.png`,
-        encoding: 'png-r8-srgb',
-        channels: 'rgb=albedo a=coverage',
-      },
       gbuffer: {
         file: `${result.id}-gbuffer.exr`,
         encoding: 'exr-f32-linear',
@@ -212,15 +203,6 @@ export function buildManifest(
         saturation: pt.environment.saturation,
       };
     }
-  }
-  if (pt?.ao) {
-    manifest.passes.ao = {
-      file: `${result.id}-ao.png`,
-      encoding: 'png-r8-linear',
-      channels: 'rgb=ambient-occlusion a=coverage',
-    };
-  }
-  if (pt?.render || pt?.ao) {
     const settings = pt.settings;
     manifest.renderer = {
       name: PT_NAME,
@@ -228,8 +210,6 @@ export function buildManifest(
       bounces: settings?.bounces ?? 0,
       denoise: settings?.denoise ?? false,
       seed: 0,
-      aoSamples: pt.ao ? (settings?.aoSamples ?? 0) : undefined,
-      aoRadius: pt.ao ? (settings?.aoRadius ?? 0) : undefined,
     };
   }
   if (provenance) {

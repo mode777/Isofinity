@@ -3,14 +3,13 @@
 How Isofinity assets are authored: a primitive (or a glTF model) is rendered
 from the fixed isometric camera into per-pixel data passes and stored as a
 sprite set plus a manifest. Two renderers produce passes over the **same
-scene and camera**: a raster MRT draw (unlit albedo + merged g-buffer) and a
-GPU path tracer (`three-gpu-pathtracer`) for the optional lit `render` and
-`ao` passes.
+scene and camera**: a raster draw (merged g-buffer: normals + depth) and a
+GPU path tracer (`three-gpu-pathtracer`) for the optional lit `render` pass.
 
 Run `npm run dev` and open the integrated editor (`index.html`). Open a
 primitive or model from the **project browser** (or "Import glTF file…")
 — a sprite editor tab opens and raster-bakes immediately — then inspect
-the passes, bake the path-traced render/AO passes, and save the bundle
+the passes, bake the path-traced render pass, and save the bundle
 (into a connected workspace folder, or as a browser download). With an
 HDRI environment loaded (file dialog, or pick one from the workspace's
 `hdri/`) the render pass can accumulate; environment and pass settings sit
@@ -81,15 +80,14 @@ everything falls back to file dialogs and downloads exactly as before
 - **Geometry**: each material's meshes are merged into one draw group
   (world transforms baked in); meshes without normals are rejected — the
   g-buffer needs real normals and never derives them from depth.
-- **Albedo**: per pixel, the material's base-color texture (sRGB-decoded at
-  sample time) multiplied by the linear base-color factor, re-encoded to
-  sRGB before storage — matching the primitive flat-color path, which writes
-  sRGB hex values as-is. Materials without a texture bake their factor as a
-  flat color.
+- **Albedo**: per-pixel surface color is not stored as a pass; the render
+  stage consumes each material's base-color texture (sRGB-decoded at
+  sample time) multiplied by the linear base-color factor. Materials
+  without a texture render their factor as a flat color.
 - **Coverage**: glTF `MASK` materials discard fragments whose sampled alpha
-  (× factor alpha) falls below the alpha cutoff, so those pixels read as
-  empty in both passes (hit-testing/occlusion stay correct); `BLEND`
-  materials bake opaque.
+  (× factor alpha) falls below the alpha cutoff at raster-bake time, so
+  those pixels read as empty in the g-buffer (hit-testing/occlusion stay
+  correct); `BLEND` materials bake opaque.
 
 ### Depth instead of position
 
@@ -122,25 +120,25 @@ planned KTX2/UASTC delivery would carry.
 - Normals remain baked — deriving them from depth derivatives breaks at
   silhouettes and interior edges (the donut hole).
 
-### Passes (one MRT draw call, `count: 2`, half-float RGBA targets)
+### Passes (one raster draw call, half-float RGBA target)
 
 | Pass    | RGB                             | A                | File                | Renderer |
 | ------- | ------------------------------- | ---------------- | ------------------- | -------- |
-| albedo  | surface color, **sRGB-encoded** | coverage         | `<id>-albedo.png`   | raster   |
 | gbuffer | world-space normal              | linear ray depth | `<id>-gbuffer.exr`  | raster   |
 | render  | tone-mapped lit color (ACES, sRGB) | coverage (AA) | `<id>-render.png`   | path traced, optional |
-| ao      | ambient occlusion (linear, white = unoccluded) | coverage | `<id>-ao.png`  | path traced, optional |
 
-- Coverage: `a = 1` on rendered albedo pixels, `0` on background (clear color
-  `(0,0,0,0)` lands in every MRT attachment). The engine uses this for
-  hit-testing and occlusion.
-- G-buffer emptiness: background pixels are all-zero, and since the g-buffer
-  alpha is depth (not coverage), empty pixels are detected as
-  `length(normal) == 0`. Testing `a == 0` alone would be wrong — depth 0 is
-  a real value at the cube's `(0,0,0)` corner.
-- Albedo is stored sRGB-encoded (standard texture convention) — the engine
-  converts to linear at sample time. The g-buffer EXR is linear float32.
-- Precision: the MRT targets are half-float, so depth carries half precision
+- Coverage: there is no separate coverage pass. A pixel is "rendered" when
+  its g-buffer normal is non-zero; background pixels are all-zero (clear
+  color `(0,0,0,0)`). The engine uses this for hit-testing and occlusion,
+  and the render pass's alpha is the antialiased display coverage.
+- G-buffer emptiness: since the g-buffer alpha is depth (not coverage),
+  empty pixels are detected as `length(normal) == 0`. Testing `a == 0`
+  alone would be wrong — depth 0 is a real value at the cube's `(0,0,0)`
+  corner.
+- Per-pixel color ships exclusively through the path-traced `render` pass
+  (the runtime requires it before a sprite can be placed). The g-buffer EXR
+  is linear float32.
+- Precision: the raster target is half-float, so depth carries half precision
   through the whole pipeline regardless of the EXR's float32 container —
   worst-case error ≈ 0.0008 units (~0.1 px at 128 px/unit), accepted for the
   fixed-range unit-cube layout.
@@ -149,7 +147,7 @@ planned KTX2/UASTC delivery would carry.
 - Row order: GL readback is bottom-up; PNG gets flipped to top-down, EXR
   does not (the exporter compensates for GL order internally).
 
-### Path-traced passes (`render`, `ao`)
+### Path-traced pass (`render`)
 
 The path tracer (`three-gpu-pathtracer`, WebGL2 + BVH; see `src/bake/pt.ts`)
 renders the same scene through the **same** `frameIsoBox` orthographic
@@ -162,13 +160,12 @@ for anti-aliasing, so sprite edges converge to true AA.
   accumulation switches to its manual-blend path (no `EXT_float_blend`
   requirement). Object pixels converge to alpha 1; the pass alpha is the
   antialiased coverage. Note it is *softer* than the raster pass's hard
-  0/1 coverage: occlusion and hit-testing keep consuming **raster**
-  coverage; only display uses the render alpha.
+  0/1 g-buffer emptiness: occlusion and hit-testing keep consuming the
+  raster g-buffer; only display uses the render alpha.
 - **Illumination**: `scene.environment` (equirect `.hdr` via `HDRLoader`)
   is the sole light source, with rotation/intensity/exposure/saturation
   controls; changing any of them restarts accumulation. No background image is ever
-  captured into the pass. Without an environment the render pass is simply
-  not produced (AO does not need one).
+  captured into the pass.   Without an environment the render pass is simply not produced.
 - **Tonemapping/export**: the accumulated linear float target is composited
   through a fullscreen quad using three's `<tonemapping_fragment>`
   (ACES filmic) plus an explicit sRGB transfer and a display-referred
@@ -183,21 +180,13 @@ for anti-aliasing, so sprite edges converge to true AA.
   All scene textures are normalized to shared wrap/filter flags (library
   requirement) and repacked into a texture array capped by the
   `tex-size` setting (default 1024) — larger albedo maps downscale.
-- **AO pass** (KNOWN BROKEN): `AmbientOcclusionMaterial` + shared BVH
-  uniform; N cosine-hemisphere rays per pixel against the asset geometry
-  (radius control), accumulated with a running average and seeded sub-pixel
-  view jitter. Despite per-frame renders and readbacks verifying correct
-  (audit logs in `[pt-audit]`), the accumulated output comes back empty on
-  tested hardware; this approach will be replaced in a future change, so
-  the pass ships labeled broken rather than fixed.
 - **Determinism**: the library resets its RNG seed per bake and seeds per
-  sample; the AO jitter uses a fixed-seed PRNG. A fixed settings set
-  reproduces a bake bit-for-bit on the same hardware/driver; cross-GPU
-  byte equality is not a goal.
-- **Manifest provenance**: when either path-traced pass is included, the
-  manifest records an `environment` block (hdri name, rotation, intensity,
-  exposure, saturation) and a `renderer` block (name/version, samples, bounces,
-  denoise, seed, AO settings) so a bake is reproducible from its bundle.
+  sample. A fixed settings set reproduces a bake bit-for-bit on the same
+  hardware/driver; cross-GPU byte equality is not a goal.
+- **Manifest provenance**: when the render pass is included, the manifest
+  records an `environment` block (hdri name, rotation, intensity, exposure,
+  saturation) and a `renderer` block (name/version, samples, bounces,
+  denoise, seed) so a bake is reproducible from its bundle.
 
 ### Sprite placement
 
@@ -213,15 +202,17 @@ moves quad size + sprite texel size into per-instance attributes.
 
 Records camera angles and view direction, `pxPerUnit`, sprite size, origin,
 depth semantics/range and per-pass channel semantics
-(`format: "isoinfinity-bake/5"`; v4 and earlier stored only albedo +
-g-buffer + the optional path-traced passes plus `environment` / `renderer`
-provenance blocks — the g-buffer EXR and albedo PNG keep the v3 byte
-conventions exactly). v5 adds the editor-facing `provenance` block: the
-bake source (a primitive name, or a workspace model file name + uniform
-scale), the path-trace settings, and the environment (a `procedural`
-marker or an `hdri/` file name + parameters) — so the integrated editor
-can re-open a sprite editable and re-bake it in place. v5 without a
-`provenance` block is valid; the editor then opens it view-only.
+(`format: "isoinfinity-bake/5"`; v4 and earlier stored an albedo PNG
+alongside the g-buffer and their manifests may still record albedo/ao pass
+entries — the parser resolves only the g-buffer and optional render entries
+and ignores the rest, so old bundles keep loading unchanged; the g-buffer
+EXR keeps the v3 byte conventions exactly). v5 adds the editor-facing
+`provenance` block: the bake source (a primitive name, or a workspace model
+file name + uniform scale), the path-trace settings, and the environment (a
+`procedural` marker or an `hdri/` file name + parameters) — so the
+integrated editor can re-open a sprite editable and re-bake it in place.
+v5 without a `provenance` block is valid; the editor then opens it
+view-only.
 
 ### Bundle (`<id>.sprite`)
 
@@ -235,10 +226,8 @@ the parser never looked at extensions:
 ```
 <id>.sprite
 ├─ manifest.json          deflated
-├─ <id>-albedo.png        stored (PNG is already compressed)
 ├─ <id>-gbuffer.exr       deflated (raw float + zero padding compress well)
-├─ <id>-render.png        stored, when baked
-└─ <id>-ao.png            stored, when baked
+└─ <id>-render.png        stored, when baked
 ```
 
 Entry names are exactly the file names the manifest's `passes` table
@@ -248,29 +237,36 @@ individually diffable. Entries carry a fixed mtime so re-baking the same
 primitive with the same settings yields identical bytes. `parseBake()`
 (`src/bake/bundle.ts`) is the matching reader: unzip, validate the `format`
 prefix (`/4` and `/5` accepted, anything else rejected by name), resolve
-entries via the manifest, return Blobs ready for the PNG/EXR decoders, and
-expose which optional passes are present plus the `provenance` block when
-recorded. The integrated editor consumes bundles through the project
-browser's `sprites/` listing.
+entries via the manifest — the g-buffer entry is required, the render entry
+is optional, and legacy albedo/ao entries are ignored — and expose which
+optional passes are present plus the `provenance` block when recorded. The
+integrated editor consumes bundles through the project browser's
+`sprites/` listing.
 
 ## Current state / next steps
 
 - Done: sphere, donut, cube, cylinder, capsule, plane and slab (2×0.5×1)
-  test primitives, box-frame camera math (arbitrary cuboids), MRT bake
-  (albedo + merged g-buffer), PNG + EXR export, single-file zip bundle,
-  debug position dump, manifest, visual pass preview.
+  test primitives, box-frame camera math (arbitrary cuboids), raster bake
+  (merged g-buffer), PNG + EXR export, single-file zip bundle, debug
+  position dump, manifest, visual pass preview.
 - Done: glTF sources (`.glb` and `.gltf` + `.bin` + textures) — static
-  meshes only, per-material merged draw groups, textured albedo (sRGB
-  texture × linear factor), alpha-mask coverage, origin normalization with
-  a UI uniform-scale control, compressed-payload rejection, same bundle
-  output. `scratch-verify.html` (dev server) exercises the GPU-side checks
-  and prints primitive bundle hashes (note: the v4 format bump changed all
-  hashes — re-baseline before comparing across format versions).
-- Done: path-traced `render` + `ao` passes (`three-gpu-pathtracer` 0.0.24)
-  over the same ortho camera — HDRI environments with rotation/intensity/
-  exposure, full PBR materials for glTF sources, ACES export identical to
-  the preview, deterministic accumulation, optional passes and provenance
+  meshes only, per-material merged draw groups, alpha-mask coverage,
+  origin normalization with a UI uniform-scale control, compressed-payload
+  rejection, same bundle output. `scratch-verify.html` (dev server)
+  exercises the GPU-side checks and prints primitive bundle hashes (note:
+  the albedo/ao pass removal changed all hashes — re-baseline before
+  comparing across format versions).
+- Done: path-traced `render` pass (`three-gpu-pathtracer` 0.0.24) over the
+  same ortho camera — HDRI environments with rotation/intensity/exposure,
+  full PBR materials for glTF sources, ACES export identical to the
+  preview, deterministic accumulation, optional pass and provenance
   blocks.
+- Removed: the unlit `albedo` pass (no runtime consumer — per-pixel color
+  ships through the required render pass) and the path-traced `ao` pass
+  (accumulated empty output on tested hardware; removed end to end rather
+  than shipped broken — a future change may reintroduce occlusion with a
+  different approach). Bundles carrying the legacy passes still load; the
+  entries are ignored.
 - Done: workspace folders (File System Access API, `src/shared/workspace.ts`)
   — `hdri/ models/ sprites/ worlds/` convention, workspace-backed model/
   HDRI listings, bundle saves to `sprites/<id>.sprite`, `.sprite` bundle
@@ -280,9 +276,6 @@ browser's `sprites/` listing.
   `bake.html` + runtime pages — editor tabs over in-memory documents,
   project browser, context-sensitive properties panel, `isoinfinity-bake/5`
   provenance with re-bake, and in-memory place-into-world.
-- Broken: the path-traced `ao` pass accumulates empty output despite healthy
-  per-frame renders (see the AO section above) — labeled broken in the UI,
-  slated for replacement with a different approach.
 - Planned: supersampling (render at N× and box-downsample), multi-cube
   composite assets, geometry-level clipping (CSG) instead of shader discard,
   KTX2/UASTC packaging for delivery (the merged g-buffer is already in the

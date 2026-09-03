@@ -17,20 +17,6 @@ export interface DecodedBundle {
   provenance: BakeProvenance | null;
   result: BakeResult;
   render: PtImage | null;
-  ao: PtImage | null;
-}
-
-/** Top-down PNG bytes -> GL-order float albedo. */
-function pngBytesToFloat(topDown: Uint8Array, w: number, h: number): Float32Array {
-  const out = new Float32Array(w * h * 4);
-  for (let y = 0; y < h; y++) {
-    const src = (y * w) * 4;
-    const dst = ((h - 1 - y) * w) * 4;
-    for (let x = 0; x < w * 4; x++) {
-      out[dst + x] = topDown[src + x] / 255;
-    }
-  }
-  return out;
 }
 
 /** Top-down PNG bytes -> GL-order PtImage. */
@@ -82,13 +68,11 @@ export async function decodeBundle(buffer: ArrayBuffer): Promise<DecodedBundle> 
   const w = m.sprite.width;
   const h = m.sprite.height;
 
-  const albedoTopDown = await decodePng(parsed.albedo, w, h);
   const gbufferGl = decodeExrGbufferGl(await parsed.gbuffer.arrayBuffer(), w, h);
 
   const result: BakeResult = {
     id: m.id,
     label: m.id,
-    albedoHex: 0,
     size: [m.cube.size[0], m.cube.size[1], m.cube.size[2]],
     width: w,
     height: h,
@@ -99,14 +83,12 @@ export async function decodeBundle(buffer: ArrayBuffer): Promise<DecodedBundle> 
       elevationDeg: m.camera.elevationDeg,
       viewDir: m.camera.viewDir,
     },
-    albedo: pngBytesToFloat(albedoTopDown, w, h),
     gbuffer: gbufferGl,
   };
 
   const render = parsed.render
     ? bytesToPtImage(await decodePng(parsed.render, w, h), w, h)
     : null;
-  const ao = parsed.ao ? bytesToPtImage(await decodePng(parsed.ao, w, h), w, h) : null;
 
-  return { manifest: m, provenance: parsed.provenance, result, render, ao };
+  return { manifest: m, provenance: parsed.provenance, result, render };
 }

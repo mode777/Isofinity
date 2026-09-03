@@ -51,10 +51,10 @@ working.
 
 ## Sprite editing
 
-Sprite editors show the pass canvases (albedo, g-buffer normal/depth,
-render, AO). The properties panel offers the source (model scale), the
-path-trace settings, environment controls (HDRI file or workspace `hdri/`,
-rotation/intensity/exposure/saturation), the render/AO pass actions, and
+Sprite editors show the pass canvases (g-buffer normal/depth, render). The
+properties panel offers the source (model scale), the path-trace settings,
+environment controls (HDRI file or workspace `hdri/`,
+rotation/intensity/exposure/saturation), the render pass action, and
 export. Built-in primitives auto-bake (raster + render pass against the
 built-in procedural environment) when opened — placement needs no user
 assets.

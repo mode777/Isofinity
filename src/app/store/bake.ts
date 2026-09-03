@@ -108,7 +108,6 @@ function baseBakeDoc(title: string): BakeDocument {
     settings: { ...DEFAULT_PT_SETTINGS },
     result: null,
     render: null,
-    ao: null,
     notes: [],
     bundleBytes: null,
     provenance: null,
@@ -200,7 +199,6 @@ export async function openBundleDoc(fileName: string): Promise<void> {
     doc.ref = { key, title: fileName };
     doc.result = decoded.result;
     doc.render = decoded.render;
-    doc.ao = decoded.ao;
     doc.bundleBytes = bytes;
     doc.provenance = decoded.provenance;
 
@@ -213,8 +211,6 @@ export async function openBundleDoc(fileName: string): Promise<void> {
         samples: prov.bake.samples,
         bounces: prov.bake.bounces,
         textureSize: prov.bake.textureSize,
-        aoSamples: prov.bake.aoSamples,
-        aoRadius: prov.bake.aoRadius,
         denoise: false,
       };
       if (prov.source.kind === 'primitive') {
@@ -300,7 +296,7 @@ function primitiveFor(doc: BakeDocument): Primitive {
 
 // --- pass actions ---------------------------------------------------------
 
-/** Raster bake (albedo + g-buffer) for the document's current source. */
+/** Raster bake (g-buffer) for the document's current source. */
 export function bakeRaster(docId: string): void {
   const doc = bakeDoc(docId);
   if (!doc || doc.viewOnly) return;
@@ -322,7 +318,6 @@ export function bakeRaster(docId: string): void {
 }
 
 let renderGen = 0;
-let aoGen = 0;
 
 /** Path-traced lit render pass. Requires a raster bake and an environment.
  * Safe to invoke while another accumulation runs: the new run resets the
@@ -365,43 +360,6 @@ export async function runRenderPass(docId: string): Promise<void> {
   }
 }
 
-/** Path-traced ambient occlusion pass (no environment needed). */
-export async function runAoPass(docId: string): Promise<void> {
-  const doc = bakeDoc(docId);
-  if (!doc || doc.viewOnly || !doc.result || doc.busy) return;
-  const gen = ++aoGen;
-  update(docId, (d) => {
-    d.busy = true;
-  });
-  try {
-    const b = getBaker(doc);
-    b.applySettings(doc.settings);
-    b.setPrimitive(primitiveFor(doc), doc.result.pxPerUnit);
-    const image = await b.aoPass((fraction) => {
-      if (gen === aoGen) {
-        ed().setStatus(`${doc.title}: AO ${Math.round(fraction * 100)}%…`);
-      }
-    });
-    if (gen !== aoGen) return;
-    update(docId, (d) => {
-      d.ao = image;
-    });
-    ed().markDirty(docId);
-    ed().setStatus(
-      `${doc.title}: AO pass ${image.width}x${image.height} px, ${doc.settings.aoSamples} rays/px`,
-    );
-  } catch (err) {
-    if (gen === aoGen) {
-      ed().setStatus(`AO pass failed: ${err instanceof Error ? err.message : String(err)}`);
-      console.error(err);
-    }
-  } finally {
-    if (gen === aoGen) update(docId, (d) => {
-      d.busy = false;
-    });
-  }
-}
-
 // --- settings & environment ----------------------------------------------
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
@@ -416,8 +374,6 @@ export function setSettings(docId: string, patch: Partial<PtSettings>): void {
       samples: clamp(Math.round(num(patch.samples, d.settings.samples)), 16, 4096),
       bounces: clamp(Math.round(num(patch.bounces, d.settings.bounces)), 1, 16),
       textureSize: clamp(Math.round(num(patch.textureSize, d.settings.textureSize)), 256, 4096),
-      aoSamples: clamp(Math.round(num(patch.aoSamples, d.settings.aoSamples)), 4, 1024),
-      aoRadius: clamp(num(patch.aoRadius, d.settings.aoRadius), 0.05, 2),
       denoise: false,
     };
   });
@@ -502,8 +458,6 @@ function provenanceOf(doc: BakeDocument): BakeProvenance | null {
       samples: doc.settings.samples,
       bounces: doc.settings.bounces,
       textureSize: doc.settings.textureSize,
-      aoSamples: doc.settings.aoSamples,
-      aoRadius: doc.settings.aoRadius,
     },
     environment:
       doc.env.kind === 'procedural'
@@ -536,15 +490,13 @@ export async function saveSprite(docId: string, rawName?: string): Promise<void>
       // View-only copy of an opened bundle: write the original bytes.
       bytes = doc.bundleBytes;
     } else {
-      const extras =
-        doc.render || doc.ao
-          ? {
-              render: doc.render ?? undefined,
-              ao: doc.ao ?? undefined,
-              environment: doc.render ? doc.ptEnv : undefined,
-              settings: doc.settings,
-            }
-          : undefined;
+      const extras = doc.render
+        ? {
+            render: doc.render,
+            environment: doc.ptEnv,
+            settings: doc.settings,
+          }
+        : undefined;
       bytes = await buildBundle(doc.result, extras, provenanceOf(doc) ?? undefined);
     }
     const ws = useWorkspaceState();

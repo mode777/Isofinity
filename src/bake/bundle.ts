@@ -9,7 +9,6 @@ import {
   buildManifest,
   encodeExr,
   encodePngBytes,
-  rgbaToCanvas,
   type BakeManifest,
   type BakeProvenance,
 } from './export.js';
@@ -28,20 +27,6 @@ const MIME_BY_EXT: Record<string, string> = {
 // timezone (local year stays 1980 in UTC offsets ±14h).
 const FIXED_MTIME = new Date(Date.UTC(1980, 1, 1));
 
-async function encodePng(result: BakeResult): Promise<Uint8Array<ArrayBuffer>> {
-  const canvas = rgbaToCanvas(result.albedo, result.width, result.height, (r, g, b, a) => [
-    r,
-    g,
-    b,
-    a,
-  ]);
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-  if (!blob) {
-    throw new Error('PNG encoding failed');
-  }
-  return new Uint8Array(await blob.arrayBuffer());
-}
-
 export async function buildBundle(
   result: BakeResult,
   pt?: PtExtras,
@@ -50,7 +35,6 @@ export async function buildBundle(
   const manifest = buildManifest(result, pt, provenance);
   const entries: Record<string, [Uint8Array, { level: 0 | 6; mtime: Date }]> = {
     [MANIFEST_ENTRY]: [strToU8(JSON.stringify(manifest, null, 2)), { level: 6, mtime: FIXED_MTIME }],
-    [manifest.passes.albedo.file]: [await encodePng(result), { level: 0, mtime: FIXED_MTIME }],
     [manifest.passes.gbuffer.file]: [
       await encodeExr(result.gbuffer, result.width, result.height),
       { level: 6, mtime: FIXED_MTIME },
@@ -62,24 +46,15 @@ export async function buildBundle(
       { level: 0, mtime: FIXED_MTIME },
     ];
   }
-  if (manifest.passes.ao && pt?.ao) {
-    entries[manifest.passes.ao.file] = [
-      await encodePngBytes(pt.ao.rgba, pt.ao.width, pt.ao.height),
-      { level: 0, mtime: FIXED_MTIME },
-    ];
-  }
   // zipSync allocates a fresh ArrayBuffer-backed Uint8Array.
   return zipSync(entries) as Uint8Array<ArrayBuffer>;
 }
 
 export interface BakeBundle {
   manifest: BakeManifest;
-  albedo: Blob;
   gbuffer: Blob;
   /** Path-traced lit render; null when the bundle omits it. */
   render: Blob | null;
-  /** Path-traced ambient occlusion; null when the bundle omits it. */
-  ao: Blob | null;
   /** Restored production record; null for bundles saved without one. */
   provenance: BakeProvenance | null;
 }
@@ -101,6 +76,8 @@ export function parseBake(buffer: ArrayBuffer | Uint8Array): BakeBundle {
       `bake bundle: unsupported format ${manifest.format} — expected isoinfinity-bake/4 or /5`,
     );
   }
+  // Only the g-buffer entry is required; pass entries recorded by older
+  // manifests that no pass consumes (albedo, ao) are ignored.
   const entry = (file: string): Blob => {
     const bytes = files[file];
     if (!bytes) {
@@ -111,10 +88,8 @@ export function parseBake(buffer: ArrayBuffer | Uint8Array): BakeBundle {
   };
   return {
     manifest,
-    albedo: entry(manifest.passes.albedo.file),
     gbuffer: entry(manifest.passes.gbuffer.file),
     render: manifest.passes.render ? entry(manifest.passes.render.file) : null,
-    ao: manifest.passes.ao ? entry(manifest.passes.ao.file) : null,
     provenance: manifest.provenance ?? null,
   };
 }

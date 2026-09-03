@@ -34,7 +34,6 @@ import {
   type OrthographicCamera,
   type WebGLRenderTarget,
 } from 'three';
-import { DEFAULT_PT_SETTINGS, PtBaker } from './pt.js';
 
 const out = document.getElementById('out')!;
 let passed = 0;
@@ -351,20 +350,17 @@ function worldToPixel(
   ];
 }
 
-// GL readback is bottom-up.
+// GL readback is bottom-up. Coverage derives from g-buffer emptiness
+// (zero-length normal = background) — there is no separate coverage pass.
 function sample(
   result: BakeResult,
   px: number,
   py: number,
-): { r: number; g: number; b: number; coverage: number; nx: number; ny: number; nz: number; depth: number } {
+): { coverage: number; nx: number; ny: number; nz: number; depth: number } {
   const i = ((result.height - 1 - py) * result.width + px) * 4;
-  const a = result.albedo;
   const g = result.gbuffer;
   return {
-    r: a[i],
-    g: a[i + 1],
-    b: a[i + 2],
-    coverage: a[i + 3],
+    coverage: Math.min(1, Math.hypot(g[i], g[i + 1], g[i + 2])),
     nx: g[i],
     ny: g[i + 1],
     nz: g[i + 2],
@@ -379,16 +375,6 @@ function frameFor(result: BakeResult): OrthographicCamera {
 async function sha256(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes as unknown as ArrayBuffer);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-function countPixels(result: BakeResult, pred: (s: ReturnType<typeof sample>) => boolean): number {
-  let n = 0;
-  for (let y = 0; y < result.height; y++) {
-    for (let x = 0; x < result.width; x++) {
-      if (pred(sample(result, x, y))) n++;
-    }
-  }
-  return n;
 }
 
 // ---------- path-tracer spike (ortho camera + transparent background) ----------
@@ -529,7 +515,8 @@ async function runPtSpike(): Promise<void> {
       massPt += a;
       cxPt += x * a;
       cyPt += y * a;
-      const ra = pixelAt(raster.albedo, w, x, y)[3];
+      const g = pixelAt(raster.gbuffer, w, x, y);
+      const ra = Math.min(1, Math.hypot(g[0], g[1], g[2]));
       massRa += ra;
       cxRa += x * ra;
       cyRa += y * ra;
@@ -542,53 +529,6 @@ async function runPtSpike(): Promise<void> {
 
   pt.dispose();
   renderer.dispose();
-}
-
-async function runAoSpike(): Promise<void> {
-  log('test: PT AO spike — donut creases occlude, deterministic, transparent background');
-  const baker = new PtBaker({ ...DEFAULT_PT_SETTINGS, aoSamples: 32 }, 128);
-  baker.setPrimitive(getDonut());
-  const image = await baker.aoPass();
-  ok(image.width > 100 && image.height > 100, `AO image sized (${image.width}x${image.height})`);
-
-  const at = (x: number, yTopDown: number): [number, number, number, number] => {
-    // Image bytes are GL readback order (bottom-up).
-    const i = ((image.height - 1 - yTopDown) * image.width + x) * 4;
-    return [image.rgba[i], image.rgba[i + 1], image.rgba[i + 2], image.rgba[i + 3]];
-  };
-  const corners: [number, number, number, number][] = [
-    at(0, 0),
-    at(image.width - 1, 0),
-    at(0, image.height - 1),
-    at(image.width - 1, image.height - 1),
-  ];
-  ok(corners.every(([, , , a]) => a === 0), 'AO background fully transparent');
-
-  let minV = 1;
-  let maxV = 0;
-  let coverage = 0;
-  for (let i = 0; i < image.width * image.height; i++) {
-    const a = image.rgba[i * 4 + 3];
-    if (a > 0) {
-      coverage++;
-      const v = image.rgba[i * 4] / 255;
-      minV = Math.min(minV, v);
-      maxV = Math.max(maxV, v);
-    }
-  }
-  ok(coverage > 1000, `AO rendered coverage (${coverage} px)`);
-  ok(minV < 0.98 && maxV > 0.5, `AO varies across the shape (range ${minV.toFixed(2)}..${maxV.toFixed(2)})`);
-
-  const image2 = await baker.aoPass();
-  let identical = true;
-  for (let i = 0; i < image.rgba.length; i++) {
-    if (image.rgba[i] !== image2.rgba[i]) {
-      identical = false;
-      break;
-    }
-  }
-  ok(identical, 'AO re-bake byte-identical (deterministic)');
-  baker.dispose();
 }
 
 function sum(v: [number, number, number, number]): number {
@@ -604,10 +544,10 @@ async function main(): Promise<void> {
     { x0: 2, material: 2, name: 'cutout' },
   ]);
 
-  // 1. Textured + factor albedo from the .glb path.
+  // 1. Coverage + mask from the .glb path (color ships via the render pass).
   let glbResult: BakeResult | null = null;
   {
-    log('test: .glb textured albedo + base-color factor');
+    log('test: .glb coverage + alpha-mask');
     const src = await loadGltf([glb]);
     ok(src.groups.length === 3, `three material groups (got ${src.groups.length})`);
     ok(approx(src.extent[0], 3, 1e-4) && approx(src.extent[1], 1, 1e-4), `extent [3,1,0] (got [${src.extent}])`);
@@ -618,19 +558,14 @@ async function main(): Promise<void> {
       return sample(glbResult!, px, py);
     };
     const a = at([0.5, 0.5, 0]);
-    ok(a.r > 0.95 && a.g < 0.05 && a.b < 0.05 && a.coverage > 0.95,
-      `tex-red quad bakes red (got rgb=${[a.r, a.g, a.b].map((v) => v.toFixed(2))})`);
+    ok(a.coverage > 0.95, `tex-red quad bakes covered (got cov=${a.coverage.toFixed(2)})`);
     const f = at([1.5, 0.5, 0]);
-    const expect = 1.055 * Math.pow(0.5, 1 / 2.4) - 0.055;
-    ok(Math.abs(f.r - expect) < 0.03 && f.g < 0.05 && f.b < 0.05,
-      `linear factor 0.5 encodes to sRGB ~${expect.toFixed(3)} (got ${f.r.toFixed(3)})`);
+    ok(f.coverage > 0.95, `factor quad bakes covered (got cov=${f.coverage.toFixed(2)})`);
     const cl = at([2.25, 0.5, 0]);
-    ok(cl.r > 0.95 && cl.coverage > 0.95, `mask kept half bakes red (got cov=${cl.coverage.toFixed(2)})`);
+    ok(cl.coverage > 0.95, `mask kept half bakes covered (got cov=${cl.coverage.toFixed(2)})`);
     const cr = at([2.75, 0.5, 0]);
     ok(cr.coverage < 0.05 && cr.nx === 0 && cr.ny === 0 && cr.nz === 0 && cr.depth === 0,
-      `masked-out half is empty in both passes (cov=${cr.coverage.toFixed(2)})`);
-    const green = countPixels(glbResult, (s) => s.coverage > 0.5 && s.g > 0.5 && s.r < 0.3);
-    ok(green === 0, `no green (alpha-cleared) pixels baked (got ${green})`);
+      `masked-out half is empty in the g-buffer (cov=${cr.coverage.toFixed(2)})`);
   }
 
   // 2. Same model via .gltf + .bin + textures bakes byte-identically.
@@ -641,13 +576,13 @@ async function main(): Promise<void> {
     const gltfResult = bakePrimitive(src.primitive(1));
     ok(gltfResult.width === glbResult!.width && gltfResult.height === glbResult!.height, 'same sprite size');
     let identical = true;
-    for (let i = 0; i < gltfResult.albedo.length; i++) {
-      if (gltfResult.albedo[i] !== glbResult!.albedo[i] || gltfResult.gbuffer[i] !== glbResult!.gbuffer[i]) {
+    for (let i = 0; i < gltfResult.gbuffer.length; i++) {
+      if (gltfResult.gbuffer[i] !== glbResult!.gbuffer[i]) {
         identical = false;
         break;
       }
     }
-    ok(identical, 'albedo + gbuffer passes byte-identical between containers');
+    ok(identical, 'g-buffer pass byte-identical between containers');
   }
 
   // 3. Bundle round-trip through the runtime parser, incl. scaled manifest.
@@ -659,16 +594,19 @@ async function main(): Promise<void> {
     ok(approx(result.size[0], 6, 1e-3) && approx(result.size[1], 2, 1e-3), `scale-2 size [6,2,0] (got [${result.size}])`);
     const bytes = await buildBundle(result);
     const parsed = parseBake(bytes.buffer as ArrayBuffer);
-    ok(parsed.manifest.format === 'isoinfinity-bake/4', `manifest format (got ${parsed.manifest.format})`);
-    ok(parsed.render === null && parsed.ao === null, 'no optional passes in a raster-only bundle');
+    ok(parsed.manifest.format === 'isoinfinity-bake/5', `manifest format (got ${parsed.manifest.format})`);
+    ok(parsed.render === null, 'no optional passes in a raster-only bundle');
     ok(approx(parsed.manifest.cube.size[0], 6, 1e-3) && approx(parsed.manifest.cube.size[1], 2, 1e-3),
       `manifest cube.size records scaled box (got [${parsed.manifest.cube.size}])`);
-    ok(parsed.albedo.size > 0 && parsed.gbuffer.size > 0, 'albedo + gbuffer entries present');
+    ok(parsed.gbuffer.size > 0, 'g-buffer entry present');
+    const passNames = Object.keys(parsed.manifest.passes);
+    ok(!passNames.includes('albedo') && !passNames.includes('ao'),
+      `manifest declares no albedo/ao passes (got [${passNames.join(', ')}])`);
   }
 
-  // 3b. Hand-built fixtures: /3, /4 with optional passes, unknown format.
+  // 3b. Hand-built fixtures: legacy passes ignored, minimal v5, unknown format.
   {
-    log('test: parseBake v3/v4 fixtures + unknown format rejection');
+    log('test: parseBake legacy/minimal fixtures + unknown format rejection');
     const pngRed2x2 = await pngBytes(SOLID_RED);
     const makeZip = (manifest: Record<string, unknown>, extra: Record<string, Uint8Array> = {}): Uint8Array =>
       zipSync({
@@ -689,9 +627,21 @@ async function main(): Promise<void> {
       albedo: { file: 'x-albedo.png', encoding: 'png-r8-srgb', channels: 'rgb=albedo a=coverage' },
       gbuffer: { file: 'x-gbuffer.exr', encoding: 'exr-f32-linear', channels: 'rgb=world-normal a=ray-depth' },
     };
+    // New-shape manifest: g-buffer only.
+    const gbufferPasses = {
+      gbuffer: rasterPasses.gbuffer,
+    };
+
+    const minimal = parseBake(makeZip(base('isoinfinity-bake/5', gbufferPasses)).buffer as ArrayBuffer);
+    ok(minimal.render === null, 'minimal g-buffer-only bundle parses');
+
+    // Legacy manifests still recording albedo/ao entries parse; the parser
+    // resolves only g-buffer (+ render) and ignores the rest.
+    const legacy = parseBake(makeZip(base('isoinfinity-bake/5', rasterPasses)).buffer as ArrayBuffer);
+    ok(legacy.render === null, 'legacy manifest with an albedo entry parses (albedo ignored)');
 
     const v3 = parseBake(makeZip(base('isoinfinity-bake/3', rasterPasses)).buffer as ArrayBuffer);
-    ok(v3.render === null && v3.ao === null, 'v3 bundle parses without optional passes');
+    ok(v3.render === null, 'v3 bundle parses without optional passes');
 
     const v4Passes = {
       ...rasterPasses,
@@ -704,16 +654,16 @@ async function main(): Promise<void> {
         'x-ao.png': pngRed2x2,
       }).buffer as ArrayBuffer,
     );
-    ok(v4.render !== null && v4.ao !== null, 'v4 bundle exposes optional pass blobs when present');
+    ok(v4.render !== null, 'v4 bundle exposes the render pass blob when present');
 
-    const broken = base('isoinfinity-bake/5', rasterPasses);
+    const broken = base('isoinfinity-bake/6', gbufferPasses);
     let threw = '';
     try {
       parseBake(makeZip(broken).buffer as ArrayBuffer);
     } catch (err) {
       threw = err instanceof Error ? err.message : String(err);
     }
-    ok(threw.includes('isoinfinity-bake/5'), `unknown format rejected by name (got "${threw}")`);
+    ok(threw.includes('isoinfinity-bake/6'), `unknown format rejected by name (got "${threw}")`);
   }
 
   // 4. Smooth curved glTF geometry bakes unit-length varying normals.
@@ -766,7 +716,6 @@ async function main(): Promise<void> {
 
   // 6. Path-tracer spike: ortho + transparent background + AA + determinism.
   await runPtSpike();
-  await runAoSpike();
 
   log(`\n${passed} passed, ${failed} failed`, failed === 0 ? 'pass' : 'fail');
 }
