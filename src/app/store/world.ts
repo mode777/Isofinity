@@ -118,6 +118,31 @@ function parseWorldFile(text: string, fileName: string): WorldFile {
 }
 
 /**
+ * Resolve a placement's asset id to a bundle file in the workspace's
+ * sprites/ listing. Tries the exact `<asset>.sprite`/`.zip` name first,
+ * then a case-insensitive stem match that also ignores a trailing model
+ * extension — ids recorded from in-memory model bakes carry the model
+ * file's `.glb`/`.gltf`, while saved bundles may be named either way.
+ */
+function resolveBundleFile(asset: string): string | null {
+  const listing = useProject.getState().sprites;
+  const direct = SPRITE_EXTS.map((ext) => `${asset}${ext}`).find((n) =>
+    listing.includes(n),
+  );
+  if (direct) return direct;
+  const stemOf = (name: string): string =>
+    stripModelExt(name.replace(/\.(sprite|zip)$/i, '').toLowerCase());
+  const target = stemOf(asset);
+  return (
+    listing.find((f) => stemOf(f) === target) ?? null
+  );
+}
+
+function stripModelExt(name: string): string {
+  return name.replace(/\.(glb|gltf)$/i, '');
+}
+
+/**
  * Open (or focus) a world document from the workspace's worlds/ folder.
  * Every referenced sprite bundle is loaded from sprites/; placements
  * whose bundle is missing are reported as skipped — except built-in
@@ -159,22 +184,33 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     };
     for (const entry of data.sprites) {
       if (loaded.has(entry.asset)) continue;
+      const bundleName = resolveBundleFile(entry.asset);
+      if (!bundleName) {
+        if (PRIMITIVE_KINDS.includes(entry.asset as PrimitiveKind)) {
+          try {
+            loaded.set(
+              entry.asset,
+              await bakePrimitiveLayer(entry.asset as PrimitiveKind),
+            );
+          } catch (bakeErr) {
+            markSkipped(entry.asset, bakeErr);
+          }
+        } else {
+          markSkipped(
+            entry.asset,
+            new Error(`no matching .sprite bundle in sprites/`),
+          );
+        }
+        continue;
+      }
       try {
-        const bundleFile = await readWorkspaceFile('sprites', `${entry.asset}${BUNDLE_EXT}`);
+        const bundleFile = await readWorkspaceFile('sprites', bundleName);
         const { layer } = await loadBundleLayer(await bundleFile.arrayBuffer());
-        loaded.set(entry.asset, layer);
+        // Pin the layer id to the placement's asset id: a bundle's
+        // manifest id can differ from the file name it was saved as.
+        loaded.set(entry.asset, { ...layer, id: entry.asset });
       } catch (err) {
-        // No bundle: built-in primitives bake on the fly; anything else is
-        // a genuinely missing sprite asset and its placements are skipped.
-        if (!(PRIMITIVE_KINDS as string[]).includes(entry.asset)) {
-          markSkipped(entry.asset, err);
-          continue;
-        }
-        try {
-          loaded.set(entry.asset, await bakePrimitiveLayer(entry.asset as PrimitiveKind));
-        } catch (bakeErr) {
-          markSkipped(entry.asset, bakeErr);
-        }
+        markSkipped(entry.asset, err);
       }
     }
     doc.layers = [...loaded.values()];
@@ -231,14 +267,12 @@ export function suggestWorldName(existingNames: string[]): string {
 }
 
 /**
- * Placement assets with no `.sprite`/`.zip` bundle in the workspace's
- * sprites/ folder: these cannot load back when the world is reopened.
+ * Placement assets with no resolvable `.sprite`/`.zip` bundle in the
+ * workspace's sprites/ folder: these cannot load back when the world is
+ * reopened.
  */
 function unbackedAssets(assets: Iterable<string>): string[] {
-  const listing = useProject.getState().sprites;
-  return [...new Set(assets)].filter(
-    (asset) => !SPRITE_EXTS.some((ext) => listing.includes(`${asset}${ext}`)),
-  );
+  return [...new Set(assets)].filter((asset) => resolveBundleFile(asset) === null);
 }
 
 export async function saveWorld(docId: string, rawName?: string): Promise<void> {
