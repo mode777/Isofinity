@@ -150,26 +150,30 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       tool: '',
     };
 
-    const skipped: string[] = [];
+    const skipped: { asset: string; reason: string }[] = [];
     const loaded = new Map<string, SpriteLayer>();
+    const markSkipped = (asset: string, err: unknown): void => {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(`world load: sprite "${asset}" failed to load:`, err);
+      if (!skipped.some((s) => s.asset === asset)) skipped.push({ asset, reason });
+    };
     for (const entry of data.sprites) {
       if (loaded.has(entry.asset)) continue;
       try {
         const bundleFile = await readWorkspaceFile('sprites', `${entry.asset}${BUNDLE_EXT}`);
         const { layer } = await loadBundleLayer(await bundleFile.arrayBuffer());
         loaded.set(entry.asset, layer);
-      } catch {
+      } catch (err) {
         // No bundle: built-in primitives bake on the fly; anything else is
         // a genuinely missing sprite asset and its placements are skipped.
         if (!(PRIMITIVE_KINDS as string[]).includes(entry.asset)) {
-          if (!skipped.includes(entry.asset)) skipped.push(entry.asset);
+          markSkipped(entry.asset, err);
           continue;
         }
         try {
           loaded.set(entry.asset, await bakePrimitiveLayer(entry.asset as PrimitiveKind));
-        } catch (err) {
-          console.error(err);
-          if (!skipped.includes(entry.asset)) skipped.push(entry.asset);
+        } catch (bakeErr) {
+          markSkipped(entry.asset, bakeErr);
         }
       }
     }
@@ -184,7 +188,9 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     ed().setStatus(
       `Loaded world "${doc.title}" — ${placed} placed` +
         (skipped.length > 0
-          ? `, skipped unloadable sprites: ${skipped.join(', ')} — save each one into sprites/ (with a render pass) and re-save the world`
+          ? `, skipped: ${skipped
+              .map((s) => `${s.asset} (${s.reason})`)
+              .join('; ')} — save each sprite into sprites/ (with a render pass) and re-save the world`
           : ''),
     );
   } catch (err) {
@@ -193,9 +199,12 @@ export async function openWorldDoc(fileName: string): Promise<void> {
   }
 }
 
-function skippedCount(sprites: { asset: string }[], skipped: string[]): number {
+function skippedCount(
+  sprites: { asset: string }[],
+  skipped: { asset: string }[],
+): number {
   let n = 0;
-  for (const s of sprites) if (skipped.includes(s.asset)) n++;
+  for (const s of sprites) if (skipped.some((k) => k.asset === s.asset)) n++;
   return n;
 }
 
