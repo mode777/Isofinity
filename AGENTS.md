@@ -41,6 +41,8 @@ it as the reference architecture; design against it.
 - `npm run build` — typecheck (`tsc --noEmit`) + production build to `dist/`
 - `npm run preview` — serve the built `dist/`
 - No test or lint setup yet.
+- `openspec` is not on PATH; run it via `npx openspec ...` (verified:
+  `npx openspec --version` → 1.11.0).
 
 ## Workflow
 

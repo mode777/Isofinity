@@ -7,8 +7,6 @@ lit render pass) packaged as a manifest + zip bundle the runtime consumes.
 
 ## Requirements
 
-## Requirements
-
 ### Requirement: Load glTF files as a bake source
 
 The bake tool SHALL let the user select a glTF file — a self-contained

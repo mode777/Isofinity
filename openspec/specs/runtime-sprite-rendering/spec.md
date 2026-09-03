@@ -7,8 +7,6 @@ occlusion and hit-testing stay driven by the baked g-buffer in every mode.
 
 ## Requirements
 
-## Requirements
-
 ### Requirement: Bundles must carry a rendered pass
 
 The editor's bundle parser SHALL accept `isoinfinity-bake/4` and

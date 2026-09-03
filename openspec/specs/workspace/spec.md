@@ -13,8 +13,8 @@ uploads and browser downloads.
 Each tool SHALL offer a workspace control that opens a local folder through
 the browser's directory picker on an explicit user action. Connecting SHALL
 be allowed to any folder the user picks; on connect the tool SHALL ensure
-the convention subfolders exist — `hdri/`, `models/`, `sprites/`,
-`worlds/`, creating any that are missing — and SHALL show the connected
+the convention subfolders exist — `hdri/`, `models/`, `sprites/`, `worlds/`,
+`presets/`, creating any that are missing — and SHALL show the connected
 state with the folder's name. Canceling the picker SHALL leave the
 connection state unchanged.
 
@@ -22,8 +22,8 @@ connection state unchanged.
 
 - **WHEN** the user picks an empty folder in the directory picker
 - **THEN** the tool reports the workspace as connected, shows the folder
-  name, and the folder now contains `hdri/`, `models/`, `sprites/`, and
-  `worlds/`
+  name, and the folder now contains `hdri/`, `models/`, `sprites/`,
+  `worlds/`, and `presets/`
 
 #### Scenario: Existing assets are usable immediately
 
