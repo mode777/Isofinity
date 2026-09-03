@@ -17,7 +17,7 @@ import type {
 import { DEFAULT_LIGHT, DEFAULT_SUN, PRIMITIVE_KINDS } from '../document.js';
 import { nextDocId, useEditor, type EditorState } from './editor.js';
 import { bakePrimitiveLayer, anyBakeBusy, resultToLayer } from './bake.js';
-import { useProject } from './project.js';
+import { SPRITE_EXTS, useProject } from './project.js';
 
 const WORLD_FORMAT = 'isoinfinity-world/1';
 
@@ -183,7 +183,9 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     const placed = data.sprites.length - skippedCount(data.sprites, skipped);
     ed().setStatus(
       `Loaded world "${doc.title}" — ${placed} placed` +
-        (skipped.length > 0 ? `, skipped missing assets: ${skipped.join(', ')}` : ''),
+        (skipped.length > 0
+          ? `, skipped unloadable sprites: ${skipped.join(', ')} — save each one into sprites/ (with a render pass) and re-save the world`
+          : ''),
     );
   } catch (err) {
     ed().setStatus(`World load failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -219,6 +221,17 @@ export function suggestWorldName(existingNames: string[]): string {
   return nextWorldName(existingNames);
 }
 
+/**
+ * Placement assets with no `.sprite`/`.zip` bundle in the workspace's
+ * sprites/ folder: these cannot load back when the world is reopened.
+ */
+function unbackedAssets(assets: Iterable<string>): string[] {
+  const listing = useProject.getState().sprites;
+  return [...new Set(assets)].filter(
+    (asset) => !SPRITE_EXTS.some((ext) => listing.includes(`${asset}${ext}`)),
+  );
+}
+
 export async function saveWorld(docId: string, rawName?: string): Promise<void> {
   const doc = worldDoc(docId);
   if (!doc) return;
@@ -228,11 +241,12 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
   const name = sanitizeWorldName(rawName?.trim() || fallback);
   const file = `${name}.json`;
   try {
+    const placements = doc.world.list();
     const worldFile: WorldFile = {
       format: WORLD_FORMAT,
       name,
       savedAt: new Date().toISOString(),
-      sprites: doc.world.list().map((p) => ({ asset: p.primId, x: p.x, z: p.z })),
+      sprites: placements.map((p) => ({ asset: p.primId, x: p.x, z: p.z })),
       light: doc.light,
       sun: doc.sun,
     };
@@ -243,7 +257,16 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
       d.title = name;
     });
     ed().markDirty(docId, false);
-    ed().setStatus(`Saved world "${name}" to worlds/${file}`);
+    const missing = unbackedAssets(placements.map((p) => p.primId));
+    if (missing.length > 0) {
+      ed().setStatus(
+        `Saved world "${name}" to worlds/${file} — WARNING: ${missing.length} sprite(s) ` +
+          `have no bundle in sprites/ (${missing.join(', ')}): those placements will be ` +
+          'skipped on reload. Open each sprite and Save it (with a render pass) first.',
+      );
+    } else {
+      ed().setStatus(`Saved world "${name}" to worlds/${file}`);
+    }
     void useProject.getState().refresh();
   } catch (err) {
     ed().setStatus(`World save failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -426,6 +449,9 @@ export function placeInWorld(bakeDocId: string, targetDocId?: string): void {
   ed().focusDoc(target.docId);
   const [w, h] = [layer.width, layer.height];
   ed().setStatus(
-    `${created ? 'Created world and placed' : 'Placed'} ${id} — ${w}x${h} px @ ${layer.pxPerUnit} px/unit`,
+    `${created ? 'Created world and placed' : 'Placed'} ${id} — ${w}x${h} px @ ${layer.pxPerUnit} px/unit` +
+      (bdoc.ref
+        ? ''
+        : ' — this sprite has no bundle in sprites/ yet: Save it (with a render pass) or placements will be skipped when the world reloads'),
   );
 }
