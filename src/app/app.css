@@ -258,6 +258,7 @@ h2 {
 
 .row input[type='range'] {
   flex: 1;
+  min-width: 0;
 }
 
 .row .value-input {
