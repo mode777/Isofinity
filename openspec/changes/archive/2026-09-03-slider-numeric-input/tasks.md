@@ -7,5 +7,5 @@
 
 ## 2. Cross-control verification
 
-- [ ] 2.1 In `npm run dev`, exercise sliders in both panels — world key light (azimuth/elevation/intensity), sun (time-of-day `13:30` idle format, day-of-year clamp `500 → 365`, latitude), sprite bake settings and environment (samples, rotate, exposure) — confirming commit, clamp, reject, and formatted-idle behavior per the spec scenarios, and that dragging still snaps by step and keeps the field in sync
+- [x] 2.1 In `npm run dev`, exercise sliders in both panels — world key light (azimuth/elevation/intensity), sun (time-of-day `13:30` idle format, day-of-year clamp `500 → 365`, latitude), sprite bake settings and environment (samples, rotate, exposure) — confirming commit, clamp, reject, and formatted-idle behavior per the spec scenarios, and that dragging still snaps by step and keeps the field in sync
 - [x] 2.2 Run `npm run build` and confirm it passes with no new diagnostics
