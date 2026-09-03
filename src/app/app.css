@@ -261,7 +261,8 @@ h2 {
 }
 
 .row .value-input {
-  width: 3.6em;
+  flex: none;
+  width: 4.6em;
   padding: 0.15rem 0.3rem;
   text-align: right;
   color: var(--muted);
