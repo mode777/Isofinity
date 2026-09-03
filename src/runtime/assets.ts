@@ -9,18 +9,8 @@ import {
   RGBAFormat,
 } from 'three';
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
-import { bakePrimitive } from '../bake/bake.js';
-import { parseBake } from '../bake/bundle.js';
-import { DEFAULT_PT_SETTINGS, PtBaker, type PtEnvironment } from '../bake/pt.js';
-import {
-  getCapsule,
-  getCube,
-  getCylinder,
-  getDonut,
-  getPlane,
-  getSlab,
-  getSphere,
-} from '../bake/primitives.js';
+import type { PtEnvironment } from '../bake/pt.js';
+import { parseBake, type BakeManifest, type BakeProvenance } from '../bake/bundle.js';
 
 export const RUNTIME_PPU = 64;
 
@@ -60,7 +50,7 @@ export interface SpriteSet {
  * elevation 45° — keep in sync with main.ts) so the baked light agrees
  * with the dynamic key light. Pure function, no external HDRI asset.
  */
-function proceduralEnvironment(): PtEnvironment {
+export function proceduralEnvironment(): PtEnvironment {
   const w = 128;
   const h = 64;
   const az = (60 * Math.PI) / 180;
@@ -115,40 +105,6 @@ function proceduralEnvironment(): PtEnvironment {
   return { texture, name: 'procedural-sky', rotationDeg: 0, intensity: 1, exposure: 1, saturation: 1 };
 }
 
-export async function bakeSpriteLayers(): Promise<SpriteLayer[]> {
-  const prims = [
-    getSphere(),
-    getDonut(),
-    getCube(),
-    getCylinder(),
-    getCapsule(),
-    getPlane(),
-    getSlab(),
-  ];
-  const pt = new PtBaker(DEFAULT_PT_SETTINGS, RUNTIME_PPU);
-  pt.setEnvironment(proceduralEnvironment());
-  const layers: SpriteLayer[] = [];
-  try {
-    for (const prim of prims) {
-      const result = bakePrimitive(prim, RUNTIME_PPU);
-      pt.setPrimitive(prim, RUNTIME_PPU);
-      const image = await pt.renderPass();
-      layers.push({
-        id: result.id,
-        pxPerUnit: RUNTIME_PPU,
-        width: result.width,
-        height: result.height,
-        originPx: result.originPx,
-        gbuffer: bakeFloatToHalf(result.gbuffer, result.width, result.height),
-        render: ptImageToLayerBytes(image),
-      });
-    }
-  } finally {
-    pt.dispose();
-  }
-  return layers;
-}
-
 export function layersToSet(layers: SpriteLayer[]): SpriteSet {
   const maxW = Math.max(...layers.map((l) => l.width));
   const maxH = Math.max(...layers.map((l) => l.height));
@@ -164,14 +120,24 @@ export function layersToSet(layers: SpriteLayer[]): SpriteSet {
   };
 }
 
-export async function layerFromBundle(buffer: ArrayBuffer): Promise<SpriteLayer> {
-  const { manifest, gbuffer, render } = parseBake(buffer);
+/**
+ * Parse a bundle into a placeable layer plus its manifest and provenance
+ * record (null for bundles saved without one, e.g. `/4`).
+ */
+export async function loadBundleLayer(
+  buffer: ArrayBuffer,
+): Promise<{
+  layer: SpriteLayer;
+  manifest: BakeManifest;
+  provenance: BakeProvenance | null;
+}> {
+  const { manifest, gbuffer, render, provenance } = parseBake(buffer);
   if (!render) {
     throw new Error('bundle has no render pass — re-bake with an environment');
   }
   const w = manifest.sprite.width;
   const h = manifest.sprite.height;
-  return {
+  const layer: SpriteLayer = {
     id: manifest.id,
     pxPerUnit: manifest.pxPerUnit,
     width: w,
@@ -180,9 +146,10 @@ export async function layerFromBundle(buffer: ArrayBuffer): Promise<SpriteLayer>
     gbuffer: decodeExrGbuffer(await gbuffer.arrayBuffer(), w, h),
     render: await decodePng(render, w, h),
   };
+  return { layer, manifest, provenance };
 }
 
-async function decodePng(blob: Blob, w: number, h: number): Promise<Uint8Array> {
+export async function decodePng(blob: Blob, w: number, h: number): Promise<Uint8Array> {
   const bitmap = await createImageBitmap(blob, {
     premultiplyAlpha: 'none',
     colorSpaceConversion: 'none',
@@ -201,7 +168,7 @@ async function decodePng(blob: Blob, w: number, h: number): Promise<Uint8Array> 
   return new Uint8Array(ctx.getImageData(0, 0, w, h).data);
 }
 
-function decodeExrGbuffer(buffer: ArrayBuffer, w: number, h: number): Uint16Array {
+export function decodeExrGbuffer(buffer: ArrayBuffer, w: number, h: number): Uint16Array {
   // Decode straight to half floats: EXRLoader converts the float32 scanlines
   // to its configured `type`, and HalfFloatType output (Uint16Array of half
   // bits) is exactly the texture upload format.
@@ -232,7 +199,7 @@ function decodeExrGbuffer(buffer: ArrayBuffer, w: number, h: number): Uint16Arra
 }
 
 // GL readback is bottom-up; uploads want top-down (row 0 = sprite top).
-function bakeFloatToHalf(rgba: Float32Array, w: number, h: number): Uint16Array {
+export function bakeFloatToHalf(rgba: Float32Array, w: number, h: number): Uint16Array {
   const out = new Uint16Array(w * h * 4);
   for (let y = 0; y < h; y++) {
     const srcRow = (h - 1 - y) * w;
@@ -249,7 +216,7 @@ function bakeFloatToHalf(rgba: Float32Array, w: number, h: number): Uint16Array 
 }
 
 // PtImage bytes are in GL readback order (bottom-up); flip to top-down.
-function ptImageToLayerBytes(image: { width: number; height: number; rgba: Uint8Array }): Uint8Array {
+export function ptImageToLayerBytes(image: { width: number; height: number; rgba: Uint8Array }): Uint8Array {
   const { width: w, height: h, rgba } = image;
   const out = new Uint8Array(w * h * 4);
   for (let y = 0; y < h; y++) {

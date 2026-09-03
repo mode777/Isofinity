@@ -7,24 +7,27 @@ scene and camera**: a raster MRT draw (unlit albedo + merged g-buffer) and a
 GPU path tracer (`three-gpu-pathtracer`) for the optional lit `render` and
 `ao` passes.
 
-Run `npm run dev` and open `/bake.html` (also built to `dist/bake.html`).
-Pick a primitive or load a glTF file, hit Bake, inspect the passes, save the
-bundle (into a connected workspace folder, or as a browser download). With an
-HDRI environment loaded (drag-drop an equirect `.hdr`, or pick one from the
-workspace) you can also bake the path-traced render and AO passes;
-environment and pass settings sit below the source controls.
+Run `npm run dev` and open the integrated editor (`index.html`). Open a
+primitive or model from the **project browser** (or "Import glTF file…")
+— a sprite editor tab opens and raster-bakes immediately — then inspect
+the passes, bake the path-traced render/AO passes, and save the bundle
+(into a connected workspace folder, or as a browser download). With an
+HDRI environment loaded (file dialog, or pick one from the workspace's
+`hdri/`) the render pass can accumulate; environment and pass settings sit
+in the properties panel. See `docs/runtime.md` for the editor shell.
 
 ### Workspace folder
 
-Both tools can bind a local folder through the File System Access API
-("Open workspace…"): the picked folder is expected to hold (and is created
-with, if missing) the convention subfolders `hdri/`, `models/`, `sprites/`,
-`worlds/`. The connection is remembered locally (IndexedDB), so a reload
-only needs one permission click ("Reconnect workspace…"). While connected,
-"Load glTF…" and "Load HDRI…" gain dropdown listings of `models/` and
-`hdri/` (a `.gltf`'s external resources resolve against the folder's
-contents), and the bundle save writes `sprites/<id>.sprite` directly.
-Without a workspace — or in browsers without the API (Firefox/Safari) —
+The editor binds a local folder through the File System Access API
+("Open workspace…" in the top bar): the picked folder is expected to hold
+(and is created with, if missing) the convention subfolders `hdri/`,
+`models/`, `sprites/`, `worlds/`. The connection is remembered locally
+(IndexedDB), so a reload only needs one permission click ("Reconnect
+workspace…"). While connected, the project browser lists `models/`,
+`sprites/` and `worlds/`, the sprite properties panel gains an `hdri/`
+listing (a `.gltf`'s external resources resolve against the folder's
+contents), and bundle saves write `sprites/<id>.sprite` directly. Without
+a workspace — or in browsers without the API (Firefox/Safari) —
 everything falls back to file dialogs and downloads exactly as before
 (feature-detected, never UA-sniffed).
 
@@ -210,10 +213,15 @@ moves quad size + sprite texel size into per-instance attributes.
 
 Records camera angles and view direction, `pxPerUnit`, sprite size, origin,
 depth semantics/range and per-pass channel semantics
-(`format: "isoinfinity-bake/4"`; v3 and earlier stored only albedo +
-g-buffer; v4 adds the optional path-traced passes plus `environment` /
-`renderer` provenance blocks — the g-buffer EXR and albedo PNG keep the v3
-byte conventions exactly).
+(`format: "isoinfinity-bake/5"`; v4 and earlier stored only albedo +
+g-buffer + the optional path-traced passes plus `environment` / `renderer`
+provenance blocks — the g-buffer EXR and albedo PNG keep the v3 byte
+conventions exactly). v5 adds the editor-facing `provenance` block: the
+bake source (a primitive name, or a workspace model file name + uniform
+scale), the path-trace settings, and the environment (a `procedural`
+marker or an `hdri/` file name + parameters) — so the integrated editor
+can re-open a sprite editable and re-bake it in place. v5 without a
+`provenance` block is valid; the editor then opens it view-only.
 
 ### Bundle (`<id>.sprite`)
 
@@ -239,11 +247,11 @@ container is pure transport, so any zip tool opens it and each pass stays
 individually diffable. Entries carry a fixed mtime so re-baking the same
 primitive with the same settings yields identical bytes. `parseBake()`
 (`src/bake/bundle.ts`) is the matching reader: unzip, validate the `format`
-prefix (`/3` and `/4` accepted, anything else rejected by name), resolve
+prefix (`/4` and `/5` accepted, anything else rejected by name), resolve
 entries via the manifest, return Blobs ready for the PNG/EXR decoders, and
-expose which optional passes are present. The runtime editor consumes
-bundles through **Load sprite** (file dialog or the workspace `sprites/`
-listing).
+expose which optional passes are present plus the `provenance` block when
+recorded. The integrated editor consumes bundles through the project
+browser's `sprites/` listing.
 
 ## Current state / next steps
 
@@ -261,14 +269,17 @@ listing).
 - Done: path-traced `render` + `ao` passes (`three-gpu-pathtracer` 0.0.24)
   over the same ortho camera — HDRI environments with rotation/intensity/
   exposure, full PBR materials for glTF sources, ACES export identical to
-  the preview, deterministic accumulation, bundle format `isoinfinity-bake/4`
-  with optional passes and provenance blocks.
-- Done: workspace folders (File System Access API, shared with the runtime
-  via `src/shared/workspace.ts`) — `hdri/ models/ sprites/ worlds/`
-  convention, workspace-backed model/HDRI pickers, bundle saves to
-  `sprites/<id>.sprite`, `.sprite` bundle naming everywhere (bytes
-  unchanged), IndexedDB handle persistence with one-click reconnect,
-  graceful degradation to dialogs/downloads elsewhere.
+  the preview, deterministic accumulation, optional passes and provenance
+  blocks.
+- Done: workspace folders (File System Access API, `src/shared/workspace.ts`)
+  — `hdri/ models/ sprites/ worlds/` convention, workspace-backed model/
+  HDRI listings, bundle saves to `sprites/<id>.sprite`, `.sprite` bundle
+  naming everywhere (bytes unchanged), IndexedDB handle persistence with
+  one-click reconnect, graceful degradation to dialogs/downloads elsewhere.
+- Done: the integrated React editor (`src/app/`) replacing the separate
+  `bake.html` + runtime pages — editor tabs over in-memory documents,
+  project browser, context-sensitive properties panel, `isoinfinity-bake/5`
+  provenance with re-bake, and in-memory place-into-world.
 - Broken: the path-traced `ao` pass accumulates empty output despite healthy
   per-frame renders (see the AO section above) — labeled broken in the UI,
   slated for replacement with a different approach.

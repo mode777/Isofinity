@@ -13,7 +13,12 @@ while applying real-time dynamic lighting on top of them.
 
 ## Status
 
-Early inception — API and architecture under active design.
+Early inception — API and architecture under active design. The bake tool
+and runtime editor live in one integrated React editor (`index.html`,
+`src/app/`): open or create sprite assets and worlds from the project
+browser, bake passes with a GPU path tracer, and place sprites into
+dynamically lit isometric worlds. See `docs/runtime.md` and
+`docs/bake-pipeline.md`.
 
 ## License
 

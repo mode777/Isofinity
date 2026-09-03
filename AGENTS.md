@@ -49,38 +49,47 @@ it as the reference architecture; design against it.
 
 ## Versioning
 
-- Every tool (bake tool and runtime editor) surfaces one shared build
-  version, computed at build/dev time in `vite.config.ts` from git:
-  `v<commit count>+<short hash>` (e.g. `v142+9f2a1bc`). It increases by one
-  with each commit automatically — never bump it by hand.
+- Every editor surface shows one shared build version, computed at
+  build/dev time in `vite.config.ts` from git: `v<commit count>+<short
+  hash>` (e.g. `v142+9f2a1bc`). It increases by one with each commit
+  automatically — never bump it by hand.
 - The constant is injected as `__APP_VERSION__` and consumed via
-  `APP_VERSION` (`src/version.ts`); both pages show it next to their title.
+  `APP_VERSION` (`src/version.ts`); the editor's top bar shows it next to
+  the app title.
 - Builds without git metadata (zip download, unusual CI) fall back to
   `dev`. The Pages deploy uses `fetch-depth: 0` so the count is exact.
 
 ## Current state
 
-- Bake tool (`bake.html`, `src/bake/`): bakes test primitives (sphere,
-  donut, cube, cylinder, capsule, plane, slab) and glTF models into
-  per-asset sprite passes — albedo (PNG), a merged g-buffer (float EXR:
-  rgb = world normals, a = linear ray depth), and an optional path-traced
-  `render` pass (HDRI-lit, ACES) — shipped as a zip-byte bundle named
-  `<id>.sprite` with a manifest (`format: isoinfinity-bake/4`). Arbitrary
-  cuboids bake directly; the 1×1×1 cube is just the default cell. Both
-  tools can bind a workspace folder (File System Access API,
-  `src/shared/workspace.ts`; convention: `hdri/`, `models/`, `sprites/`,
-  `worlds/`) to load and save assets in place, with dialogs/downloads as
-  fallback. Conventions in `docs/bake-pipeline.md`. The path-traced `ao`
-  pass is KNOWN BROKEN (accumulates empty output) and will be replaced
-  with a different approach in a future change.
-- Runtime editor (`index.html`, `src/runtime/`, shared math in
-  `src/shared/`): bakes sprites at page load, places them freely on an
-  isometric ground plane, and loads extra objects from `.sprite` bundles
-  (dialog or workspace `sprites/` listing); worlds (placements + light
-  state) save/load as `isoinfinity-world/1` JSON in the workspace's
-  `worlds/` folder. Raw WebGL2 compositor with per-pixel sprite occlusion,
-  deferred-style directional lighting (key + ambient, shades the baked
-  albedo/normal G-buffer), per-sprite baked/unlit display modes, and a
-  global dynamic-light switch. See `docs/runtime.md`.
+- Integrated editor (`index.html`, `src/app/`, a React application over
+  framework-agnostic engines): one page with a top bar (workspace
+  connection), a tab bar of in-memory editor documents, a project browser
+  (built-in primitives + workspace `sprites/`, `models/`, `worlds/`),
+  a context-sensitive properties panel (bake options for sprite tabs,
+  light/sun for world tabs), editor area, and a status bar. Opening a
+  resource opens/focuses a tab; documents survive tab switches without
+  saving; one live editor context per editor kind. See `docs/runtime.md`.
+- Bake pipeline (`src/bake/`): bakes test primitives (sphere, donut,
+  cube, cylinder, capsule, plane, slab) and glTF models into per-asset
+  sprite passes — albedo (PNG), a merged g-buffer (float EXR: rgb = world
+  normals, a = linear ray depth), and an optional path-traced `render`
+  pass (HDRI-lit, ACES) — shipped as a zip-byte bundle named `<id>.sprite`
+  with a manifest (`format: isoinfinity-bake/5`, carrying `provenance`:
+  source, bake settings, environment so sprites re-bake in place; `/4`
+  opens view-only). Arbitrary cuboids bake directly; the 1×1×1 cube is
+  just the default cell. The path-traced `ao` pass is KNOWN BROKEN
+  (accumulates empty output) and will be replaced with a different
+  approach in a future change.
+- Sprite→world handoff: a baked sprite document's passes become a world
+  document layer in memory ("Place in world") — no bundle round trip.
+- Workspace binding (File System Access API, `src/shared/workspace.ts`;
+  convention: `hdri/`, `models/`, `sprites/`, `worlds/`) is surfaced
+  through the top bar, project browser and panels, with dialogs/downloads
+  as fallback. Conventions in `docs/bake-pipeline.md`. Worlds
+  (placements + light state) save/load as `isoinfinity-world/1` JSON in
+  the workspace's `worlds/` folder.
+- Raw WebGL2 compositor (`src/runtime/renderer.ts`) with per-pixel sprite
+  occlusion, deferred-style directional lighting (key + ambient, shades
+  the baked albedo/normal G-buffer), and a global dynamic-light switch.
 - No released API: expect breaking changes while the architecture is under
   design.

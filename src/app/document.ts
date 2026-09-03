@@ -1,0 +1,124 @@
+import type { BakeProvenance } from '../bake/bundle.js';
+import type { BakeResult } from '../bake/bake.js';
+import type { GltfSource } from '../bake/gltf.js';
+import type { PtEnvironment, PtImage, PtSettings } from '../bake/pt.js';
+import type { SpriteLayer } from '../runtime/assets.js';
+import type { World } from '../runtime/world.js';
+
+export type PrimitiveKind =
+  | 'sphere'
+  | 'donut'
+  | 'cube'
+  | 'cylinder'
+  | 'capsule'
+  | 'plane'
+  | 'slab';
+
+export const PRIMITIVE_KINDS: PrimitiveKind[] = [
+  'sphere',
+  'donut',
+  'cube',
+  'cylinder',
+  'capsule',
+  'plane',
+  'slab',
+];
+
+/** Where a sprite document's geometry comes from. */
+export type BakeSource =
+  | { kind: 'primitive'; primitive: PrimitiveKind }
+  | { kind: 'model'; fileName: string };
+
+/** Where a sprite document's render-pass environment comes from. */
+export type EnvSource = { kind: 'procedural' } | { kind: 'hdri'; fileName: string };
+
+export interface LightState {
+  azimuthDeg: number;
+  elevationDeg: number;
+  intensity: number;
+  colorHex: string;
+  ambientHex: string;
+  enabled: boolean;
+}
+
+export interface SunState {
+  hour: number;
+  day: number;
+  lat: number;
+}
+
+export const DEFAULT_LIGHT: LightState = {
+  azimuthDeg: 60,
+  elevationDeg: 45,
+  intensity: 1.2,
+  colorHex: '#fff1dd',
+  ambientHex: '#a8a8a8',
+  enabled: true,
+};
+
+export const DEFAULT_SUN: SunState = { hour: 12, day: 80, lat: 45 };
+
+/** Identity of the file/builtin a document was opened from or saved as. */
+export interface ResourceRef {
+  /** Dedupe key; opening a resource with an already-open key focuses it. */
+  key: string;
+  title: string;
+}
+
+export interface BakeDocument {
+  kind: 'bake';
+  docId: string;
+  ref: ResourceRef | null;
+  dirty: boolean;
+  title: string;
+  /** Null when the document was opened without provenance (view-only). */
+  source: BakeSource | null;
+  /** Live parsed model for `source.kind === 'model'`. */
+  gltf: GltfSource | null;
+  scale: number;
+  env: EnvSource;
+  /** Live environment (texture + params) used by the path tracer. */
+  ptEnv: PtEnvironment;
+  settings: PtSettings;
+  result: BakeResult | null;
+  render: PtImage | null;
+  ao: PtImage | null;
+  /** Notes about skipped glTF content for the current source. */
+  notes: string[];
+  /**
+   * Original bundle bytes while the document displays an opened bundle
+   * without a re-bake; save-as writes these verbatim.
+   */
+  bundleBytes: Uint8Array<ArrayBuffer> | null;
+  /** Restored provenance from an opened `/5` bundle. */
+  provenance: BakeProvenance | null;
+  /** True when the document cannot re-bake (no provenance / missing refs). */
+  viewOnly: boolean;
+  /** Human-readable reason the document is view-only. */
+  viewOnlyReason: string | null;
+  /** True while a path-traced pass is accumulating. */
+  busy: boolean;
+}
+
+export interface WorldDocument {
+  kind: 'world';
+  docId: string;
+  ref: ResourceRef | null;
+  dirty: boolean;
+  title: string;
+  world: World;
+  layers: SpriteLayer[];
+  light: LightState;
+  sun: SunState;
+  /** Active placement tool: a layer id, a primitive id, or 'eraser'. */
+  tool: string;
+}
+
+export type EditorDocument = BakeDocument | WorldDocument;
+
+export type EditorKind = EditorDocument['kind'];
+
+export interface Tab {
+  docId: string;
+  kind: EditorKind;
+}

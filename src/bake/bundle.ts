@@ -5,10 +5,17 @@ import {
   zipSync,
 } from 'three/examples/jsm/libs/fflate.module.js';
 import type { BakeResult } from './bake.js';
-import { buildManifest, encodeExr, encodePngBytes, rgbaToCanvas, type BakeManifest } from './export.js';
+import {
+  buildManifest,
+  encodeExr,
+  encodePngBytes,
+  rgbaToCanvas,
+  type BakeManifest,
+  type BakeProvenance,
+} from './export.js';
 import type { PtExtras } from './pt.js';
 
-export type { PtExtras };
+export type { PtExtras, BakeProvenance, BakeManifest };
 
 export const MANIFEST_ENTRY = 'manifest.json';
 
@@ -35,8 +42,12 @@ async function encodePng(result: BakeResult): Promise<Uint8Array<ArrayBuffer>> {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
-export async function buildBundle(result: BakeResult, pt?: PtExtras): Promise<Uint8Array<ArrayBuffer>> {
-  const manifest = buildManifest(result, pt);
+export async function buildBundle(
+  result: BakeResult,
+  pt?: PtExtras,
+  provenance?: BakeProvenance,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const manifest = buildManifest(result, pt, provenance);
   const entries: Record<string, [Uint8Array, { level: 0 | 6; mtime: Date }]> = {
     [MANIFEST_ENTRY]: [strToU8(JSON.stringify(manifest, null, 2)), { level: 6, mtime: FIXED_MTIME }],
     [manifest.passes.albedo.file]: [await encodePng(result), { level: 0, mtime: FIXED_MTIME }],
@@ -69,6 +80,8 @@ export interface BakeBundle {
   render: Blob | null;
   /** Path-traced ambient occlusion; null when the bundle omits it. */
   ao: Blob | null;
+  /** Restored production record; null for bundles saved without one. */
+  provenance: BakeProvenance | null;
 }
 
 export function parseBake(buffer: ArrayBuffer | Uint8Array): BakeBundle {
@@ -83,9 +96,9 @@ export function parseBake(buffer: ArrayBuffer | Uint8Array): BakeBundle {
     throw new Error(`bake bundle: unsupported format ${String(manifest.format)}`);
   }
   const minor = manifest.format.slice(prefix.length);
-  if (minor !== '3' && minor !== '4') {
+  if (minor !== '4' && minor !== '5') {
     throw new Error(
-      `bake bundle: unsupported format ${manifest.format} — expected isoinfinity-bake/3 or /4`,
+      `bake bundle: unsupported format ${manifest.format} — expected isoinfinity-bake/4 or /5`,
     );
   }
   const entry = (file: string): Blob => {
@@ -102,5 +115,6 @@ export function parseBake(buffer: ArrayBuffer | Uint8Array): BakeBundle {
     gbuffer: entry(manifest.passes.gbuffer.file),
     render: manifest.passes.render ? entry(manifest.passes.render.file) : null,
     ao: manifest.passes.ao ? entry(manifest.passes.ao.file) : null,
+    provenance: manifest.provenance ?? null,
   };
 }

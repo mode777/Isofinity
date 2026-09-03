@@ -88,6 +88,34 @@ export async function encodeExr(
   return bytes;
 }
 
+/**
+ * How a sprite was produced, recorded in `isoinfinity-bake/5` manifests so
+ * the editor can restore and re-bake it. Model references are workspace
+ * file names resolved against `models/`; environment references against
+ * `hdri/`.
+ */
+export interface BakeProvenance {
+  source:
+    | { kind: 'primitive'; primitive: string }
+    | { kind: 'model'; model: string; scale: number };
+  bake: {
+    samples: number;
+    bounces: number;
+    textureSize: number;
+    aoSamples: number;
+    aoRadius: number;
+  };
+  environment:
+    | { procedural: true }
+    | {
+        hdri: string;
+        rotationDeg: number;
+        intensity: number;
+        exposure: number;
+        saturation: number;
+      };
+}
+
 export interface BakeManifest {
   format: string;
   id: string;
@@ -120,11 +148,17 @@ export interface BakeManifest {
     aoSamples?: number;
     aoRadius?: number;
   };
+  /** Present when the producing tool knows the sprite's full provenance. */
+  provenance?: BakeProvenance;
 }
 
-export function buildManifest(result: BakeResult, pt?: PtExtras): BakeManifest {
+export function buildManifest(
+  result: BakeResult,
+  pt?: PtExtras,
+  provenance?: BakeProvenance,
+): BakeManifest {
   const manifest: BakeManifest = {
-    format: 'isoinfinity-bake/4',
+    format: 'isoinfinity-bake/5',
     id: result.id,
     cube: { size: [result.size[0], result.size[1], result.size[2]], origin: [0, 0, 0] },
     camera: {
@@ -197,6 +231,9 @@ export function buildManifest(result: BakeResult, pt?: PtExtras): BakeManifest {
       aoSamples: pt.ao ? (settings?.aoSamples ?? 0) : undefined,
       aoRadius: pt.ao ? (settings?.aoRadius ?? 0) : undefined,
     };
+  }
+  if (provenance) {
+    manifest.provenance = provenance;
   }
   return manifest;
 }

@@ -328,6 +328,25 @@ export class Renderer {
     this.light = light;
   }
 
+  /**
+   * Release every GL object (tab close / StrictMode remount). The context
+   * itself is per-canvas and stays usable: a remount re-creates its
+   * programs, buffers and textures on it.
+   */
+  dispose(): void {
+    const gl = this.gl;
+    if (this.renderTex) gl.deleteTexture(this.renderTex);
+    if (this.gbufferTex) gl.deleteTexture(this.gbufferTex);
+    gl.deleteBuffer(this.groundVbo);
+    gl.deleteVertexArray(this.groundVao);
+    gl.deleteBuffer(this.highlightVbo);
+    gl.deleteVertexArray(this.highlightVao);
+    gl.deleteBuffer(this.instVbo);
+    gl.deleteVertexArray(this.spriteVao);
+    gl.deleteProgram(this.flatProg);
+    gl.deleteProgram(this.spriteProg);
+  }
+
   setGround(data: Float32Array): void {
     const gl = this.gl;
     gl.bindVertexArray(this.groundVao);

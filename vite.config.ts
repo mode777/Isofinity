@@ -1,4 +1,5 @@
 import { execSync } from 'node:child_process';
+import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 // Tool version, recomputed on every build/dev start: v<commit count>+<short
@@ -18,6 +19,7 @@ function appVersion(): string {
 // project subpath (https://<owner>.github.io/Isofinity/).
 export default defineConfig({
   base: './',
+  plugins: [react()],
   define: {
     __APP_VERSION__: JSON.stringify(appVersion()),
   },
@@ -25,7 +27,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: 'index.html',
-        bake: 'bake.html',
       },
     },
   },
