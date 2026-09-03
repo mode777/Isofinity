@@ -32,6 +32,20 @@ export type BakeSource =
 /** Where a sprite document's render-pass environment comes from. */
 export type EnvSource = { kind: 'procedural' } | { kind: 'hdri'; fileName: string };
 
+/** The sprite viewport's views (one displayed at a time). */
+export type BakeViewMode = 'realtime' | 'normals' | 'depth' | 'render';
+
+/**
+ * Sprite viewport zoom/pan. `zoom` is the image-native scale (1 = 100%);
+ * `panX`/`panY` offset the image's top-left corner in viewport pixels.
+ * Null means "fit" — resolved per view against the current panel size.
+ */
+export interface ViewTransform {
+  zoom: number;
+  panX: number;
+  panY: number;
+}
+
 export interface LightState {
   azimuthDeg: number;
   elevationDeg: number;
@@ -97,6 +111,16 @@ export interface BakeDocument {
   viewOnlyReason: string | null;
   /** True while a path-traced pass is accumulating. */
   busy: boolean;
+  /**
+   * Active viewport view; null = default (first available). In-memory
+   * editor state only — never written into bundles.
+   */
+  view: BakeViewMode | null;
+  /**
+   * Viewport zoom/pan; null = fit the panel. In-memory editor state only —
+   * never written into bundles.
+   */
+  viewTransform: ViewTransform | null;
 }
 
 export interface WorldDocument {

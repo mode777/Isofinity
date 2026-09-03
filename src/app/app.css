@@ -141,6 +141,14 @@ body {
   padding: 1rem;
 }
 
+/* Sprite docs: the viewport panel fills the region, so the center area
+   must not scroll out from under its pan/zoom gestures. */
+.center-viewport {
+  overflow: hidden;
+  display: flex;
+  padding: 0;
+}
+
 .statusbar {
   grid-area: status;
   padding: 0.3rem 0.75rem;
@@ -324,28 +332,91 @@ h2 {
   line-height: 1.6;
 }
 
-.sprite-editor .passes {
+.sprite-editor {
   display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
+  flex-direction: column;
+  gap: 0.6rem;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  padding: 1rem;
 }
 
-.sprite-editor figure {
-  margin: 0;
+/* The sprite viewport: one panel, one view at a time, filling the space
+   between the toolbar and the status bar. */
+.bake-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #333;
+  background: #0e1013;
+  cursor: grab;
+  touch-action: none;
 }
 
-.sprite-editor figcaption {
+.bake-viewport.dragging {
+  cursor: grabbing;
+}
+
+.bake-viewport canvas.viewport-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.rt-host {
+  position: absolute;
+  inset: 0;
+}
+
+.viewport-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1rem;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.zoom-controls {
+  position: absolute;
+  right: 0.6rem;
+  bottom: 0.6rem;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0.15rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.zoom-controls button {
+  padding: 0.1rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.zoom-value {
+  min-width: 3.2em;
+  text-align: center;
   color: var(--muted);
   font-size: 0.8rem;
-  margin-top: 0.3rem;
-  display: flex;
-  gap: 0.4rem;
-  align-items: center;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
 }
 
-.sprite-editor figcaption button {
-  padding: 0.15rem 0.55rem;
-  font-size: 0.8rem;
+.toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 0 0.2rem;
+  background: var(--panel-border);
 }
 
 canvas {
@@ -359,8 +430,7 @@ canvas {
   touch-action: none;
 }
 
-.world-editor canvas.empty,
-.sprite-editor canvas.empty {
+.world-editor canvas.empty {
   background: #0e1013;
   min-width: 8rem;
   min-height: 4rem;

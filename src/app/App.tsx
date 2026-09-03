@@ -39,7 +39,7 @@ export function App(): React.JSX.Element {
       <aside className="left">
         <ProjectBrowser />
       </aside>
-      <main className="center">
+      <main className={doc?.kind === 'bake' ? 'center center-viewport' : 'center'}>
         {doc?.kind === 'bake' ? <SpriteEditor key={doc.docId} doc={doc} /> : null}
         {doc?.kind === 'world' ? <WorldEditor key={doc.docId} doc={doc} /> : null}
         {!doc ? (

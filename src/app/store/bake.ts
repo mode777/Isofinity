@@ -39,7 +39,7 @@ import {
   serializePreset,
   type BakePreset,
 } from '../presets.js';
-import type { BakeDocument, PrimitiveKind } from '../document.js';
+import type { BakeDocument, BakeViewMode, PrimitiveKind, ViewTransform } from '../document.js';
 import { findDocByRef, nextDocId, useEditor, type EditorState } from './editor.js';
 import { useProject } from './project.js';
 import { useWorkspace } from './workspace.js';
@@ -121,6 +121,8 @@ function baseBakeDoc(title: string): BakeDocument {
     viewOnly: false,
     viewOnlyReason: null,
     busy: false,
+    view: null,
+    viewTransform: null,
   };
 }
 
@@ -381,6 +383,43 @@ export async function runRenderPass(docId: string): Promise<void> {
         d.busy = false;
       });
     }
+  }
+}
+
+// --- viewport view state ----------------------------------------------------
+
+/**
+ * Switch the sprite viewport's view. Editor-only state: never marks the
+ * document dirty and never reaches a bundle.
+ */
+export function setBakeView(docId: string, view: BakeViewMode): void {
+  const doc = bakeDoc(docId);
+  if (!doc) return;
+  update(docId, (d) => {
+    d.view = view;
+  });
+}
+
+/**
+ * Set the viewport zoom/pan (null = fit). Editor-only state: never marks
+ * the document dirty and never reaches a bundle.
+ */
+export function setViewTransform(docId: string, transform: ViewTransform | null): void {
+  const doc = bakeDoc(docId);
+  if (!doc) return;
+  update(docId, (d) => {
+    d.viewTransform = transform;
+  });
+}
+
+/** The document's source geometry, or null when it cannot be resolved. */
+export function sourcePrimitive(docId: string): Primitive | null {
+  const doc = bakeDoc(docId);
+  if (!doc) return null;
+  try {
+    return primitiveFor(doc);
+  } catch {
+    return null;
   }
 }
 
