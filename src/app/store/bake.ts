@@ -20,6 +20,7 @@ import {
 } from '../../bake/primitives.js';
 import {
   BUNDLE_EXT,
+  deleteWorkspaceFile,
   readAllWorkspaceFiles,
   readWorkspaceFile,
   writeWorkspaceFile,
@@ -32,6 +33,12 @@ import {
 import type { SpriteLayer } from '../../runtime/assets.js';
 import { decodeBundle } from '../bundleView.js';
 import { parseHdrFile } from '../hdr.js';
+import {
+  parsePreset,
+  presetFileName,
+  serializePreset,
+  type BakePreset,
+} from '../presets.js';
 import type { BakeDocument, PrimitiveKind } from '../document.js';
 import { findDocByRef, nextDocId, useEditor, type EditorState } from './editor.js';
 import { useProject } from './project.js';
@@ -447,6 +454,21 @@ export async function loadHdriFromWorkspace(docId: string, fileName: string): Pr
 
 // --- save / export ---------------------------------------------------------
 
+type PresetEnvironment = BakePreset['environment'];
+
+/** The document's environment in the provenance/preset shape. */
+function environmentOf(doc: BakeDocument): PresetEnvironment {
+  return doc.env.kind === 'procedural'
+    ? { procedural: true }
+    : {
+        hdri: doc.env.fileName,
+        rotationDeg: doc.ptEnv.rotationDeg,
+        intensity: doc.ptEnv.intensity,
+        exposure: doc.ptEnv.exposure,
+        saturation: doc.ptEnv.saturation,
+      };
+}
+
 function provenanceOf(doc: BakeDocument): BakeProvenance | null {
   if (!doc.source) return null;
   return {
@@ -459,16 +481,7 @@ function provenanceOf(doc: BakeDocument): BakeProvenance | null {
       bounces: doc.settings.bounces,
       textureSize: doc.settings.textureSize,
     },
-    environment:
-      doc.env.kind === 'procedural'
-        ? { procedural: true }
-        : {
-            hdri: doc.env.fileName,
-            rotationDeg: doc.ptEnv.rotationDeg,
-            intensity: doc.ptEnv.intensity,
-            exposure: doc.ptEnv.exposure,
-            saturation: doc.ptEnv.saturation,
-          },
+    environment: environmentOf(doc),
   };
 }
 
@@ -529,6 +542,108 @@ export function downloadPositionDebug(docId: string): void {
   debugPositionCanvas(doc.result).toBlob((blob) => {
     if (blob) download(`${doc.result!.id}-position-debug.png`, blob, 'image/png');
   });
+}
+
+// --- bake setting presets ---------------------------------------------------
+
+/** Save the document's path-trace settings + environment as a named preset. */
+export async function savePreset(docId: string, rawName: string): Promise<void> {
+  const doc = bakeDoc(docId);
+  if (!doc || doc.viewOnly) return;
+  try {
+    const name = presetFileName(rawName);
+    const text = serializePreset({
+      samples: doc.settings.samples,
+      bounces: doc.settings.bounces,
+      environment: environmentOf(doc),
+    });
+    if (useWorkspaceState() === 'connected') {
+      await writeWorkspaceFile('presets', name, text);
+      ed().setStatus(`Saved presets/${name} to the workspace`);
+      void useProject.getState().refresh();
+    } else {
+      download(name, text, 'application/json');
+      ed().setStatus(`Downloaded ${name}`);
+    }
+  } catch (err) {
+    ed().setStatus(`Preset save failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(err);
+  }
+}
+
+/**
+ * Apply a parsed preset. The environment is resolved first — a missing HDRI
+ * throws a named error before any state changes, leaving the document
+ * untouched — then settings and environment commit in one update. Texture
+ * size is not part of a preset and stays unchanged; an existing render pass
+ * re-runs once with the new values.
+ */
+export async function applyPreset(docId: string, preset: BakePreset): Promise<void> {
+  const doc = bakeDoc(docId);
+  if (!doc || doc.viewOnly) return;
+  let env: BakeDocument['env'] = { kind: 'procedural' };
+  let ptEnv: PtEnvironment | null = null;
+  if ('hdri' in preset.environment) {
+    const { hdri, rotationDeg, intensity, exposure, saturation } = preset.environment;
+    try {
+      const file = await readWorkspaceFile('hdri', hdri);
+      const { texture } = await parseHdrFile(await file.arrayBuffer(), hdri);
+      env = { kind: 'hdri', fileName: hdri };
+      ptEnv = { ...doc.ptEnv, name: hdri, texture, rotationDeg, intensity, exposure, saturation };
+    } catch (err) {
+      throw new Error(
+        `HDRI "${hdri}" — ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  const samples = clamp(Math.round(num(preset.samples, doc.settings.samples)), 16, 4096);
+  const bounces = clamp(Math.round(num(preset.bounces, doc.settings.bounces)), 1, 16);
+  update(docId, (d) => {
+    d.settings = { ...d.settings, samples, bounces };
+    d.env = env;
+    d.ptEnv = ptEnv ?? proceduralEnvironment();
+  });
+  ed().markDirty(docId);
+  ed().setStatus(
+    `Preset applied: samples ${samples}, bounces ${bounces}, environment ${
+      ptEnv ? ptEnv.name : 'procedural sky'
+    }`,
+  );
+  const after = bakeDoc(docId);
+  if (after?.render) void runRenderPass(docId);
+}
+
+/** Read and apply a preset listed in the workspace's presets/ folder. */
+export async function applyWorkspacePreset(docId: string, fileName: string): Promise<void> {
+  try {
+    const file = await readWorkspaceFile('presets', fileName);
+    await applyPreset(docId, parsePreset(await file.text()));
+  } catch (err) {
+    ed().setStatus(`Preset apply failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(err);
+  }
+}
+
+/** Parse a picked/dropped preset JSON file and apply it. */
+export async function importPresetFile(docId: string, file: File): Promise<void> {
+  try {
+    await applyPreset(docId, parsePreset(await file.text()));
+  } catch (err) {
+    ed().setStatus(`Preset import failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(err);
+  }
+}
+
+/** Delete a preset file from the workspace's presets/ folder. */
+export async function deletePreset(fileName: string): Promise<void> {
+  try {
+    await deleteWorkspaceFile('presets', fileName);
+    ed().setStatus(`Deleted presets/${fileName}`);
+    void useProject.getState().refresh();
+  } catch (err) {
+    ed().setStatus(`Preset delete failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(err);
+  }
 }
 
 /** Convert a sprite document's baked passes into a placeable layer. */

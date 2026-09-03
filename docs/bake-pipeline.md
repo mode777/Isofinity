@@ -20,13 +20,14 @@ in the properties panel. See `docs/runtime.md` for the editor shell.
 The editor binds a local folder through the File System Access API
 ("Open workspace…" in the top bar): the picked folder is expected to hold
 (and is created with, if missing) the convention subfolders `hdri/`,
-`models/`, `sprites/`, `worlds/`. The connection is remembered locally
+`models/`, `sprites/`, `worlds/`, `presets/`. The connection is remembered
+locally
 (IndexedDB), so a reload only needs one permission click ("Reconnect
 workspace…"). While connected, the project browser lists `models/`,
-`sprites/` and `worlds/`, the sprite properties panel gains an `hdri/`
-listing (a `.gltf`'s external resources resolve against the folder's
-contents), and bundle saves write `sprites/<id>.sprite` directly. Without
-a workspace — or in browsers without the API (Firefox/Safari) —
+`sprites/` and `worlds/`, the sprite properties panel gains `hdri/` and
+`presets/` listings (a `.gltf`'s external resources resolve against the
+folder's contents), and bundle saves write `sprites/<id>.sprite` directly.
+Without a workspace — or in browsers without the API (Firefox/Safari) —
 everything falls back to file dialogs and downloads exactly as before
 (feature-detected, never UA-sniffed).
 
@@ -243,6 +244,22 @@ optional passes are present plus the `provenance` block when recorded. The
 integrated editor consumes bundles through the project browser's
 `sprites/` listing.
 
+### Bake setting presets (`presets/<name>.json`)
+
+Named, reusable bake looks stored in the workspace's `presets/` folder
+(`format: "isoinfinity-bake-preset/1"`): the path-trace sample and bounce
+counts plus the environment in the provenance shape — a `procedural`
+marker, or an `hdri/` file name with rotation/intensity/exposure/saturation.
+Texture size is deliberately not part of a preset (it is model-dependent
+and stays per-document). The sprite properties panel's Presets section
+saves the current settings under a name (overwriting on the same name),
+applies a listed preset — resolving the HDRI from `hdri/` first, so a
+missing file is a named error that changes nothing — and deletes presets.
+Saved/edited by hand only insofar as the strict parser accepts them: exact
+format match, finite numbers, known environment shapes, rejected by name
+otherwise. Without a workspace, saving downloads the `.json` and applying
+accepts a preset file through the file dialog or drag-drop.
+
 ## Current state / next steps
 
 - Done: sphere, donut, cube, cylinder, capsule, plane and slab (2×0.5×1)
@@ -276,6 +293,11 @@ integrated editor consumes bundles through the project browser's
   `bake.html` + runtime pages — editor tabs over in-memory documents,
   project browser, context-sensitive properties panel, `isoinfinity-bake/5`
   provenance with re-bake, and in-memory place-into-world.
+- Done: bake setting presets (`isoinfinity-bake-preset/1` JSON in the
+  workspace's `presets/` folder) — save/apply/delete from the sprite
+  properties panel, HDRI resolved from `hdri/` with atomic named-error
+  handling, texture size excluded, download/import fallback without a
+  workspace.
 - Planned: supersampling (render at N× and box-downsample), multi-cube
   composite assets, geometry-level clipping (CSG) instead of shader discard,
   KTX2/UASTC packaging for delivery (the merged g-buffer is already in the

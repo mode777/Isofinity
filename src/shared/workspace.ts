@@ -12,7 +12,7 @@
 
 export const BUNDLE_EXT = '.sprite';
 
-export const WORKSPACE_FOLDERS = ['hdri', 'models', 'sprites', 'worlds'] as const;
+export const WORKSPACE_FOLDERS = ['hdri', 'models', 'sprites', 'worlds', 'presets'] as const;
 export type WorkspaceFolder = (typeof WORKSPACE_FOLDERS)[number];
 
 export type WorkspaceState =
@@ -261,6 +261,21 @@ export async function writeWorkspaceFile(
   } catch (err) {
     throw new Error(
       `workspace ${folder}/: cannot write "${name}" — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+/** Remove one file from the folder. */
+export async function deleteWorkspaceFile(
+  folder: WorkspaceFolder,
+  name: string,
+): Promise<void> {
+  try {
+    const sub = await folderHandle(folder);
+    await sub.removeEntry(name);
+  } catch (err) {
+    throw new Error(
+      `workspace ${folder}/: cannot delete "${name}" — ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 }

@@ -279,6 +279,31 @@ h2 {
   background: none;
 }
 
+.preset-drop {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.preset-save {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.preset-save input[type='text'] {
+  flex: 1;
+  min-width: 0;
+}
+
+.preset-actions {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.preset-actions button {
+  flex: 1;
+}
+
 .hint {
   color: var(--muted);
   font-size: 0.8rem;

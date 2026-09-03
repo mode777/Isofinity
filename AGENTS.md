@@ -83,7 +83,7 @@ it as the reference architecture; design against it.
 - Sprite→world handoff: a baked sprite document's passes become a world
   document layer in memory ("Place in world") — no bundle round trip.
 - Workspace binding (File System Access API, `src/shared/workspace.ts`;
-  convention: `hdri/`, `models/`, `sprites/`, `worlds/`) is surfaced
+  convention: `hdri/`, `models/`, `sprites/`, `worlds/`, `presets/`) is surfaced
   through the top bar, project browser and panels, with dialogs/downloads
   as fallback. Conventions in `docs/bake-pipeline.md`. Worlds
   (placements + light state) save/load as `isoinfinity-world/1` JSON in

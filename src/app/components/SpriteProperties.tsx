@@ -1,11 +1,15 @@
 import type { BakeDocument } from '../document.js';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import {
+  applyWorkspacePreset,
   bakeRaster,
+  deletePreset,
   downloadPositionDebug,
+  importPresetFile,
   loadHdriFile,
   loadHdriFromWorkspace,
   runRenderPass,
+  savePreset,
   setEnvParams,
   setModelScale,
   setSettings,
@@ -13,6 +17,102 @@ import {
 import { useProject } from '../store/project.js';
 import { useWorkspace } from '../store/workspace.js';
 import { NumberRow, Section, SliderRow } from './controls.js';
+
+function PresetsSection(props: { doc: BakeDocument }): React.JSX.Element {
+  const { doc } = props;
+  const [name, setName] = useState('');
+  const [selected, setSelected] = useState('');
+  const fileInput = useRef<HTMLInputElement>(null);
+  const presets = useProject((s) => s.presets);
+
+  const save = (): void => {
+    void savePreset(doc.docId, name);
+    setName('');
+  };
+  const importFiles = (files: FileList | null): void => {
+    const file = files?.[0];
+    if (file) void importPresetFile(doc.docId, file);
+  };
+
+  return (
+    <Section title="Presets">
+      <div
+        className="preset-drop"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          importFiles(e.dataTransfer.files);
+        }}
+      >
+        <div className="preset-save">
+          <input
+            type="text"
+            placeholder="preset name…"
+            aria-label="Preset name"
+            value={name}
+            disabled={doc.viewOnly}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && name.trim()) save();
+            }}
+          />
+          <button disabled={doc.viewOnly || !name.trim()} onClick={save}>
+            Save preset
+          </button>
+        </div>
+        <select
+          title="Workspace presets"
+          value={selected}
+          disabled={doc.viewOnly}
+          onChange={(e) => setSelected(e.target.value)}
+        >
+          <option value="">
+            {presets.length > 0 ? 'workspace presets…' : 'no presets in the workspace'}
+          </option>
+          {presets.map((n) => (
+            <option key={n} value={n}>
+              {n.replace(/\.json$/i, '')}
+            </option>
+          ))}
+        </select>
+        <div className="preset-actions">
+          <button
+            disabled={doc.viewOnly || !selected}
+            onClick={() => void applyWorkspacePreset(doc.docId, selected)}
+          >
+            Apply
+          </button>
+          <button
+            disabled={!selected}
+            onClick={() => {
+              void deletePreset(selected);
+              setSelected('');
+            }}
+          >
+            Delete
+          </button>
+          <button disabled={doc.viewOnly} onClick={() => fileInput.current?.click()}>
+            Import file…
+          </button>
+        </div>
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".json,application/json"
+          hidden
+          onChange={(e) => {
+            const files = e.target.files;
+            e.target.value = '';
+            importFiles(files);
+          }}
+        />
+        <p className="hint">
+          presets store samples, bounces and the environment — texture size stays per-document
+        </p>
+      </div>
+    </Section>
+  );
+}
 
 export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Element {
   const { doc } = props;
@@ -164,6 +264,8 @@ export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Elemen
           {doc.busy ? 'Rendering…' : doc.render ? 'Re-render pass' : 'Bake render pass'}
         </button>
       </Section>
+
+      <PresetsSection doc={doc} />
 
       <Section title="Debug">
         <button disabled={!doc.result} onClick={() => downloadPositionDebug(doc.docId)}>
