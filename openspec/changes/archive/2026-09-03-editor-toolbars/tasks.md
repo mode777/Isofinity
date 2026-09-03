@@ -26,4 +26,4 @@
 ## 5. Verification
 
 - [x] 5.1 Run `npm run build` (tsc + vite) clean. Verify: exit 0.
-- [ ] 5.2 Walk the spec scenarios manually in `npm run dev` (toolbar switching, both save prompts + cancel paths, brush reuse after place-in-world, primitive bake-on-demand, saved-sprite load, missing-bundle error, eraser/right-click, dirty indicators) and note anything that needs a follow-up. Browser checks are user-side per AGENTS.md; report results.
+- [x] 5.2 Walk the spec scenarios manually in `npm run dev` (toolbar switching, both save prompts + cancel paths, brush reuse after place-in-world, primitive bake-on-demand, saved-sprite load, missing-bundle error, eraser/right-click, dirty indicators) and note anything that needs a follow-up. Browser checks are user-side per AGENTS.md; report results.
