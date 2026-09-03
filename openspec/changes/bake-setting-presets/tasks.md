@@ -16,3 +16,8 @@
 
 - [x] 4.1 Update `docs/bake-pipeline.md` workspace conventions: `presets/` folder and the `isoinfinity-bake-preset/1` preset file; verify the doc matches the shipped behavior
 - [ ] 4.2 Run `npm run build`; then a browser walkthrough (user): save/overwrite/apply/delete a preset, apply with missing HDRI reports a named error and changes nothing, texture size survives apply, download/import fallback works with no workspace
+
+## 5. Revision: apply fills values, only explicit buttons render
+
+- [x] 5.1 Remove every implicit trigger in `src/app/store/bake.ts` — preset apply, environment parameter changes, HDRI loads, and model scale changes only commit document state; an in-flight render pass is discarded (not restarted) when an input makes it stale; verify `npm run build` passes
+- [x] 5.2 Encode the rule in the specs: bake-presets delta (applying changes settings/environment only, no render) and a new integrated-editor delta (only explicit bake buttons bake/render); update design.md and `docs/bake-pipeline.md` accordingly; verify `openspec validate` passes

@@ -325,15 +325,29 @@ export function bakeRaster(docId: string): void {
 }
 
 let renderGen = 0;
+let renderingDocId: string | null = null;
+
+/** Discard an in-flight render pass whose settings just went stale — no new
+ * pass is started: only the explicitly labeled bake/render buttons render. */
+function invalidateRunningRender(): void {
+  const docId = renderingDocId;
+  if (!docId) return;
+  renderGen += 1;
+  renderingDocId = null;
+  update(docId, (d) => {
+    d.busy = false;
+  });
+}
 
 /** Path-traced lit render pass. Requires a raster bake and an environment.
  * Safe to invoke while another accumulation runs: the new run resets the
  * tracer for the current settings and the stale run's commit is discarded
- * by its generation token (environment changes restart accumulation). */
+ * by its generation token. */
 export async function runRenderPass(docId: string): Promise<void> {
   const doc = bakeDoc(docId);
   if (!doc || doc.viewOnly || !doc.result || !doc.ptEnv.texture) return;
   const gen = ++renderGen;
+  renderingDocId = docId;
   update(docId, (d) => {
     d.busy = true;
   });
@@ -361,9 +375,12 @@ export async function runRenderPass(docId: string): Promise<void> {
       console.error(err);
     }
   } finally {
-    if (gen === renderGen) update(docId, (d) => {
-      d.busy = false;
-    });
+    if (gen === renderGen) {
+      renderingDocId = null;
+      update(docId, (d) => {
+        d.busy = false;
+      });
+    }
   }
 }
 
@@ -376,6 +393,7 @@ const num = (v: unknown, fallback: number): number =>
 export function setSettings(docId: string, patch: Partial<PtSettings>): void {
   const doc = bakeDoc(docId);
   if (!doc || doc.viewOnly) return;
+  invalidateRunningRender();
   update(docId, (d) => {
     d.settings = {
       samples: clamp(Math.round(num(patch.samples, d.settings.samples)), 16, 4096),
@@ -391,11 +409,11 @@ export function setModelScale(docId: string, scale: number): void {
   const doc = bakeDoc(docId);
   if (!doc || doc.viewOnly || doc.source?.kind !== 'model') return;
   const value = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  invalidateRunningRender();
   update(docId, (d) => {
     d.scale = value;
   });
   ed().markDirty(docId);
-  bakeRaster(docId);
 }
 
 export function setEnvParams(
@@ -404,6 +422,7 @@ export function setEnvParams(
 ): void {
   const doc = bakeDoc(docId);
   if (!doc || doc.viewOnly) return;
+  invalidateRunningRender();
   update(docId, (d) => {
     d.ptEnv = {
       ...d.ptEnv,
@@ -414,8 +433,6 @@ export function setEnvParams(
     };
   });
   ed().markDirty(docId);
-  // Environment changes restart the accumulation once a render pass exists.
-  if (doc.render) void runRenderPass(docId);
 }
 
 /** Load an HDRI from a picked/dropped file into the document environment. */
@@ -425,13 +442,13 @@ export async function loadHdriFile(docId: string, file: File): Promise<void> {
   ed().setStatus(`Loading ${file.name}…`);
   try {
     const { texture } = await parseHdrFile(await file.arrayBuffer(), file.name);
+    invalidateRunningRender();
     update(docId, (d) => {
       d.env = { kind: 'hdri', fileName: file.name };
       d.ptEnv = { ...d.ptEnv, texture, name: file.name };
     });
     ed().markDirty(docId);
     ed().setStatus(`HDRI ${file.name} loaded — ready for the render pass`);
-    if (doc.render) void runRenderPass(docId);
   } catch (err) {
     // The previously active environment stays active on any load failure.
     ed().setStatus(`HDRI load failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -575,8 +592,9 @@ export async function savePreset(docId: string, rawName: string): Promise<void> 
  * Apply a parsed preset. The environment is resolved first — a missing HDRI
  * throws a named error before any state changes, leaving the document
  * untouched — then settings and environment commit in one update. Texture
- * size is not part of a preset and stays unchanged; an existing render pass
- * re-runs once with the new values.
+ * size is not part of a preset and stays unchanged. Applying never starts a
+ * render pass: an in-flight pass is discarded, and the user re-renders
+ * explicitly.
  */
 export async function applyPreset(docId: string, preset: BakePreset): Promise<void> {
   const doc = bakeDoc(docId);
@@ -598,6 +616,7 @@ export async function applyPreset(docId: string, preset: BakePreset): Promise<vo
   }
   const samples = clamp(Math.round(num(preset.samples, doc.settings.samples)), 16, 4096);
   const bounces = clamp(Math.round(num(preset.bounces, doc.settings.bounces)), 1, 16);
+  invalidateRunningRender();
   update(docId, (d) => {
     d.settings = { ...d.settings, samples, bounces };
     d.env = env;
@@ -609,8 +628,6 @@ export async function applyPreset(docId: string, preset: BakePreset): Promise<vo
       ptEnv ? ptEnv.name : 'procedural sky'
     }`,
   );
-  const after = bakeDoc(docId);
-  if (after?.render) void runRenderPass(docId);
 }
 
 /** Read and apply a preset listed in the workspace's presets/ folder. */

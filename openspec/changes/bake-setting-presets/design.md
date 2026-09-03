@@ -73,12 +73,23 @@ Applying resolves the environment *first*: for an HDRI preset, the file is
 read and parsed before any state changes; any failure (missing file, bad
 HDRI) reports a named error with the document untouched — satisfying the
 atomicity scenario. On success, settings + environment params commit in one
-store update and the render pass re-runs at most once. Reusing
-`loadHdriFile` as-is would restart the pass twice (once on load, once on
-`setEnvParams`), so apply sets the params together with the texture in a
-single update and then triggers the pass explicitly; the standalone HDRI
-loaders keep their current behavior. Texture size is untouched because
-`setSettings` merges into the document's settings.
+store update and no render pass starts (see the next decision). Texture
+size is untouched because `setSettings` merges into the document's
+settings.
+
+### Only explicit bake actions bake or render
+
+None of the properties-panel inputs trigger work: preset apply, path-trace
+setting changes, environment parameter changes, HDRI loads, and model scale
+changes only commit document state. Renders happen solely through the
+explicitly labeled buttons (raster bake, render pass). This replaces the
+previous restart-on-change behavior, which fired long accumulations as a
+side effect of moving a slider or applying a preset — the exact complaint
+that motivated it. One corollary: an input change makes an in-flight
+accumulation stale, so a shared generation token discards it (busy state
+cleared) instead of letting it commit outdated pixels; nothing is
+restarted. Opening a resource keeps its initial bake — a fresh editor tab
+must show something.
 
 ### Naming: mirror the bundle-name handling
 
@@ -106,8 +117,10 @@ control in the panel.
   other four folders.
 - [Hand-edited or foreign JSON files in `presets/`] → Strict format
   validation with named rejection; nothing partial is ever applied.
-- [Extra render-pass restarts when applying] → Resolve-then-commit keeps it
-  to a single re-run.
+- [Passes go stale relative to the committed settings until the user
+  re-renders] → Accepted and made visible: the dirty flag tracks unsaved
+  changes and the status line reports what a preset changed; explicit
+  buttons re-render on demand.
 
 ## Migration Plan
 

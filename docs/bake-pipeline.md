@@ -164,9 +164,12 @@ for anti-aliasing, so sprite edges converge to true AA.
   0/1 g-buffer emptiness: occlusion and hit-testing keep consuming the
   raster g-buffer; only display uses the render alpha.
 - **Illumination**: `scene.environment` (equirect `.hdr` via `HDRLoader`)
-  is the sole light source, with rotation/intensity/exposure/saturation
-  controls; changing any of them restarts accumulation. No background image is ever
-  captured into the pass.   Without an environment the render pass is simply not produced.
+   is the sole light source, with rotation/intensity/exposure/saturation
+   controls; changing any of them only updates document state — an in-flight
+   accumulation is discarded, never restarted, and rendering happens only
+   through the explicit render-pass buttons. No background image is ever
+   captured into the pass. Without an environment the render pass is simply
+   not produced.
 - **Tonemapping/export**: the accumulated linear float target is composited
   through a fullscreen quad using three's `<tonemapping_fragment>`
   (ACES filmic) plus an explicit sRGB transfer and a display-referred
@@ -255,10 +258,14 @@ and stays per-document). The sprite properties panel's Presets section
 saves the current settings under a name (overwriting on the same name),
 applies a listed preset — resolving the HDRI from `hdri/` first, so a
 missing file is a named error that changes nothing — and deletes presets.
-Saved/edited by hand only insofar as the strict parser accepts them: exact
-format match, finite numbers, known environment shapes, rejected by name
-otherwise. Without a workspace, saving downloads the `.json` and applying
-accepts a preset file through the file dialog or drag-drop.
+Applying fills the values into the panel and triggers nothing: like every
+properties-panel input, it never starts a bake or render pass; only the
+explicitly labeled bake buttons do (an in-flight pass is discarded when
+inputs change). Saved/edited by hand only insofar as the strict parser
+accepts them: exact format match, finite numbers, known environment shapes,
+rejected by name otherwise. Without a workspace, saving downloads the
+`.json` and applying accepts a preset file through the file dialog or
+drag-drop.
 
 ## Current state / next steps
 
