@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 
-/** Label + range slider + readout, the workhorse control of both panels. */
+/** Label + range slider + editable value field, the workhorse control of both panels. */
 export function SliderRow(props: {
   label: string;
   value: number;
@@ -12,6 +13,18 @@ export function SliderRow(props: {
   disabled?: boolean;
 }): React.JSX.Element {
   const { label, value, min, max, step, format, onChange, disabled } = props;
+  const [editing, setEditing] = useState<string | null>(null);
+
+  const commit = (): void => {
+    if (editing === null) return;
+    const text = editing.trim().replace(',', '.');
+    setEditing(null);
+    if (text === '') return;
+    const parsed = Number(text);
+    if (!Number.isFinite(parsed)) return;
+    onChange(Math.min(max, Math.max(min, parsed)));
+  };
+
   return (
     <label className="row">
       <span className="row-label">{label}</span>
@@ -24,7 +37,25 @@ export function SliderRow(props: {
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
       />
-      <output>{format ? format(value) : String(value)}</output>
+      <input
+        className="value-input"
+        type="text"
+        inputMode="decimal"
+        aria-label={label}
+        disabled={disabled}
+        value={editing ?? (format ? format(value) : String(value))}
+        onFocus={() => setEditing(String(value))}
+        onChange={(e) => setEditing(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commit();
+          } else if (e.key === 'Escape') {
+            setEditing(null);
+          }
+        }}
+      />
     </label>
   );
 }

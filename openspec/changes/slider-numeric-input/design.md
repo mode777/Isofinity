@@ -40,7 +40,9 @@ local `editing: string | null` state. When `editing === null` it shows
 `format?.(value) ?? String(value)` (exactly today's readout, so `13:30`,
 `45°`, `1.35` displays are preserved); focus sets `editing` to the raw
 `String(value)` and subsequent keystrokes edit that text. Blur/Enter commits,
-Escape clears `editing` (and blurs). Alternative rejected: always show the
+Escape clears `editing` and stays focused (a synchronous blur after cancel
+would commit the stale pre-Escape text via the blur handler's closure).
+Alternative rejected: always show the
 raw number — loses the formatted readouts that exist today.
 
 **Commit rules in one helper.** On commit: trim; normalize a decimal comma to

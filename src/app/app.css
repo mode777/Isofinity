@@ -260,8 +260,9 @@ h2 {
   flex: 1;
 }
 
-.row output {
+.row .value-input {
   width: 3.6em;
+  padding: 0.15rem 0.3rem;
   text-align: right;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
