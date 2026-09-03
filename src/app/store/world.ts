@@ -231,6 +231,7 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
     });
     ed().markDirty(docId, false);
     ed().setStatus(`Saved world "${name}" to worlds/${file}`);
+    void useProject.getState().refresh();
   } catch (err) {
     ed().setStatus(`World save failed: ${err instanceof Error ? err.message : String(err)}`);
     console.error(err);

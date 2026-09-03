@@ -34,6 +34,7 @@ import { decodeBundle } from '../bundleView.js';
 import { parseHdrFile } from '../hdr.js';
 import type { BakeDocument, PrimitiveKind } from '../document.js';
 import { findDocByRef, nextDocId, useEditor, type EditorState } from './editor.js';
+import { useProject } from './project.js';
 import { useWorkspace } from './workspace.js';
 
 const PRIMITIVES: Record<PrimitiveKind, () => Primitive> = {
@@ -550,6 +551,7 @@ export async function saveSprite(docId: string, rawName?: string): Promise<void>
     if (ws === 'connected') {
       await writeWorkspaceFile('sprites', name, bytes);
       ed().setStatus(`Saved sprites/${name} to the workspace`);
+      void useProject.getState().refresh();
     } else {
       download(name, bytes, 'application/zip');
       ed().setStatus(`Downloaded ${name}`);
