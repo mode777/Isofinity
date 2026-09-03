@@ -2,9 +2,10 @@
 
 Authoring pipeline for Isofinity world assets: turn geometry sources (built-in
 test primitives and glTF model files (GLB or glTF)) into per-pixel baked sprite passes
-(sRGB albedo, world-space normal + linear-ray-depth g-buffer, plus optional
-path-traced lit render and ambient-occlusion passes) packaged as a manifest +
-zip bundle the runtime consumes.
+(world-space normal + linear-ray-depth g-buffer, plus the optional path-traced
+lit render pass) packaged as a manifest + zip bundle the runtime consumes.
+
+## Requirements
 
 ## Requirements
 
@@ -55,41 +56,21 @@ without changing the previously active source.
 - **THEN** only the static meshes are used and the status area notes what was
   skipped
 
-### Requirement: Loaded models bake textured albedo
-
-For glTF sources the albedo pass SHALL be sampled per pixel from each
-fragment's material: the base-color texture (when present) multiplied by the
-material's base-color factor, in place of a single flat color — identical
-for `.glb` and `.gltf` sources. Materials without a base-color texture
-SHALL bake their base-color factor as the flat color. The stored albedo
-SHALL remain sRGB-encoded, matching the primitive bakes.
-
-#### Scenario: Multiple textured materials bake side by side
-
-- **WHEN** a glTF contains two meshes with different base-color textures
-- **THEN** the baked albedo pass shows pixels sampled from each mesh's own
-  texture
-
-#### Scenario: Untextured material uses its base color factor
-
-- **WHEN** a glTF material has no base-color texture but a non-white
-  base-color factor
-- **THEN** the mesh's baked pixels are a flat color equal to that factor
-
 ### Requirement: Loaded model coverage respects material alpha
 
-Baked coverage (albedo alpha) SHALL be 1 only where the fragment is kept.
-Fragments from alpha-masked materials whose sampled alpha falls below the
-material's alpha cutoff SHALL be discarded so their pixels read as empty
-(background) in both passes, keeping hit-testing and occlusion correct.
-Alpha-blended materials SHALL bake as opaque.
+Baked coverage SHALL be 1 only where the fragment is kept. Fragments from
+alpha-masked materials whose sampled alpha falls below the material's alpha
+cutoff SHALL be discarded at bake time so their pixels read as empty
+(background) in every stored pass: an all-zero g-buffer value (zero-length
+normal) and alpha 0 in the render pass when present, keeping hit-testing and
+occlusion correct. Alpha-blended materials SHALL bake as opaque.
 
 #### Scenario: Masked-out texels bake as empty pixels
 
 - **WHEN** a glTF uses an alpha-mask material and part of its texture is below
   the alpha cutoff
-- **THEN** the corresponding sprite pixels have coverage 0 and an all-zero
-  g-buffer value
+- **THEN** the corresponding sprite pixels have an all-zero g-buffer value
+  and, when the render pass is present, alpha 0
 
 ### Requirement: Loaded models are normalized into the asset box
 
@@ -113,24 +94,26 @@ manifest `size` SHALL record the scaled box extent.
 
 ### Requirement: glTF bakes emit standard bundles
 
-A glTF bake SHALL produce the same outputs as a primitive bake — albedo PNG,
-g-buffer EXR (rgb = world-space normal, a = linear ray depth against the
-global reference plane), manifest with format `isoinfinity-bake/5`, single
-zip bundle — readable by the editor's bundle parser without modification.
-The g-buffer normals SHALL come from the mesh geometry, not derived from
-depth. The g-buffer EXR and albedo PNG SHALL follow exactly the byte-level
-conventions of format `/3` and `/4`. When produced, the render and AO passes
-SHALL be included as additional bundle entries (`<id>-render.png`, `<id>-ao.png`)
-referenced by the manifest's pass table; the manifest SHALL record which
-optional passes are present, and the environment/tonemap/renderer settings
-used for them. The editor bundle parser SHALL accept both `/4` and `/5`
-bundles; a `/4` or `/5` bundle MAY omit the optional passes.
+A glTF bake SHALL produce the same outputs as a primitive bake — g-buffer
+EXR (rgb = world-space normal, a = linear ray depth against the global
+reference plane), manifest with format `isoinfinity-bake/5`, single zip
+bundle — readable by the editor's bundle parser without modification. The
+g-buffer normals SHALL come from the mesh geometry, not derived from depth.
+The g-buffer EXR SHALL follow exactly the byte-level conventions of format
+`/3` and `/4`. When produced, the render pass SHALL be included as an
+additional bundle entry (`<id>-render.png`) referenced by the manifest's
+pass table; the manifest SHALL record which optional passes are present and
+the environment/tonemap/renderer settings used for them. The editor bundle
+parser SHALL accept both `/4` and `/5` bundles, SHALL require only the
+g-buffer entry, and SHALL ignore pass entries recorded by older manifests
+that it no longer consumes (for example albedo or ao); a `/4` or `/5`
+bundle MAY omit the optional passes.
 
 #### Scenario: glTF bundle downloads and validates
 
 - **WHEN** the user bakes a glTF source and downloads the bundle
 - **THEN** the zip contains a valid `isoinfinity-bake/5` manifest plus the
-  albedo and g-buffer passes, and the editor's bundle parser accepts it
+  g-buffer pass, and the editor's bundle parser accepts it
 
 #### Scenario: Curved glTF geometry bakes correct normals
 
@@ -141,25 +124,32 @@ bundles; a `/4` or `/5` bundle MAY omit the optional passes.
 
 #### Scenario: Bundle with optional passes lists them in the manifest
 
-- **WHEN** the user bakes with render and AO passes produced
-- **THEN** the bundle additionally contains `<id>-render.png` and
-  `<id>-ao.png` and the manifest's pass table references exactly those
-  entries alongside the environment and tonemap settings used
+- **WHEN** the user bakes with the render pass produced
+- **THEN** the bundle additionally contains `<id>-render.png` and the
+  manifest's pass table references exactly that entry alongside the
+  environment and tonemap settings used
 
 #### Scenario: Bundle without optional passes stays minimal
 
-- **WHEN** the user bakes without the render and AO passes
-- **THEN** the bundle contains only manifest, albedo, and g-buffer entries
-  and is byte-convention-compatible with a `/4` bundle apart from the
-  format string
+- **WHEN** the user bakes without the render pass
+- **THEN** the bundle contains only manifest and g-buffer entries and is
+  byte-convention-compatible with an albedo-era bundle apart from the
+  missing albedo entry
+
+#### Scenario: Legacy bundle with albedo and ao entries still opens
+
+- **WHEN** the user opens a `/4` or `/5` bundle whose manifest still records
+  albedo and ao passes
+- **THEN** the bundle loads using its g-buffer (and render, when present)
+  entries and the legacy entries are ignored
 
 ### Requirement: Bake renders a path-traced lit render pass
 
 The bake tool SHALL be able to render the active source through a path-traced
 renderer into an additional `render` pass: a fully lit beauty image produced
 with the same fixed isometric orthographic camera and the same projected
-sprite rectangle as the raster passes, so the render pass aligns pixel-for-
-pixel with the albedo and g-buffer passes. Background pixels (no geometry)
+sprite rectangle as the raster g-buffer pass, so the render pass aligns
+pixel-for-pixel with the g-buffer pass. Background pixels (no geometry)
 SHALL be transparent (alpha 0) and camera rays that miss the asset SHALL not
 contribute any background image or color into the pass. The render pass SHALL
 be tone-mapped (ACES filmic) and sRGB-encoded before storage, and the
@@ -170,9 +160,8 @@ count and seed.
 #### Scenario: Render pass aligns with the raster passes
 
 - **WHEN** the user bakes a source with the render pass enabled
-- **THEN** the render pass has the same pixel dimensions as the albedo and
-  g-buffer passes and object pixels land at the same pixel coordinates in
-  all passes
+- **THEN** the render pass has the same pixel dimensions as the g-buffer
+  pass and object pixels land at the same pixel coordinates in both passes
 
 #### Scenario: Background stays transparent
 
@@ -195,7 +184,7 @@ scale its intensity, and set the exposure applied at tone-mapping; changing
 any of them SHALL restart the render pass accumulation. Loading an invalid
 environment file SHALL produce a named error in the status area and keep the
 previously active environment. Without an active environment the tool SHALL
-still bake albedo and g-buffer, and simply not produce render/AO passes.
+still bake the g-buffer, and simply not produce the render pass.
 
 #### Scenario: Environment illuminates the render
 
@@ -216,36 +205,30 @@ still bake albedo and g-buffer, and simply not produce render/AO passes.
 - **THEN** the status area names the error and the previous environment
   stays active
 
-### Requirement: Bake can produce a path-traced ambient occlusion pass
-
-The bake tool SHALL be able to render an additional optional `ao` pass:
-monochrome ambient occlusion computed by tracing rays against the asset
-geometry, with white meaning unoccluded and black fully occluded. The AO
-pass SHALL use the same camera and sprite rectangle as the other passes,
-SHALL be controllable by an occlusion radius and sample count, and SHALL
-not require an environment. Background pixels SHALL be transparent.
-
-#### Scenario: Crevices bake darker
-
-- **WHEN** an asset with concave features (e.g. the donut) bakes with the
-  AO pass enabled
-- **THEN** pixels in creases and contact areas are darker than exposed
-  pixels, converging with more samples
-
-#### Scenario: AO bakes without an environment
-
-- **WHEN** the user enables the AO pass with no HDRI loaded
-- **THEN** the AO pass is produced while the render pass is not
-
 ### Requirement: Render stage consumes full PBR materials
 
-The path-traced render and AO stages SHALL consume the complete material
-description of each draw group — base-color texture multiplied by base-color
-factor, metallic-roughness values/textures, and normal maps where present —
-instead of the base-color-only subset the raster passes use. Alpha-mask
-materials SHALL apply their cutoff in the render pass so masked-out texels
-read as transparent there, matching raster coverage. The raster albedo and
-g-buffer passes SHALL remain unchanged by this requirement.
+The path-traced render stage SHALL consume the complete material description
+of each draw group — the base-color texture (when present) multiplied by the
+base-color factor, metallic-roughness values/textures, and normal maps where
+present — instead of a single flat color, identical for `.glb` and `.gltf`
+sources. Materials without a base-color texture SHALL render their
+base-color factor as the flat color. Alpha-mask materials SHALL apply their
+cutoff in the render pass so masked-out texels read as transparent there,
+matching g-buffer emptiness.
+
+#### Scenario: Textured materials render side by side
+
+- **WHEN** a glTF contains two meshes with different base-color textures and
+  the render pass is baked
+- **THEN** the rendered image shows pixels sampled from each mesh's own
+  texture multiplied by its base-color factor
+
+#### Scenario: Untextured material uses its base color factor
+
+- **WHEN** a glTF material has no base-color texture but a non-white
+  base-color factor
+- **THEN** the mesh's rendered pixels are a flat color derived from that
+  factor
 
 #### Scenario: Metallic materials reflect the environment
 
@@ -258,7 +241,7 @@ g-buffer passes SHALL remain unchanged by this requirement.
 
 - **WHEN** an alpha-mask material is rendered into the render pass
 - **THEN** texels below the alpha cutoff are transparent in the render pass
-  just as they have zero coverage in the raster passes
+  just as they have an all-zero g-buffer value
 
 ### Requirement: Workspace-backed source pickers in the bake tool
 
@@ -325,12 +308,11 @@ An `isoinfinity-bake/5` manifest SHALL record how the sprite was produced:
 the bake source (a built-in primitive identified by name, or a glTF model
 referenced by its file name within the workspace's `models/` folder together
 with the applied uniform scale), the path-trace settings used for the
-optional passes (sample count, bounce count, texture size, AO samples and
-radius), and the environment used for the render pass (the `.hdr`/`.exr`
-file name within the workspace's `hdri/` folder, or a marker for the
-built-in procedural environment, plus rotation, intensity, exposure, and
-saturation). The provenance SHALL be written on every sprite save and
-updated on re-bake.
+optional render pass (sample count, bounce count, texture size), and the
+environment used for the render pass (the `.hdr`/`.exr` file name within the
+workspace's `hdri/` folder, or a marker for the built-in procedural
+environment, plus rotation, intensity, exposure, and saturation). The
+provenance SHALL be written on every sprite save and updated on re-bake.
 
 #### Scenario: Model sprite records its source
 
@@ -355,10 +337,12 @@ them and re-bake in place. Re-baking SHALL re-read the referenced model
 from the connected workspace's `models/` folder (at the recorded scale) and
 the referenced environment from `hdri/`, re-run the selected passes with
 the recorded (or edited) settings, and replace the document's passes;
-saving SHALL write an updated `/5` bundle. When a referenced model or
-environment file is missing — or the workspace is not connected — the
-sprite SHALL open view-only (passes visible, save/export available) with a
-named status message naming the missing reference.
+saving SHALL write an updated `/5` bundle. Provenance recorded by older
+manifests MAY carry settings the pass set no longer has (for example AO
+samples and radius); the editor SHALL ignore those fields. When a referenced
+model or environment file is missing — or the workspace is not connected —
+the sprite SHALL open view-only (passes visible, save/export available) with
+a named status message naming the missing reference.
 
 #### Scenario: Re-bake applies edited settings
 
@@ -367,6 +351,13 @@ named status message naming the missing reference.
 - **THEN** the render pass re-accumulates from the sprite's recorded source
   and environment with the new sample count, and saving writes the new
   settings into the manifest
+
+#### Scenario: Provenance with legacy AO settings opens editable
+
+- **WHEN** the user opens a `/5` sprite whose provenance records AO samples
+  and radius
+- **THEN** the sprite opens editable with the remaining settings restored and
+  the legacy AO fields ignored
 
 #### Scenario: Missing model degrades to view-only
 

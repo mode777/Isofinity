@@ -8,6 +8,8 @@ context-sensitive properties panel, and a status bar.
 
 ## Requirements
 
+## Requirements
+
 ### Requirement: Integrated editor shell layout
 
 The editor SHALL render as a single page with five regions: a top bar (host
@@ -154,18 +156,24 @@ The properties panel SHALL show controls matching the active tab's editor
 kind. For a sprite editor it SHALL show the document's source information,
 model scale (when the source is a model), path-trace bake settings, the
 environment controls (load/rotate/intensity/exposure/saturation), and the
-pass actions (raster bake, render pass, AO pass). For a world editor it
-SHALL show the key light controls (azimuth, elevation, intensity, color,
-ambient color, dynamic-light switch) and the sun-position controls. The
-panel SHALL NOT duplicate the per-editor toolbar's actions (save,
-place-in-world, and placement tool selection live in the toolbar). Editing
-a control SHALL update the active document only.
+pass actions (raster bake, render pass). For a world editor it SHALL show
+the key light controls (azimuth, elevation, intensity, color, ambient color,
+dynamic-light switch) and the sun-position controls. The panel SHALL NOT
+duplicate the per-editor toolbar's actions (save, place-in-world, and
+placement tool selection live in the toolbar). Editing a control SHALL
+update the active document only.
 
 #### Scenario: Sprite tab shows bake properties
 
 - **WHEN** the user activates a sprite editor tab
 - **THEN** the properties panel shows the bake settings, environment
   controls, and pass actions, and no save/export buttons
+
+#### Scenario: No AO pass action exists
+
+- **WHEN** the user activates a sprite editor tab
+- **THEN** the properties panel offers no ambient-occlusion pass action and
+  no AO samples/radius controls
 
 #### Scenario: World tab shows light properties
 
