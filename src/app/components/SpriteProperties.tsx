@@ -7,14 +7,12 @@ import {
   loadHdriFromWorkspace,
   runAoPass,
   runRenderPass,
-  saveSprite,
   setEnvParams,
   setModelScale,
   setSettings,
 } from '../store/bake.js';
 import { useProject } from '../store/project.js';
 import { useWorkspace } from '../store/workspace.js';
-import { placeInWorld } from '../store/world.js';
 import { NumberRow, Section, SliderRow } from './controls.js';
 
 export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Element {
@@ -194,19 +192,9 @@ export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Elemen
         </button>
       </Section>
 
-      <Section title="Export">
-        <button disabled={!doc.result} onClick={() => void saveSprite(doc.docId)}>
-          {connected ? 'Save sprite to workspace' : 'Download sprite (.sprite)'}
-        </button>
+      <Section title="Debug">
         <button disabled={!doc.result} onClick={() => downloadPositionDebug(doc.docId)}>
           Download position debug
-        </button>
-        <button
-          disabled={!doc.result || !doc.render}
-          title="Place this sprite into a world document (in memory)"
-          onClick={() => placeInWorld(doc.docId)}
-        >
-          Place in world
         </button>
       </Section>
 

@@ -10,12 +10,14 @@ import type {
   BakeDocument,
   EditorDocument,
   LightState,
+  PrimitiveKind,
   SunState,
   WorldDocument,
 } from '../document.js';
 import { DEFAULT_LIGHT, DEFAULT_SUN } from '../document.js';
 import { nextDocId, useEditor, type EditorState } from './editor.js';
-import { resultToLayer } from './bake.js';
+import { bakePrimitiveLayer, anyBakeBusy, resultToLayer } from './bake.js';
+import { useProject } from './project.js';
 
 const WORLD_FORMAT = 'isoinfinity-world/1';
 
@@ -40,7 +42,7 @@ export function newWorldDoc(): string {
     layers: [],
     light: { ...DEFAULT_LIGHT },
     sun: { ...DEFAULT_SUN },
-    tool: 'eraser',
+    tool: '',
   };
   ed().addDoc(doc);
   return doc.docId;
@@ -143,7 +145,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       layers: [],
       light: data.light,
       sun: data.sun,
-      tool: 'eraser',
+      tool: '',
     };
 
     const skipped: string[] = [];
@@ -162,7 +164,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     for (const s of data.sprites) {
       if (loaded.has(s.asset)) doc.world.place(s.x, s.z, s.asset);
     }
-    doc.tool = doc.layers[0]?.id ?? 'eraser';
+    doc.tool = doc.layers[0]?.id ?? '';
 
     ed().addDoc(doc);
     const placed = data.sprites.length - skippedCount(data.sprites, skipped);
@@ -204,10 +206,13 @@ export function suggestWorldName(existingNames: string[]): string {
   return nextWorldName(existingNames);
 }
 
-export async function saveWorld(docId: string, rawName: string): Promise<void> {
+export async function saveWorld(docId: string, rawName?: string): Promise<void> {
   const doc = worldDoc(docId);
   if (!doc) return;
-  const name = sanitizeWorldName(rawName);
+  const fallback = doc.ref
+    ? doc.ref.title.replace(/\.json$/i, '')
+    : suggestWorldName(useProject.getState().worlds);
+  const name = sanitizeWorldName(rawName?.trim() || fallback);
   const file = `${name}.json`;
   try {
     const worldFile: WorldFile = {
@@ -249,6 +254,10 @@ export function placeAt(docId: string, gx: number, gz: number): void {
     if (doc.world.removeAt(gx, gz)) ed().markDirty(docId);
     return;
   }
+  if (!doc.layers.some((l) => l.id === doc.tool)) {
+    ed().setStatus(`brush "${doc.tool}" is not loaded — pick a brush from the toolbar`);
+    return;
+  }
   doc.world.place(gx - 0.5, gz - 0.5, doc.tool);
   ed().markDirty(docId);
 }
@@ -283,6 +292,70 @@ export function setSun(docId: string, patch: Partial<SunState>): void {
     };
   });
   ed().markDirty(docId);
+}
+
+// --- brushes --------------------------------------------------------------
+
+/** A placement brush: a built-in primitive or a saved workspace sprite. */
+export type Brush =
+  | { kind: 'primitive'; id: PrimitiveKind }
+  | { kind: 'sprite'; id: string; fileName?: string };
+
+/** Documents with a brush acquisition in flight (one per world). */
+const brushBusy = new Set<string>();
+
+const brushStatus = (id: string): string =>
+  `brush: ${id} — left-click/drag places, right-click erases`;
+
+/**
+ * Make a brush placeable in the world: reuse its layer when the document
+ * already holds it, else load a saved sprite bundle (workspace sprites/)
+ * or bake the primitive on the fly, and append the result as a layer.
+ * Progress and failures land in the status bar; the tool only changes on
+ * success.
+ */
+export async function selectBrush(docId: string, brush: Brush): Promise<void> {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  if (doc.layers.some((l) => l.id === brush.id)) {
+    setTool(docId, brush.id);
+    ed().setStatus(brushStatus(brush.id));
+    return;
+  }
+  if (brushBusy.has(docId)) {
+    ed().setStatus('Still loading the previous brush — one moment');
+    return;
+  }
+  if (brush.kind === 'primitive' && anyBakeBusy()) {
+    ed().setStatus('A path-traced pass is running — pick the brush again when it finishes');
+    return;
+  }
+  brushBusy.add(docId);
+  try {
+    let layer: SpriteLayer;
+    if (brush.kind === 'sprite') {
+      const fileName = brush.fileName ?? `${brush.id}${BUNDLE_EXT}`;
+      ed().setStatus(`Loading brush sprite ${fileName}…`);
+      const file = await readWorkspaceFile('sprites', fileName);
+      const parsed = await loadBundleLayer(await file.arrayBuffer());
+      layer = { ...parsed.layer, id: brush.id };
+    } else {
+      layer = await bakePrimitiveLayer(brush.id);
+    }
+    update(docId, (d) => {
+      d.layers = [...d.layers, layer];
+      d.tool = brush.id;
+    });
+    ed().markDirty(docId);
+    ed().setStatus(brushStatus(brush.id));
+  } catch (err) {
+    ed().setStatus(
+      `Brush "${brush.id}" failed to load: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    console.error(err);
+  } finally {
+    brushBusy.delete(docId);
+  }
 }
 
 // --- place in world ---------------------------------------------------------

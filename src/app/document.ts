@@ -110,7 +110,10 @@ export interface WorldDocument {
   layers: SpriteLayer[];
   light: LightState;
   sun: SunState;
-  /** Active placement tool: a layer id, a primitive id, or 'eraser'. */
+  /**
+   * Active placement tool: '' = pencil with no brush chosen, a brush id
+   * (sprite layer id or primitive id), or 'eraser'.
+   */
   tool: string;
 }
 

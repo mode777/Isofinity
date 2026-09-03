@@ -7,7 +7,9 @@ import {
 import { depthRange } from '../../bake/iso.js';
 import type { Vec3 } from '../../shared/iso.js';
 import { placeInWorld } from '../store/world.js';
-import { runAoPass, runRenderPass, bakeRaster } from '../store/bake.js';
+import { runAoPass, runRenderPass, saveSprite } from '../store/bake.js';
+import { useEditor } from '../store/editor.js';
+import { EditorToolbar } from './EditorToolbar.js';
 
 type GBufferMode = 'normal' | 'depth';
 
@@ -24,12 +26,24 @@ function blit(canvas: HTMLCanvasElement | null, src: HTMLCanvasElement): void {
 export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
   const { doc } = props;
   const [mode, setMode] = useState<GBufferMode>('normal');
+  const setStatus = useEditor((s) => s.setStatus);
   const albedoRef = useRef<HTMLCanvasElement>(null);
   const gbufferRef = useRef<HTMLCanvasElement>(null);
   const renderRef = useRef<HTMLCanvasElement>(null);
   const aoRef = useRef<HTMLCanvasElement>(null);
 
   const result = doc.result;
+
+  const onSave = (): void => {
+    const raw = window.prompt('Save sprite as', doc.title);
+    if (raw === null) return;
+    const name = raw.trim();
+    if (!name) {
+      setStatus('Sprite needs a name');
+      return;
+    }
+    void saveSprite(doc.docId, name);
+  };
 
   useEffect(() => {
     if (!result) return;
@@ -67,6 +81,22 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
 
   return (
     <div className="sprite-editor">
+      <EditorToolbar>
+        <button
+          disabled={!doc.result}
+          title="Save to the workspace's sprites/ folder — downloads the bundle when no workspace is connected"
+          onClick={onSave}
+        >
+          Save
+        </button>
+        <button
+          disabled={!doc.result || !doc.render}
+          title="Place this sprite into a world document (in memory)"
+          onClick={() => placeInWorld(doc.docId)}
+        >
+          Place in world
+        </button>
+      </EditorToolbar>
       {doc.viewOnly ? (
         <p className="viewonly">View-only — {doc.viewOnlyReason}</p>
       ) : null}
@@ -122,22 +152,6 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
         </figure>
       </div>
       {doc.notes.length > 0 ? <p className="hint">skipped: {doc.notes.join(', ')}</p> : null}
-      <div className="editor-actions">
-        <button
-          disabled={doc.viewOnly || !doc.source}
-          title="Raster bake (albedo + g-buffer)"
-          onClick={() => bakeRaster(doc.docId)}
-        >
-          Re-bake raster
-        </button>
-        <button
-          disabled={!doc.result || !doc.render}
-          title="Place this sprite into a world document (in memory)"
-          onClick={() => placeInWorld(doc.docId)}
-        >
-          Place in world
-        </button>
-      </div>
     </div>
   );
 }

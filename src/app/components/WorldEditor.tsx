@@ -7,10 +7,21 @@ import {
 } from '../../shared/iso.js';
 import { RUNTIME_PPU, layersToSet } from '../../runtime/assets.js';
 import { Renderer } from '../../runtime/renderer.js';
+import { PRIMITIVE_KINDS } from '../document.js';
 import type { WorldDocument } from '../document.js';
 import { lightParams } from '../light.js';
-import { eraseAt, placeAt, setTool } from '../store/world.js';
+import {
+  eraseAt,
+  placeAt,
+  saveWorld,
+  selectBrush,
+  setTool,
+  suggestWorldName,
+} from '../store/world.js';
 import { useEditor } from '../store/editor.js';
+import { useProject } from '../store/project.js';
+import { useWorkspace } from '../store/workspace.js';
+import { EditorToolbar } from './EditorToolbar.js';
 
 const MARGIN = 8;
 const GRID_N = 12;
@@ -208,43 +219,122 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     // which re-uploads the sprite texture arrays.
   }, [doc.docId, spriteSet]);
 
+  const connected = useWorkspace((s) => s.state.kind) === 'connected';
+  const sprites = useProject((s) => s.sprites);
+  const worlds = useProject((s) => s.worlds);
   const setStatus = useEditor((s) => s.setStatus);
   const activeTool = doc.tool;
 
+  // Remembers the last pencil brush so the pencil button can switch back
+  // from the eraser.
+  const lastBrush = useRef(activeTool === 'eraser' ? '' : activeTool);
+
+  const brushEntries = useMemo(() => {
+    const primitives = PRIMITIVE_KINDS.map((p) => ({
+      value: `p:${p}`,
+      label: p,
+      kind: 'primitive' as const,
+      brush: { kind: 'primitive' as const, id: p },
+    }));
+    const spriteEntries = (connected ? sprites : []).map((fileName) => {
+      const id = fileName.replace(/\.(sprite|zip)$/i, '');
+      return {
+        value: `s:${fileName}`,
+        label: id,
+        kind: 'sprite' as const,
+        brush: { kind: 'sprite' as const, id, fileName },
+      };
+    });
+    return [...primitives, ...spriteEntries];
+  }, [connected, sprites]);
+  const selectedEntry = brushEntries.find((e) => e.label === activeTool);
+
+  const onSaveWorld = (): void => {
+    const suggested = doc.ref
+      ? doc.ref.title.replace(/\.json$/i, '')
+      : suggestWorldName(worlds);
+    const raw = window.prompt('Save world as', suggested);
+    if (raw === null) return;
+    const name = raw.trim();
+    if (!name) {
+      setStatus('World needs a name');
+      return;
+    }
+    void saveWorld(doc.docId, name);
+  };
+
   return (
     <div className="world-editor">
-      <div className="tools">
-        {doc.layers.map((layer) => (
-          <button
-            key={layer.id}
-            className={activeTool === layer.id ? 'active' : ''}
-            onClick={() => {
-              setTool(doc.docId, layer.id);
-              setStatus(`tool: ${layer.id} — left-click/drag places, right-click erases`);
-            }}
-          >
-            {layer.id}
-          </button>
-        ))}
+      <EditorToolbar>
         <button
-          className={activeTool === 'eraser' ? 'active' : ''}
-          onClick={() => {
-            setTool(doc.docId, 'eraser');
-            setStatus('tool: eraser — left-click/drag erases');
+          disabled={!connected}
+          title={
+            connected
+              ? "Save to the workspace's worlds/ folder"
+              : 'Connect a workspace to save the world'
+          }
+          onClick={onSaveWorld}
+        >
+          Save
+        </button>
+        <button
+          className={activeTool === 'eraser' ? '' : 'active'}
+          title="Placement tool — left-click/drag places the selected brush, right-click erases"
+          onClick={() => setTool(doc.docId, lastBrush.current)}
+        >
+          Pencil
+        </button>
+        <select
+          aria-label="Placement brush"
+          title="Placement brush — built-in primitives and workspace sprites"
+          value={selectedEntry?.value ?? ''}
+          onChange={(e) => {
+            const entry = brushEntries.find((b) => b.value === e.target.value);
+            if (!entry) return;
+            lastBrush.current = entry.label;
+            void selectBrush(doc.docId, entry.brush);
           }}
         >
-          eraser
+          <option value="">brush…</option>
+          <optgroup label="Primitives">
+            {brushEntries
+              .filter((b) => b.kind === 'primitive')
+              .map((b) => (
+                <option key={b.value} value={b.value}>
+                  {b.label}
+                </option>
+              ))}
+          </optgroup>
+          {connected ? (
+            <optgroup label="Sprites">
+              {brushEntries
+                .filter((b) => b.kind === 'sprite')
+                .map((b) => (
+                  <option key={b.value} value={b.value}>
+                    {b.label}
+                  </option>
+                ))}
+            </optgroup>
+          ) : null}
+        </select>
+        <button
+          className={activeTool === 'eraser' ? 'active' : ''}
+          title="Eraser — left-click/drag removes placements"
+          onClick={() => setTool(doc.docId, 'eraser')}
+        >
+          Eraser
         </button>
-        {doc.layers.length === 0 ? (
-          <span className="hint">
-            No sprites yet — bake one and use "Place in world", or open a world
-            that references bundles.
-          </span>
-        ) : null}
-      </div>
+        <span className="hint">
+          {activeTool === 'eraser' ? 'eraser' : activeTool === '' ? 'no brush' : activeTool}
+        </span>
+      </EditorToolbar>
       <canvas ref={canvasRef} />
       <p className="hint">
-        tool: {activeTool} — left-click/drag places, right-click erases
+        {activeTool === 'eraser'
+          ? 'tool: eraser — left-click/drag erases'
+          : activeTool === ''
+            ? 'pick a brush above — left-click/drag places it, right-click erases'
+            : `tool: ${activeTool} — left-click/drag places, right-click erases`}
       </p>
     </div>
   );

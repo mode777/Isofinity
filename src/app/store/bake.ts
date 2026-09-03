@@ -517,11 +517,18 @@ function provenanceOf(doc: BakeDocument): BakeProvenance | null {
   };
 }
 
+/** Resolve a user-supplied bundle name to a `.sprite` file name. */
+function bundleFileName(raw: string | undefined, fallback: string): string {
+  const trimmed = raw?.trim();
+  if (!trimmed) return fallback;
+  return /\.(sprite|zip)$/i.test(trimmed) ? trimmed : `${trimmed}${BUNDLE_EXT}`;
+}
+
 /** Save the sprite to the workspace (or download when disconnected). */
-export async function saveSprite(docId: string): Promise<void> {
+export async function saveSprite(docId: string, rawName?: string): Promise<void> {
   const doc = bakeDoc(docId);
   if (!doc || !doc.result) return;
-  const name = `${doc.result.id}${BUNDLE_EXT}`;
+  const name = bundleFileName(rawName, `${doc.result.id}${BUNDLE_EXT}`);
   try {
     let bytes: Uint8Array<ArrayBuffer>;
     if (doc.bundleBytes) {
@@ -582,4 +589,45 @@ export function resultToLayer(doc: BakeDocument, id: string): SpriteLayer | null
     gbuffer: bakeFloatToHalf(doc.result.gbuffer, doc.result.width, doc.result.height),
     render: ptImageToLayerBytes(doc.render),
   };
+}
+
+/**
+ * Bake a built-in primitive into a placeable layer on the fly (default
+ * settings, procedural environment). Runs on a throwaway path tracer so
+ * the document-owned baker is untouched; the instance is always disposed.
+ * Callers must not run this while another path-traced pass accumulates —
+ * both drive the shared bake renderer.
+ */
+export async function bakePrimitiveLayer(primitive: PrimitiveKind): Promise<SpriteLayer> {
+  const prim = PRIMITIVES[primitive]();
+  const result = bakePrimitive(prim);
+  const settings = { ...DEFAULT_PT_SETTINGS };
+  const baker = new PtBaker(settings, result.pxPerUnit);
+  try {
+    baker.applySettings(settings);
+    baker.setEnvironment(proceduralEnvironment());
+    baker.setPrimitive(prim, result.pxPerUnit);
+    const render = await baker.renderPass((samples, total) => {
+      ed().setStatus(`Baking ${primitive} brush: ${samples}/${total} samples…`);
+    });
+    return {
+      id: result.id,
+      pxPerUnit: result.pxPerUnit,
+      width: result.width,
+      height: result.height,
+      originPx: result.originPx,
+      gbuffer: bakeFloatToHalf(result.gbuffer, result.width, result.height),
+      render: ptImageToLayerBytes(render),
+    };
+  } finally {
+    baker.dispose();
+  }
+}
+
+/** True while any sprite document runs a path-traced pass. */
+export function anyBakeBusy(): boolean {
+  for (const doc of Object.values(ed().docs)) {
+    if (doc?.kind === 'bake' && doc.busy) return true;
+  }
+  return false;
 }

@@ -1,8 +1,5 @@
-import { useEffect, useState } from 'react';
 import type { WorldDocument } from '../document.js';
-import { useProject } from '../store/project.js';
-import { saveWorld, setLight, setSun, suggestWorldName } from '../store/world.js';
-import { useEditor } from '../store/editor.js';
+import { setLight, setSun } from '../store/world.js';
 import { CheckRow, ColorRow, Section, SliderRow } from './controls.js';
 
 function formatHour(v: number): string {
@@ -13,19 +10,6 @@ function formatHour(v: number): string {
 
 export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Element {
   const { doc } = props;
-  const worlds = useProject((s) => s.worlds);
-  const setStatus = useEditor((s) => s.setStatus);
-
-  // The name box starts at the first free world-N.json for unsaved worlds.
-  const [name, setName] = useState(() =>
-    doc.ref ? doc.ref.title.replace(/\.json$/i, '') : suggestWorldName(worlds),
-  );
-
-  useEffect(() => {
-    setName(doc.ref ? doc.ref.title.replace(/\.json$/i, '') : suggestWorldName(worlds));
-    // Re-suggest only when switching documents, not on every listing change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc.docId]);
 
   const setSunHour = (hour: number): void => {
     setSun(doc.docId, { hour });
@@ -33,31 +17,6 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
 
   return (
     <>
-      <Section title="World">
-        <label className="row">
-          <span className="row-label">Name</span>
-          <input
-            type="text"
-            value={name}
-            maxLength={64}
-            spellCheck={false}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </label>
-        <button
-          onClick={() => {
-            if (!name.trim()) {
-              setStatus('World needs a name');
-              return;
-            }
-            void saveWorld(doc.docId, name);
-          }}
-        >
-          Save world
-        </button>
-        {doc.dirty ? <p className="hint">unsaved changes</p> : null}
-      </Section>
-
       <Section title="Key light">
         <CheckRow
           label="Dynamic light"

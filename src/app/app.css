@@ -315,8 +315,7 @@ h2 {
   align-items: center;
 }
 
-.sprite-editor figcaption button,
-.editor-actions button {
+.sprite-editor figcaption button {
   padding: 0.15rem 0.55rem;
   font-size: 0.8rem;
 }
@@ -339,16 +338,20 @@ canvas {
   min-height: 4rem;
 }
 
-.tools {
+.editor-toolbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-bottom: 0.8rem;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  margin-bottom: 0.8rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--panel);
 }
 
-.editor-actions {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.8rem;
+.editor-toolbar .hint {
+  margin: 0;
+  white-space: nowrap;
 }
+
