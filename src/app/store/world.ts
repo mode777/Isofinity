@@ -14,7 +14,7 @@ import type {
   SunState,
   WorldDocument,
 } from '../document.js';
-import { DEFAULT_LIGHT, DEFAULT_SUN } from '../document.js';
+import { DEFAULT_LIGHT, DEFAULT_SUN, PRIMITIVE_KINDS } from '../document.js';
 import { nextDocId, useEditor, type EditorState } from './editor.js';
 import { bakePrimitiveLayer, anyBakeBusy, resultToLayer } from './bake.js';
 import { useProject } from './project.js';
@@ -120,7 +120,9 @@ function parseWorldFile(text: string, fileName: string): WorldFile {
 /**
  * Open (or focus) a world document from the workspace's worlds/ folder.
  * Every referenced sprite bundle is loaded from sprites/; placements
- * whose bundle is missing are reported as skipped.
+ * whose bundle is missing are reported as skipped — except built-in
+ * primitives, which are always available and bake on the fly (same as
+ * picking them as a brush in the toolbar).
  */
 export async function openWorldDoc(fileName: string): Promise<void> {
   const key = `world:${fileName}`;
@@ -157,7 +159,18 @@ export async function openWorldDoc(fileName: string): Promise<void> {
         const { layer } = await loadBundleLayer(await bundleFile.arrayBuffer());
         loaded.set(entry.asset, layer);
       } catch {
-        if (!skipped.includes(entry.asset)) skipped.push(entry.asset);
+        // No bundle: built-in primitives bake on the fly; anything else is
+        // a genuinely missing sprite asset and its placements are skipped.
+        if (!(PRIMITIVE_KINDS as string[]).includes(entry.asset)) {
+          if (!skipped.includes(entry.asset)) skipped.push(entry.asset);
+          continue;
+        }
+        try {
+          loaded.set(entry.asset, await bakePrimitiveLayer(entry.asset as PrimitiveKind));
+        } catch (err) {
+          console.error(err);
+          if (!skipped.includes(entry.asset)) skipped.push(entry.asset);
+        }
       }
     }
     doc.layers = [...loaded.values()];
