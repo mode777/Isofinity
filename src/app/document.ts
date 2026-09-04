@@ -123,6 +123,11 @@ export interface BakeDocument {
    * transform. In-memory editor state only — never written into bundles.
    */
   viewTransforms: Partial<Record<BakeViewMode, ViewTransform>>;
+  /**
+   * Viewport bounding-box overlay toggle. In-memory editor state only —
+   * never written into bundles.
+   */
+  boxOverlay?: boolean;
 }
 
 export interface WorldDocument {

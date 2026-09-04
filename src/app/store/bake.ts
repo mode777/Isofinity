@@ -564,6 +564,34 @@ export function setModelScale(docId: string, scale: number): void {
   ed().markDirty(docId);
 }
 
+/**
+ * Set a model source's scale from a desired height in meters: the scale
+ * derives from the model's native bounding-box Y extent, so the other
+ * axes scale proportionally. Needs the loaded model (its native extent);
+ * the meters value itself is never stored — provenance keeps recording
+ * the derived uniform scale.
+ */
+export function setModelHeight(docId: string, meters: number): void {
+  const doc = bakeDoc(docId);
+  if (!doc || doc.viewOnly || doc.source?.kind !== 'model') return;
+  const extentY = doc.gltf?.extent[1];
+  if (extentY === undefined || !Number.isFinite(extentY) || extentY <= 0) return;
+  if (!Number.isFinite(meters) || meters <= 0) return;
+  setModelScale(docId, meters / extentY);
+}
+
+/**
+ * Toggle the viewport bounding-box overlay. Editor-only state: never
+ * marks the document dirty and never reaches a bundle.
+ */
+export function setBoxOverlay(docId: string, on: boolean): void {
+  const doc = bakeDoc(docId);
+  if (!doc) return;
+  update(docId, (d) => {
+    d.boxOverlay = on;
+  });
+}
+
 export function setEnvParams(
   docId: string,
   patch: Partial<Pick<PtEnvironment, 'rotationDeg' | 'intensity' | 'exposure' | 'saturation'>>,

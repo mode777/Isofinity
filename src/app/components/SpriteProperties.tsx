@@ -1,5 +1,7 @@
 import type { BakeDocument } from '../document.js';
 import { useRef, useState } from 'react';
+import { MAX_SPRITE_PX, PAD_PX, PX_PER_UNIT } from '../../bake/bake.js';
+import { projectBoxFrame } from '../../bake/iso.js';
 import {
   applyWorkspacePreset,
   bakeRaster,
@@ -11,6 +13,7 @@ import {
   runRenderPass,
   savePreset,
   setEnvParams,
+  setModelHeight,
   setModelScale,
   setSettings,
 } from '../store/bake.js';
@@ -122,6 +125,23 @@ export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Elemen
 
   const env = doc.ptEnv;
 
+  const modelExtent = doc.source?.kind === 'model' ? (doc.gltf?.extent ?? null) : null;
+  const spritePx = modelExtent
+    ? projectBoxFrame(
+        [
+          modelExtent[0] * doc.scale,
+          modelExtent[1] * doc.scale,
+          modelExtent[2] * doc.scale,
+        ],
+        PX_PER_UNIT,
+        PAD_PX,
+      )
+    : null;
+  const overCap =
+    spritePx !== null &&
+    (spritePx.width > MAX_SPRITE_PX || spritePx.height > MAX_SPRITE_PX);
+  const fmt = (v: number): string => String(Number(v.toFixed(3)));
+
   return (
     <>
       <Section title="Source">
@@ -134,14 +154,39 @@ export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Elemen
               : 'unknown (no provenance)'}
         </p>
         {doc.source?.kind === 'model' ? (
-          <NumberRow
-            label="Scale"
-            value={doc.scale}
-            min={0.01}
-            max={1000}
-            onChange={(v) => setModelScale(doc.docId, v)}
-            disabled={doc.viewOnly}
-          />
+          <>
+            <NumberRow
+              label="Scale"
+              value={Number(doc.scale.toFixed(4))}
+              min={0.01}
+              max={1000}
+              onChange={(v) => setModelScale(doc.docId, v)}
+              disabled={doc.viewOnly}
+            />
+            {modelExtent && spritePx ? (
+              <>
+                <NumberRow
+                  label="Height (m)"
+                  value={Number((doc.scale * modelExtent[1]).toFixed(4))}
+                  min={0.01}
+                  max={1000}
+                  onChange={(v) => setModelHeight(doc.docId, v)}
+                  disabled={doc.viewOnly}
+                />
+                <p className="hint">
+                  native size {fmt(modelExtent[0])} x {fmt(modelExtent[1])} x{' '}
+                  {fmt(modelExtent[2])} file units — bakes to {spritePx.width} x{' '}
+                  {spritePx.height} px
+                </p>
+                {overCap ? (
+                  <p className="hint">
+                    sprite {spritePx.width} x {spritePx.height} px exceeds the{' '}
+                    {MAX_SPRITE_PX} px cap — lower the height
+                  </p>
+                ) : null}
+              </>
+            ) : null}
+          </>
         ) : null}
         <button
           disabled={doc.viewOnly || !doc.source}

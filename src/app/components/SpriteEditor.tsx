@@ -4,7 +4,8 @@ import {
   rgbaBytesToCanvas,
   rgbaToCanvas,
 } from '../../bake/export.js';
-import { depthRange } from '../../bake/iso.js';
+import { depthRange, projectBoxFrame } from '../../bake/iso.js';
+import { PAD_PX } from '../../bake/bake.js';
 import type { Vec3 } from '../../shared/iso.js';
 import {
   fitTransform,
@@ -21,6 +22,7 @@ import { placeInWorld } from '../store/world.js';
 import {
   saveSprite,
   setBakeView,
+  setBoxOverlay,
   setViewTransform,
   sourcePrimitive,
 } from '../store/bake.js';
@@ -146,7 +148,47 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
       image.width * transform.zoom,
       image.height * transform.zoom,
     );
-  }, [view, image, panel, transform]);
+    // Bounding-box overlay: box edges neutral, the three origin-adjacent
+    // edges per axis, and a cross at the world origin — all in image
+    // pixels so they track zoom/pan with the sprite.
+    if (doc.boxOverlay && doc.result) {
+      const proj = projectBoxFrame(doc.result.size as Vec3, doc.result.pxPerUnit, PAD_PX);
+      const { zoom, panX, panY } = transform;
+      const px = (p: [number, number]): number => panX + p[0] * zoom;
+      const py = (p: [number, number]): number => panY + p[1] * zoom;
+      ctx.save();
+      ctx.translate(0.5, 0.5);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+      ctx.beginPath();
+      for (const [a, b] of proj.edges) {
+        ctx.moveTo(px(a), py(a));
+        ctx.lineTo(px(b), py(b));
+      }
+      ctx.stroke();
+      for (const [axis, color] of [
+        ['x', '#ff5252'],
+        ['y', '#69f0ae'],
+        ['z', '#536dfe'],
+      ] as const) {
+        const [a, b] = proj.axes[axis];
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(px(a), py(a));
+        ctx.lineTo(px(b), py(b));
+        ctx.stroke();
+      }
+      ctx.strokeStyle = '#ffd54f';
+      const [ox, oy] = [px(proj.origin), py(proj.origin)];
+      ctx.beginPath();
+      ctx.moveTo(ox - 4, oy);
+      ctx.lineTo(ox + 4, oy);
+      ctx.moveTo(ox, oy - 4);
+      ctx.lineTo(ox, oy + 4);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }, [view, image, panel, transform, doc.boxOverlay, doc.result]);
 
   // Wheel zoom around the cursor (native listener so preventDefault works).
   // Realtime 3D measures pan from the panel center, the 2D views from the
@@ -255,7 +297,11 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
         onPointerCancel={endDrag}
       >
         {view === 'realtime' && prim ? (
-          <RealtimeCanvas prim={prim} transform={transform ?? REALTIME_FIT} />
+          <RealtimeCanvas
+            prim={prim}
+            transform={transform ?? REALTIME_FIT}
+            overlay={!!doc.boxOverlay}
+          />
         ) : view !== 'realtime' ? (
           <canvas ref={imageRef} className="viewport-canvas" />
         ) : null}
@@ -280,6 +326,14 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
               {VIEW_LABELS[m]}
             </button>
           ))}
+          <button
+            className={doc.boxOverlay ? 'active' : ''}
+            disabled={!prim && !doc.result}
+            title="Toggle the bounding-box overlay (box, origin, axes)"
+            onClick={() => setBoxOverlay(doc.docId, !doc.boxOverlay)}
+          >
+            Box
+          </button>
         </div>
         <div className="zoom-controls">
           <button

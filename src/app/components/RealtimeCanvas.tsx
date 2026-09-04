@@ -14,6 +14,7 @@ import { useEditor } from '../store/editor.js';
 export function RealtimeCanvas(props: {
   prim: Primitive;
   transform: ViewTransform;
+  overlay: boolean;
 }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<RealtimeMeshView | null>(null);
@@ -56,9 +57,10 @@ export function RealtimeCanvas(props: {
     const view = viewRef.current;
     if (!view || !size) return;
     view.resize(size.w, size.h);
+    view.setBoxOverlay(props.overlay);
     view.render(props.transform);
     // prim: a recreated view (e.g. scale change) must draw immediately.
-  }, [props.prim, props.transform, size]);
+  }, [props.prim, props.transform, props.overlay, size]);
 
   return failed ? (
     <div className="viewport-placeholder">

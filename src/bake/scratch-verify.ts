@@ -9,7 +9,7 @@ import {
   strToU8,
   zipSync,
 } from 'three/examples/jsm/libs/fflate.module.js';
-import { frameIsoBox } from './iso.js';
+import { frameIsoBox, projectBoxFrame, type Vec3 } from './iso.js';
 import { loadGltf } from './gltf.js';
 import {
   getCapsule,
@@ -694,6 +694,57 @@ async function main(): Promise<void> {
     ok(nonUnit === 0, `all rendered normals unit length (got ${nonUnit} off)`);
     ok(maxNx - minNx > 0.5, `normals vary smoothly across the surface (x range ${(maxNx - minNx).toFixed(2)})`);
     ok(dirtyEmpty === 0, `empty pixels all-zero (got ${dirtyEmpty} dirty)`);
+  }
+
+  // 4b. Box-frame projection: pixel-space overlay geometry for the viewport.
+  {
+    log('test: box-frame projection');
+    const size: Vec3 = [2, 1, 3];
+    const PPU = 64;
+    const proj = projectBoxFrame(size, PPU, PAD_PX);
+    const frame = frameIsoBox(size, PPU, PAD_PX);
+    ok(
+      proj.width === frame.width && proj.height === frame.height,
+      'projection rect equals the padded frame rect',
+    );
+    ok(proj.edges.length === 12, `12 box edges (got ${proj.edges.length})`);
+    ok(
+      proj.origin[0] === frame.originPx[0] && proj.origin[1] === frame.originPx[1],
+      'origin projects to originPx',
+    );
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const [a, b] of proj.edges) {
+      for (const p of [a, b]) {
+        minX = Math.min(minX, p[0]);
+        maxX = Math.max(maxX, p[0]);
+        minY = Math.min(minY, p[1]);
+        maxY = Math.max(maxY, p[1]);
+      }
+    }
+    ok(
+      approx(minX, PAD_PX, 0.51) &&
+        approx(minY, PAD_PX, 0.51) &&
+        approx(maxX, proj.width - PAD_PX, 0.51) &&
+        approx(maxY, proj.height - PAD_PX, 0.51),
+      `corners sit PAD_PX inside the sprite rect (got [${minX.toFixed(2)}, ${minY.toFixed(2)}, ${maxX.toFixed(2)}, ${maxY.toFixed(2)}])`,
+    );
+    const segKey = (s: [number, number][]): string => s.map((p) => p.join(',')).join('|');
+    const edgeKeys = new Set(proj.edges.map(segKey));
+    ok(
+      edgeKeys.has(segKey(proj.axes.x)) &&
+        edgeKeys.has(segKey(proj.axes.y)) &&
+        edgeKeys.has(segKey(proj.axes.z)),
+      'axes are origin-adjacent box edges',
+    );
+    const cube = bakePrimitive(getCube());
+    const cubeProj = projectBoxFrame(cube.size, cube.pxPerUnit, PAD_PX);
+    ok(
+      cubeProj.width === cube.width && cubeProj.height === cube.height,
+      'projection matches the cube bake rect',
+    );
   }
 
   // 5. Primitive regression hashes (compare against pre-change bundles).

@@ -96,3 +96,79 @@ export function frameIsoBox(
 
   return { camera, width, height, originPx };
 }
+
+/** A point in sprite-pixel space ([x, y], top-down like `originPx`). */
+export type PxPoint = [number, number];
+
+/** A line segment between two sprite-pixel points. */
+export type PxSegment = [PxPoint, PxPoint];
+
+/** Sprite-pixel projection of a bake box in the fixed isometric frame. */
+export interface BoxFrameProjection {
+  /** Padded frame size in px — equals the bake sprite rect. */
+  width: number;
+  height: number;
+  /** The 12 box edges. */
+  edges: PxSegment[];
+  /** World origin (box min corner); equals the frame's `originPx`. */
+  origin: PxPoint;
+  /** Origin-adjacent box edges along +X/+Y/+Z. */
+  axes: { x: PxSegment; y: PxSegment; z: PxSegment };
+}
+
+/** Corner index pairs (bit 0 = x, bit 1 = y, bit 2 = z) forming the 12 edges. */
+const BOX_EDGES: [number, number][] = [
+  [0, 1],
+  [0, 2],
+  [0, 4],
+  [1, 3],
+  [1, 5],
+  [2, 3],
+  [2, 6],
+  [3, 7],
+  [4, 5],
+  [4, 6],
+  [5, 7],
+  [6, 7],
+];
+
+/**
+ * Project a bake box into sprite pixels using the same padded isometric
+ * frame the bake (and the realtime view) frames it with. Pure math — no
+ * render — so the editor can draw the box overlay and preview the sprite
+ * pixel size without touching the GPU.
+ */
+export function projectBoxFrame(
+  size: Vec3,
+  pxPerUnit: number,
+  padPx: number,
+): BoxFrameProjection {
+  const frame = frameIsoBox(size, pxPerUnit, padPx);
+  const pixels: PxPoint[] = [];
+  for (let i = 0; i < 8; i++) {
+    const corner = new Vector3(
+      (i & 1) * size[0],
+      ((i >> 1) & 1) * size[1],
+      ((i >> 2) & 1) * size[2],
+    );
+    const v = corner.project(frame.camera);
+    pixels.push([
+      (v.x * 0.5 + 0.5) * frame.width,
+      (1 - (v.y * 0.5 + 0.5)) * frame.height,
+    ]);
+  }
+  const edges = BOX_EDGES.map(
+    ([a, b]) => [pixels[a], pixels[b]] as PxSegment,
+  );
+  return {
+    width: frame.width,
+    height: frame.height,
+    edges,
+    origin: frame.originPx,
+    axes: {
+      x: [pixels[0], pixels[1]],
+      y: [pixels[0], pixels[2]],
+      z: [pixels[0], pixels[4]],
+    },
+  };
+}
