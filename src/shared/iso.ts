@@ -1,6 +1,19 @@
 export const ISO_AZIMUTH_DEG = 45;
 export const ISO_ELEVATION_DEG = 30;
 
+/** The fixed bake view slots: successive 90° yaw steps from north. */
+export type ViewSlot = 'n' | 'e' | 's' | 'w';
+/** Non-default slots; removable, may be absent from a sprite. */
+export type ExtraViewSlot = Exclude<ViewSlot, 'n'>;
+
+export const VIEW_SLOTS: readonly ViewSlot[] = ['n', 'e', 's', 'w'];
+export const EXTRA_VIEW_SLOTS: readonly ExtraViewSlot[] = ['e', 's', 'w'];
+
+/** A slot's camera azimuth: north is the fixed iso camera, then +90° yaw. */
+export function slotAzimuthDeg(slot: ViewSlot): number {
+  return ISO_AZIMUTH_DEG + 90 * VIEW_SLOTS.indexOf(slot);
+}
+
 const AZ = (ISO_AZIMUTH_DEG * Math.PI) / 180;
 const EL = (ISO_ELEVATION_DEG * Math.PI) / 180;
 const SA = Math.sin(AZ);

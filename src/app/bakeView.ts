@@ -1,4 +1,5 @@
-import type { BakeDocument, BakeViewMode, ViewTransform } from './document.js';
+import type { BakeDocument, BakeViewMode, ViewPasses, ViewTransform } from './document.js';
+import type { ViewSlot } from '../shared/iso.js';
 
 /** Viewport zoom bounds (image-native scale; 1 = 100%). */
 export const ZOOM_MIN = 0.1;
@@ -14,19 +15,38 @@ export const VIEW_MODES: BakeViewMode[] = ['realtime', 'normals', 'depth', 'rend
 /** Default-view resolution order: first available wins. */
 const FALLBACK_ORDER: BakeViewMode[] = ['realtime', 'render', 'normals', 'depth'];
 
+/**
+ * A document's baked passes for one view slot: `result`/`render` for the
+ * north slot, the matching `extraViews` entry otherwise; null when the
+ * slot holds no baked passes.
+ */
+export function viewPasses(
+  doc: Pick<BakeDocument, 'result' | 'render' | 'extraViews'>,
+  slot: ViewSlot,
+): ViewPasses | null {
+  if (slot === 'n') {
+    return doc.result ? { result: doc.result, render: doc.render } : null;
+  }
+  return doc.extraViews[slot] ?? null;
+}
+
 export function viewAvailability(
-  doc: Pick<BakeDocument, 'source' | 'gltf' | 'result' | 'render' | 'busy'>,
+  doc: Pick<
+    BakeDocument,
+    'source' | 'gltf' | 'result' | 'render' | 'extraViews' | 'activeSlot' | 'busy'
+  >,
 ): BakeViewAvailability {
   const realtime =
     doc.source !== null &&
     (doc.source.kind === 'primitive' || doc.gltf !== null);
+  const passes = viewPasses(doc, doc.activeSlot);
   return {
     realtime,
-    normals: doc.result !== null,
-    depth: doc.result !== null,
+    normals: passes !== null,
+    depth: passes !== null,
     // Available while a pass accumulates: the render view shows the live
     // preview (possibly an empty canvas until the first preview lands).
-    render: doc.render !== null || doc.busy,
+    render: passes?.render != null || doc.busy,
   };
 }
 
@@ -69,7 +89,10 @@ export function viewPlaceholder(
 
 /** The view the viewport displays: the stored choice, else the default. */
 export function resolvedView(
-  doc: Pick<BakeDocument, 'view' | 'source' | 'gltf' | 'result' | 'render' | 'busy'>,
+  doc: Pick<
+    BakeDocument,
+    'view' | 'source' | 'gltf' | 'result' | 'render' | 'extraViews' | 'activeSlot' | 'busy'
+  >,
 ): BakeViewMode {
   if (doc.view !== null) return doc.view;
   const avail = viewAvailability(doc);

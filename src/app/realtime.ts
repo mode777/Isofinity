@@ -20,7 +20,7 @@ import {
   type Material,
 } from 'three';
 import { PAD_PX } from '../bake/bake.js';
-import { frameIsoBox } from '../bake/iso.js';
+import { ISO_AZIMUTH_DEG, frameIsoBox } from '../bake/iso.js';
 import type { Primitive } from '../bake/primitives.js';
 import type { Vec3 } from '../shared/iso.js';
 import type { ViewTransform } from './document.js';
@@ -140,15 +140,15 @@ export class RealtimeMeshView {
   private camUp: Vector3;
   private overlay: Group;
 
-  constructor(canvas: HTMLCanvasElement, prim: Primitive) {
+  constructor(canvas: HTMLCanvasElement, prim: Primitive, azimuthDeg: number = ISO_AZIMUTH_DEG) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true });
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.outputColorSpace = SRGBColorSpace;
 
-    // Same camera frame as the bake: fixed iso direction, box center,
-    // frustum = the sprite extent plus the bake's padding.
-    const frame = frameIsoBox(prim.size, 128, PAD_PX);
+    // Same camera frame as the bake: the view slot's iso direction, box
+    // center, frustum = the sprite extent plus the bake's padding.
+    const frame = frameIsoBox(prim.size, 128, PAD_PX, azimuthDeg);
     this.camera = frame.camera;
     this.fitHalfW = (frame.camera.right - frame.camera.left) / 2;
     this.fitHalfH = (frame.camera.top - frame.camera.bottom) / 2;

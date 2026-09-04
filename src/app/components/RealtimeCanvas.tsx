@@ -13,6 +13,8 @@ import { useEditor } from '../store/editor.js';
  */
 export function RealtimeCanvas(props: {
   prim: Primitive;
+  /** The active view slot's camera azimuth. */
+  azimuthDeg: number;
   transform: ViewTransform;
   overlay: boolean;
 }): React.JSX.Element {
@@ -30,7 +32,7 @@ export function RealtimeCanvas(props: {
 
     let view: RealtimeMeshView;
     try {
-      view = new RealtimeMeshView(canvas, props.prim);
+      view = new RealtimeMeshView(canvas, props.prim, props.azimuthDeg);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       useEditor.getState().setStatus(`Realtime view failed: ${message}`);
@@ -51,7 +53,7 @@ export function RealtimeCanvas(props: {
       view.dispose();
       canvas.remove();
     };
-  }, [props.prim]);
+  }, [props.prim, props.azimuthDeg]);
 
   useEffect(() => {
     const view = viewRef.current;

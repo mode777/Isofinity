@@ -2,8 +2,9 @@ import { DataTexture, FloatType, RGBAFormat, Vector3 } from 'three';
 import { EXRExporter, NO_COMPRESSION } from 'three/examples/jsm/exporters/EXRExporter.js';
 import { PAD_PX, type BakeResult } from './bake.js';
 import { depthRange, frameIsoBox, reconstructWorldPos } from './iso.js';
-import type { PtExtras } from './pt.js';
+import type { PtExtras, PtImage } from './pt.js';
 import { PT_NAME } from './pt-version.js';
+import type { ExtraViewSlot, ViewSlot } from '../shared/iso.js';
 
 export function download(name: string, data: BlobPart, mime: string): void {
   const url = URL.createObjectURL(new Blob([data], { type: mime }));
@@ -134,6 +135,12 @@ export interface BakeManifest {
   pxPerUnit: number;
   sprite: { width: number; height: number; originPx: [number, number] };
   passes: Record<string, { file: string; encoding: string; channels: string }>;
+  /**
+   * The stored view slots. Always present on `/6` writes and always
+   * includes `n` (mirroring the top-level camera/sprite/passes, which stay
+   * the north view's); one entry per additional baked view.
+   */
+  views?: BakeViewEntry[];
   /** Present when the render pass is baked: the environment used for it. */
   environment?: {
     hdri: string;
@@ -154,13 +161,33 @@ export interface BakeManifest {
   provenance?: BakeProvenance;
 }
 
+/** One stored view slot's record in an `isoinfinity-bake/6` manifest. */
+export interface BakeViewEntry {
+  slot: ViewSlot;
+  azimuthDeg: number;
+  sprite: { width: number; height: number; originPx: [number, number] };
+  passes: Record<string, { file: string; encoding: string; channels: string }>;
+}
+
+/**
+ * An extra (non-north) view's baked passes, bundled alongside the north
+ * view. The slot fixes the camera azimuth; the result carries the per-view
+ * sprite rect and camera record.
+ */
+export interface BundleExtraView {
+  slot: ExtraViewSlot;
+  result: BakeResult;
+  render?: PtImage | null;
+}
+
 export function buildManifest(
   result: BakeResult,
   pt?: PtExtras,
   provenance?: BakeProvenance,
+  extraViews: BundleExtraView[] = [],
 ): BakeManifest {
   const manifest: BakeManifest = {
-    format: 'isoinfinity-bake/5',
+    format: 'isoinfinity-bake/6',
     id: result.id,
     cube: { size: [result.size[0], result.size[1], result.size[2]], origin: [0, 0, 0] },
     camera: {
@@ -221,6 +248,46 @@ export function buildManifest(
   if (provenance) {
     manifest.provenance = provenance;
   }
+  // The view table lists every stored slot; n mirrors the top-level fields
+  // (which remain the north view's, keeping /5-era readers working).
+  const views: BakeViewEntry[] = [
+    {
+      slot: 'n',
+      azimuthDeg: manifest.camera.azimuthDeg,
+      sprite: manifest.sprite,
+      passes: manifest.passes,
+    },
+  ];
+  for (const view of extraViews) {
+    const passes: BakeViewEntry['passes'] = {
+      gbuffer: {
+        file: `${result.id}-${view.slot}-gbuffer.exr`,
+        encoding: 'exr-f32-linear',
+        channels: 'rgb=world-normal a=ray-depth',
+      },
+    };
+    if (view.render) {
+      passes.render = {
+        file: `${result.id}-${view.slot}-render.png`,
+        encoding: 'png-r8-srgb',
+        channels: 'rgb=tonemapped-render a=coverage',
+      };
+    }
+    views.push({
+      slot: view.slot,
+      azimuthDeg: view.result.camera.azimuthDeg,
+      sprite: {
+        width: view.result.width,
+        height: view.result.height,
+        originPx: [
+          Math.round(view.result.originPx[0] * 1000) / 1000,
+          Math.round(view.result.originPx[1] * 1000) / 1000,
+        ],
+      },
+      passes,
+    });
+  }
+  manifest.views = views;
   return manifest;
 }
 

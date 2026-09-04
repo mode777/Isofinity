@@ -21,7 +21,7 @@ import {
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { WebGLPathTracer } from 'three-gpu-pathtracer';
 import { PAD_PX, PX_PER_UNIT } from './bake.js';
-import { frameIsoBox, type IsoFrame } from './iso.js';
+import { ISO_AZIMUTH_DEG, frameIsoBox, type IsoFrame } from './iso.js';
 import type { MaterialGroup, Primitive } from './primitives.js';
 
 export { PT_NAME } from './pt-version.js';
@@ -264,8 +264,15 @@ export class PtBaker {
     return this.settings.tiles ?? null;
   }
 
-  /** Rebuilds the PT scene for a new source; the next pass regenerates. */
-  setPrimitive(prim: Primitive, pxPerUnit: number = this.pxPerUnit): void {
+  /**
+   * Rebuilds the PT scene for a new source (and/or view slot); the next
+   * pass regenerates. The slot's azimuth picks the frame camera.
+   */
+  setPrimitive(
+    prim: Primitive,
+    pxPerUnit: number = this.pxPerUnit,
+    azimuthDeg: number = ISO_AZIMUTH_DEG,
+  ): void {
     for (const mesh of this.meshes) this.scene.remove(mesh);
     this.meshes = [];
 
@@ -285,7 +292,9 @@ export class PtBaker {
     normalizeTextures(this.scene);
 
     this.pxPerUnit = pxPerUnit;
-    this.frame = frameIsoBox(prim.size, pxPerUnit, PAD_PX);
+    this.frame = frameIsoBox(prim.size, pxPerUnit, PAD_PX, azimuthDeg);
+    // A new camera (slot change) or scene (source change) must be handed to
+    // the tracer again before the next pass.
     this.sceneDirty = true;
   }
 

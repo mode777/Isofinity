@@ -6,12 +6,13 @@ import {
 } from '../../bake/export.js';
 import { depthRange, projectBoxFrame } from '../../bake/iso.js';
 import { PAD_PX } from '../../bake/bake.js';
-import type { Vec3 } from '../../shared/iso.js';
+import { VIEW_SLOTS, slotAzimuthDeg, type Vec3, type ViewSlot } from '../../shared/iso.js';
 import {
   fitTransform,
   panned,
   resolvedView,
   viewAvailability,
+  viewPasses,
   viewPlaceholder,
   viewUnavailableReason,
   VIEW_MODES,
@@ -20,8 +21,11 @@ import {
 } from '../bakeView.js';
 import { placeInWorld } from '../store/world.js';
 import {
+  bakeAll,
+  removeView,
   runRenderPass,
   saveSprite,
+  setActiveSlot,
   setBakeView,
   setBoxOverlay,
   setViewTransform,
@@ -40,11 +44,17 @@ const VIEW_LABELS: Record<BakeViewMode, string> = {
 
 const REALTIME_FIT: ViewTransform = { zoom: 1, panX: 0, panY: 0 };
 
+/** Display order/labels of the view-slot switcher icons. */
+const SLOT_ORDER: ViewSlot[] = [...VIEW_SLOTS];
+const SLOT_LABELS: Record<ViewSlot, string> = { n: 'N', e: 'E', s: 'S', w: 'W' };
+
 export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
   const { doc } = props;
   const setStatus = useEditor((s) => s.setStatus);
   const view = resolvedView(doc);
   const avail = viewAvailability(doc);
+  const slot = doc.activeSlot;
+  const passes = viewPasses(doc, slot);
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLCanvasElement>(null);
@@ -76,9 +86,12 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
     [doc.docId, doc.source, doc.gltf, doc.scale],
   );
 
-  // The active 2D view's image, rendered once per pass/view change.
+  // The active 2D view's image, rendered once per pass/view change. The
+  // passes shown are the active view slot's; while a pass accumulates the
+  // live preview stands in for the committed render so the image converges
+  // visibly (it never alters the stored pass).
   const image = useMemo<HTMLCanvasElement | null>(() => {
-    const result = doc.result;
+    const result = passes?.result ?? null;
     if (view === 'normals' || view === 'depth') {
       if (!result) return null;
       const isDepth = view === 'depth';
@@ -93,16 +106,13 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
       });
     }
     if (view === 'render') {
-      // While a pass accumulates, the live preview stands in for the
-      // committed render so the image converges visibly; it never alters
-      // the stored pass.
-      const shown = doc.busy && doc.preview ? doc.preview : doc.render;
+      const shown = doc.busy && doc.preview ? doc.preview : passes?.render ?? null;
       return shown
         ? rgbaBytesToCanvas(shown.rgba, shown.width, shown.height)
         : null;
     }
     return null;
-  }, [doc.result, doc.render, doc.preview, doc.busy, view]);
+  }, [passes, doc.preview, doc.busy, view]);
 
   // Zoom/pan: the active view's stored transform, or its default (the 2D
   // fit / the realtime framing). Stored per view — the views use different
@@ -155,9 +165,15 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
     );
     // Bounding-box overlay: box edges neutral, the three origin-adjacent
     // edges per axis, and a cross at the world origin — all in image
-    // pixels so they track zoom/pan with the sprite.
-    if (doc.boxOverlay && doc.result) {
-      const proj = projectBoxFrame(doc.result.size as Vec3, doc.result.pxPerUnit, PAD_PX);
+    // pixels so they track zoom/pan with the sprite. Projected with the
+    // active slot's camera so the box matches the displayed view.
+    if (doc.boxOverlay && passes) {
+      const proj = projectBoxFrame(
+        passes.result.size as Vec3,
+        passes.result.pxPerUnit,
+        PAD_PX,
+        slotAzimuthDeg(slot),
+      );
       const { zoom, panX, panY } = transform;
       const px = (p: [number, number]): number => panX + p[0] * zoom;
       const py = (p: [number, number]): number => panY + p[1] * zoom;
@@ -193,7 +209,7 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
       ctx.stroke();
       ctx.restore();
     }
-  }, [view, image, panel, transform, doc.boxOverlay, doc.result]);
+  }, [view, image, panel, transform, doc.boxOverlay, passes, slot]);
 
   // Wheel zoom around the cursor (native listener so preventDefault works).
   // Realtime 3D measures pan from the panel center, the 2D views from the
@@ -228,7 +244,7 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
     if (e.button !== 0 || !transform) return;
     // Clicks on the corner controls must reach their buttons: capturing
     // the pointer here would retarget pointerup and swallow the click.
-    if ((e.target as HTMLElement).closest('.view-controls, .zoom-controls')) return;
+    if ((e.target as HTMLElement).closest('.view-controls, .zoom-controls, .slot-switcher')) return;
     dragRef.current = {
       x: e.clientX,
       y: e.clientY,
@@ -284,10 +300,28 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
         </button>
         <button
           disabled={doc.viewOnly || doc.busy}
-          title="Bake the g-buffer from the current source, then render the lit pass with the current environment"
-          onClick={() => void runRenderPass(doc.docId)}
+          title={`Bake the g-buffer from the current source, then render the lit pass with the current environment — into the ${SLOT_LABELS[slot]} view`}
+          onClick={() => void runRenderPass(doc.docId, slot)}
         >
-          {doc.busy ? 'Rendering…' : doc.render ? 'Re-render pass' : 'Render pass'}
+          {doc.busy ? 'Rendering…' : passes?.render ? 'Re-render pass' : 'Render pass'}
+        </button>
+        <button
+          disabled={doc.viewOnly || doc.busy}
+          title="Batch-bake all four view slots in N, E, S, W order — missing views are created, existing ones re-baked"
+          onClick={() => void bakeAll(doc.docId)}
+        >
+          Bake all
+        </button>
+        <button
+          disabled={slot === 'n' || !passes || doc.viewOnly || doc.busy}
+          title={
+            slot === 'n'
+              ? 'The north view is the default and cannot be removed'
+              : `Discard the baked passes of the ${SLOT_LABELS[slot]} view`
+          }
+          onClick={() => removeView(doc.docId, slot)}
+        >
+          Remove view
         </button>
         <button
           disabled={!doc.result || !doc.render}
@@ -311,6 +345,7 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
         {view === 'realtime' && prim ? (
           <RealtimeCanvas
             prim={prim}
+            azimuthDeg={slotAzimuthDeg(slot)}
             transform={transform ?? REALTIME_FIT}
             overlay={!!doc.boxOverlay}
           />
@@ -340,12 +375,32 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
           ))}
           <button
             className={doc.boxOverlay ? 'active' : ''}
-            disabled={!prim && !doc.result}
+            disabled={!prim && !passes}
             title="Toggle the bounding-box overlay (box, origin, axes)"
             onClick={() => setBoxOverlay(doc.docId, !doc.boxOverlay)}
           >
             Box
           </button>
+        </div>
+        <div className="slot-switcher">
+          {SLOT_ORDER.map((s) => {
+            const baked = viewPasses(doc, s) !== null;
+            const selectable = !doc.busy && (!doc.viewOnly || baked);
+            return (
+              <button
+                key={s}
+                className={`slot-icon${baked ? ' baked' : ''}${s === slot ? ' active' : ''}`}
+                disabled={!selectable}
+                title={
+                  `View ${SLOT_LABELS[s]} — ${baked ? 'baked' : 'not baked'}` +
+                  (selectable ? '' : ' (unavailable)')
+                }
+                onClick={() => setActiveSlot(doc.docId, s)}
+              >
+                {SLOT_LABELS[s]}
+              </button>
+            );
+          })}
         </div>
         <div className="zoom-controls">
           <button

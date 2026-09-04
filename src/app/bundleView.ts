@@ -3,9 +3,11 @@ import { parseBake, type BakeProvenance } from '../bake/bundle.js';
 import type { BakeManifest } from '../bake/export.js';
 import { HalfFloatType, RGBAFormat } from 'three';
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
+import { isoDirection } from '../bake/iso.js';
 import type { PtImage } from '../bake/pt.js';
 import type { BakeResult } from '../bake/bake.js';
 import { decodePng } from '../runtime/assets.js';
+import type { ExtraViewSlot } from '../shared/iso.js';
 
 /**
  * Decode an opened bundle into the same in-memory shapes a live bake
@@ -15,6 +17,15 @@ import { decodePng } from '../runtime/assets.js';
 export interface DecodedBundle {
   manifest: BakeManifest;
   provenance: BakeProvenance | null;
+  result: BakeResult;
+  render: PtImage | null;
+  /** Extra stored views (e/s/w); empty for `/4` and `/5` bundles. */
+  extraViews: DecodedBundleView[];
+}
+
+/** One decoded extra view, in the document's `extraViews` shape. */
+export interface DecodedBundleView {
+  slot: ExtraViewSlot;
   result: BakeResult;
   render: PtImage | null;
 }
@@ -90,5 +101,32 @@ export async function decodeBundle(buffer: ArrayBuffer): Promise<DecodedBundle> 
     ? bytesToPtImage(await decodePng(parsed.render, w, h), w, h)
     : null;
 
-  return { manifest: m, provenance: parsed.provenance, result, render };
+  const extraViews: DecodedBundleView[] = [];
+  for (const view of parsed.views) {
+    const vw = view.width;
+    const vh = view.height;
+    const viewGbufferGl = decodeExrGbufferGl(await view.gbuffer.arrayBuffer(), vw, vh);
+    const dir = isoDirection(view.azimuthDeg, m.camera.elevationDeg);
+    extraViews.push({
+      slot: view.slot,
+      result: {
+        id: m.id,
+        label: m.id,
+        size: [m.cube.size[0], m.cube.size[1], m.cube.size[2]],
+        width: vw,
+        height: vh,
+        pxPerUnit: m.pxPerUnit,
+        originPx: view.originPx,
+        camera: {
+          azimuthDeg: view.azimuthDeg,
+          elevationDeg: m.camera.elevationDeg,
+          viewDir: [dir.x, dir.y, dir.z],
+        },
+        gbuffer: viewGbufferGl,
+      },
+      render: view.render ? bytesToPtImage(await decodePng(view.render, vw, vh), vw, vh) : null,
+    });
+  }
+
+  return { manifest: m, provenance: parsed.provenance, result, render, extraViews };
 }

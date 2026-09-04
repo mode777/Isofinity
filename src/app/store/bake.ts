@@ -1,5 +1,9 @@
 import { bakePrimitive } from '../../bake/bake.js';
-import { buildBundle, type BakeProvenance } from '../../bake/bundle.js';
+import {
+  buildBundle,
+  type BakeProvenance,
+  type BundleExtraView,
+} from '../../bake/bundle.js';
 import { debugPositionCanvas, download } from '../../bake/export.js';
 import { loadGltf, detectSpecGloss, readGlbJsonSlice, type GltfSource } from '../../bake/gltf.js';
 import { convertSpecGlossToMR } from '../../bake/specgloss.js';
@@ -26,6 +30,7 @@ import {
   readWorkspaceFile,
   writeWorkspaceFile,
 } from '../../shared/workspace.js';
+import { EXTRA_VIEW_SLOTS, VIEW_SLOTS, slotAzimuthDeg, type ViewSlot } from '../../shared/iso.js';
 import {
   bakeFloatToHalf,
   proceduralEnvironment,
@@ -33,6 +38,7 @@ import {
 } from '../../runtime/assets.js';
 import type { SpriteLayer } from '../../runtime/assets.js';
 import { decodeBundle } from '../bundleView.js';
+import { viewPasses } from '../bakeView.js';
 import { parseHdrFile } from '../hdr.js';
 import {
   parsePreset,
@@ -116,6 +122,8 @@ function baseBakeDoc(title: string): BakeDocument {
     settings: { ...DEFAULT_PT_SETTINGS },
     result: null,
     render: null,
+    extraViews: {},
+    activeSlot: 'n',
     preview: null,
     notes: [],
     bundleBytes: null,
@@ -220,6 +228,7 @@ async function offerSpecGlossFix(fileName: string, key: string): Promise<boolean
         d.gltf = source;
         d.result = null;
         d.render = null;
+        d.extraViews = {};
         d.preview = null;
         d.bundleBytes = null;
         d.notes = [];
@@ -288,6 +297,14 @@ export async function openBundleDoc(fileName: string): Promise<void> {
     doc.render = decoded.render;
     doc.bundleBytes = bytes;
     doc.provenance = decoded.provenance;
+    doc.extraViews = Object.fromEntries(
+      decoded.extraViews.map((view) => [
+        view.slot,
+        { result: view.result, render: view.render },
+      ]),
+    ) as BakeDocument['extraViews'];
+
+    const viewCount = 1 + decoded.extraViews.length;
 
     const prov = decoded.provenance;
     if (!prov) {
@@ -344,6 +361,7 @@ export async function openBundleDoc(fileName: string): Promise<void> {
     const r = decoded.result;
     ed().setStatus(
       `${fileName}: ${r.width}x${r.height} px @ ${r.pxPerUnit} px/unit opened` +
+        (viewCount > 1 ? ` — ${viewCount} views` : '') +
         (doc.viewOnly ? ` — view-only (${doc.viewOnlyReason})` : ''),
     );
   } catch (err) {
@@ -386,33 +404,46 @@ function primitiveFor(doc: BakeDocument): Primitive {
 
 // --- pass actions ---------------------------------------------------------
 
+/** The status-bar label for a slot's passes (north stays unlabelled). */
+const slotLabel = (slot: ViewSlot): string => (slot === 'n' ? '' : ` ${slot.toUpperCase()}:`);
+
 /**
- * Raster bake (g-buffer) for the document's current source. Internal step:
- * run by the document-open paths and implicitly by the render pass action —
- * the UI exposes no dedicated raster bake button.
+ * Raster bake (g-buffer) for the document's current source, into the given
+ * view slot. Internal step: run by the document-open paths (north) and
+ * implicitly by the render pass action — the UI exposes no dedicated raster
+ * bake button. Only the target slot's passes are touched; a re-bake clears
+ * that slot's previous render so the pair stays pixel-aligned.
  */
-function bakeRaster(docId: string): void {
+function bakeRaster(docId: string, slot: ViewSlot = 'n'): void {
   const doc = bakeDoc(docId);
   if (!doc || doc.viewOnly) return;
   try {
-    const result = bakePrimitive(primitiveFor(doc));
+    const result = bakePrimitive(primitiveFor(doc), undefined, slotAzimuthDeg(slot));
     update(docId, (d) => {
-      d.result = result;
+      if (slot === 'n') {
+        d.result = result;
+      } else {
+        d.extraViews = { ...d.extraViews, [slot]: { result, render: null } };
+      }
       d.notes = d.gltf?.skipped ?? [];
       d.bundleBytes = null;
     });
     ed().markDirty(docId);
     ed().setStatus(
-      `${result.label}: ${result.width}x${result.height} px @ ${result.pxPerUnit} px/unit${activeNotes(doc.gltf?.skipped ?? [])}`,
+      `${result.label}${slotLabel(slot)}: ${result.width}x${result.height} px @ ${result.pxPerUnit} px/unit` +
+        activeNotes(doc.gltf?.skipped ?? []),
     );
   } catch (err) {
-    ed().setStatus(`Bake failed: ${err instanceof Error ? err.message : String(err)}`);
+    ed().setStatus(
+      `Bake failed${slotLabel(slot)}: ${err instanceof Error ? err.message : String(err)}`,
+    );
     console.error(err);
   }
 }
 
 let renderGen = 0;
 let renderingDocId: string | null = null;
+let renderingSlot: ViewSlot = 'n';
 
 /** Discard an in-flight render pass whose settings just went stale — no new
  * pass is started: only the sprite editor's render action starts a pass. */
@@ -428,21 +459,20 @@ function invalidateRunningRender(): void {
 }
 
 /**
- * Path-traced lit render pass — the sprite editor's single explicit bake
- * action. It implicitly (re)bakes the raster g-buffer first, so both passes
- * are current with the document's source and settings and stay
- * pixel-aligned; the raster draw is synchronous and its status line
- * precedes the render progress. The accumulation runs incrementally over a
- * tile grid with a live preview in the viewport. Safe to invoke while
- * another accumulation runs: the new run resets the tracer for the current
- * settings and the stale run stops before its next tile draw, its commit
- * discarded by its generation token.
+ * One slot's render pass: implicit raster g-buffer re-bake, then the
+ * path-traced accumulation against it, committed into that slot's storage.
+ * Returns 'done', 'cancelled' (superseded by a newer generation), or
+ * 'failed' (named error already in the status bar). Callers own the busy
+ * state and the generation token.
  */
-export async function runRenderPass(docId: string): Promise<void> {
+async function renderSlot(
+  docId: string,
+  slot: ViewSlot,
+  gen: number,
+  prefix = '',
+): Promise<'done' | 'cancelled' | 'failed'> {
   const doc = bakeDoc(docId);
-  if (!doc || doc.viewOnly || !doc.ptEnv.texture) return;
-  const gen = ++renderGen;
-  renderingDocId = docId;
+  if (!doc || doc.viewOnly || !doc.ptEnv.texture) return 'cancelled';
   update(docId, (d) => {
     d.busy = true;
     d.preview = null;
@@ -454,20 +484,22 @@ export async function runRenderPass(docId: string): Promise<void> {
     // The render pass implies a fresh g-buffer: bake it first (a
     // synchronous raster draw — no token interaction). A failed bake
     // leaves no result behind; its error is already in the status bar.
-    bakeRaster(docId);
+    bakeRaster(docId, slot);
     const baked = bakeDoc(docId);
-    if (!baked?.result) return;
+    const passes = baked ? viewPasses(baked, slot) : null;
+    if (!baked || !passes) return gen === renderGen ? 'failed' : 'cancelled';
     const b = getBaker(baked);
     b.applySettings(baked.settings);
     b.setEnvironment(baked.ptEnv);
-    b.setPrimitive(primitiveFor(baked), baked.result.pxPerUnit);
+    b.setPrimitive(primitiveFor(baked), passes.result.pxPerUnit, slotAzimuthDeg(slot));
+    const label = prefix ? `${prefix}${slotLabel(slot) || ' N:'}` : `${baked.title}${slotLabel(slot)}:`;
     const image = await b.renderPass({
       onProgress: (samples, total, compiling) => {
         if (gen === renderGen) {
           ed().setStatus(
             compiling
-              ? `${baked.title}: compiling shaders…`
-              : `${baked.title}: rendering ${samples}/${total} samples…`,
+              ? `${label} compiling shaders…`
+              : `${label} rendering ${samples}/${total} samples…`,
           );
         }
       },
@@ -480,26 +512,94 @@ export async function runRenderPass(docId: string): Promise<void> {
       },
       isCancelled: () => gen !== renderGen,
     });
-    if (gen !== renderGen || !image) return;
+    if (gen !== renderGen || !image) return 'cancelled';
     update(docId, (d) => {
-      d.render = image;
-      d.preview = null;
       // Mirror the derived tile grid into the settings so provenance
       // records the grid this pass actually used.
       if (b.tileGrid !== null) d.settings = { ...d.settings, tiles: b.tileGrid };
+      if (slot === 'n') {
+        d.render = image;
+      } else {
+        const current = d.extraViews[slot];
+        if (current) {
+          d.extraViews = { ...d.extraViews, [slot]: { ...current, render: image } };
+        }
+      }
       // A finished render pass is the freshest thing to look at — stay on
       // it (editor-only state; does not affect dirty).
       d.view = 'render';
     });
     ed().markDirty(docId);
     ed().setStatus(
-      `${doc.title}: render pass ${image.width}x${image.height} px, ${doc.settings.samples} samples`,
+      `${baked.title}${slotLabel(slot)}: render pass ${image.width}x${image.height} px, ${doc.settings.samples} samples`,
     );
+    return 'done';
   } catch (err) {
     if (gen === renderGen) {
-      ed().setStatus(`Render pass failed: ${err instanceof Error ? err.message : String(err)}`);
+      ed().setStatus(
+        `Render pass failed${slotLabel(slot)}: ${err instanceof Error ? err.message : String(err)}`,
+      );
       console.error(err);
+      return 'failed';
     }
+    return 'cancelled';
+  }
+}
+
+/**
+ * Path-traced lit render pass for the selected view slot — the sprite
+ * editor's explicit bake action for one slot. Safe to invoke while another
+ * accumulation runs: the new run resets the tracer for the current
+ * settings and the stale run stops before its next tile draw, its commit
+ * discarded by its generation token.
+ */
+export async function runRenderPass(docId: string, slot: ViewSlot = 'n'): Promise<void> {
+  const doc = bakeDoc(docId);
+  if (!doc || doc.viewOnly || !doc.ptEnv.texture) return;
+  const gen = ++renderGen;
+  renderingDocId = docId;
+  renderingSlot = slot;
+  try {
+    await renderSlot(docId, slot, gen);
+  } finally {
+    if (gen === renderGen) {
+      renderingDocId = null;
+      update(docId, (d) => {
+        d.busy = false;
+        d.preview = null;
+      });
+    }
+  }
+}
+
+/**
+ * Batch-bake all four view slots in N, E, S, W order, one render pass each
+ * against a fresh g-buffer, switching the viewport to every slot as its
+ * pass runs. Missing slots are created, existing ones re-baked. A failed
+ * or superseded slot ends the batch: slots already baked keep their passes
+ * and the failure's named error is already in the status bar.
+ */
+export async function bakeAll(docId: string): Promise<void> {
+  const doc = bakeDoc(docId);
+  if (!doc || doc.viewOnly) return;
+  if (!doc.ptEnv.texture) {
+    ed().setStatus('Bake All needs an environment — load an HDRI first');
+    return;
+  }
+  const gen = ++renderGen;
+  renderingDocId = docId;
+  try {
+    for (let k = 0; k < VIEW_SLOTS.length; k++) {
+      if (gen !== renderGen) return;
+      const slot = VIEW_SLOTS[k];
+      renderingSlot = slot;
+      update(docId, (d) => {
+        d.activeSlot = slot;
+      });
+      const outcome = await renderSlot(docId, slot, gen, `[${k + 1}/${VIEW_SLOTS.length}]`);
+      if (outcome !== 'done') return;
+    }
+    ed().setStatus('Bake All finished — all four views baked');
   } finally {
     if (gen === renderGen) {
       renderingDocId = null;
@@ -523,6 +623,40 @@ export function setBakeView(docId: string, view: BakeViewMode): void {
   update(docId, (d) => {
     d.view = view;
   });
+}
+
+/**
+ * Select the view slot the viewport displays and bake actions target.
+ * Editor-only state: never marks the document dirty and never reaches a
+ * bundle. A view-only document can only display stored views.
+ */
+export function setActiveSlot(docId: string, slot: ViewSlot): void {
+  const doc = bakeDoc(docId);
+  if (!doc || doc.busy) return;
+  if (doc.viewOnly && !viewPasses(doc, slot)) return;
+  update(docId, (d) => {
+    d.activeSlot = slot;
+  });
+}
+
+/**
+ * Discard a non-default slot's baked passes. Not available for the north
+ * slot (the default view always exists once baked), for view-only
+ * documents, for slots without baked passes, or while a pass accumulates.
+ */
+export function removeView(docId: string, slot: ViewSlot): void {
+  const doc = bakeDoc(docId);
+  if (!doc || doc.viewOnly || doc.busy) return;
+  if (slot === 'n' || !doc.extraViews[slot]) return;
+  if (renderingDocId === docId && renderingSlot === slot) invalidateRunningRender();
+  update(docId, (d) => {
+    const next = { ...d.extraViews };
+    delete next[slot];
+    d.extraViews = next;
+    if (d.activeSlot === slot) d.activeSlot = 'n';
+  });
+  ed().markDirty(docId);
+  ed().setStatus(`Removed the ${slot.toUpperCase()} view`);
 }
 
 /**
@@ -730,7 +864,11 @@ export async function saveSprite(docId: string, rawName?: string): Promise<void>
             settings: doc.settings,
           }
         : undefined;
-      bytes = await buildBundle(doc.result, extras, provenanceOf(doc) ?? undefined);
+      const extraViews: BundleExtraView[] = EXTRA_VIEW_SLOTS.flatMap((slot) => {
+        const passes = doc.extraViews[slot];
+        return passes ? [{ slot, result: passes.result, render: passes.render }] : [];
+      });
+      bytes = await buildBundle(doc.result, extras, provenanceOf(doc) ?? undefined, extraViews);
     }
     const ws = useWorkspaceState();
     if (ws === 'connected') {

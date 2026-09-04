@@ -5,6 +5,7 @@
  */
 import { bakePrimitive, PAD_PX, type BakeResult } from './bake.js';
 import { buildBundle, parseBake } from './bundle.js';
+import { decodeBundle } from '../app/bundleView.js';
 import {
   strToU8,
   zipSync,
@@ -531,6 +532,70 @@ async function runPtSpike(): Promise<void> {
   renderer.dispose();
 }
 
+/**
+ * Slot alignment: the path-traced render pass at a non-default slot's
+ * camera must share the slot's sprite rect and coverage footprint with that
+ * slot's raster g-buffer (per-view depth/viewDir agreement).
+ */
+async function runSlotAlignmentSpike(): Promise<void> {
+  const PRIM = 128;
+  const AZIMUTH = 135; // the e slot
+  const frame = frameIsoBox([1, 1, 1], PRIM, PAD_PX, AZIMUTH);
+  const w = frame.width;
+  const h = frame.height;
+
+  const renderer = new WebGLRenderer({ antialias: false, stencil: false });
+  renderer.setSize(w, h, false);
+  renderer.outputColorSpace = SRGBColorSpace;
+
+  const scene = new Scene();
+  const mesh = new Mesh(getCube().geometry, new MeshStandardMaterial({ color: 0x4f9e5c }));
+  mesh.position.set(0.5, 0.5, 0.5);
+  scene.add(mesh);
+  scene.background = null;
+  const env = new GradientEquirectTexture(16);
+  env.topColor.set(0xffffff);
+  env.bottomColor.set(0x202020);
+  env.update();
+  scene.environment = env;
+  scene.environmentIntensity = 1;
+
+  log('test: PT slot alignment — e-slot camera matches the e-slot raster');
+  const pt = spikePathTracer(renderer, scene, frame.camera);
+  await accumulate(pt, 32);
+  const read = readTarget(renderer, pt.target);
+
+  const raster = bakePrimitive(getCube(), PRIM, AZIMUTH);
+  ok(raster.camera.azimuthDeg === AZIMUTH && raster.width === w && raster.height === h,
+    `raster e-slot bake shares the slot rect ${w}x${h}`);
+  let massPt = 0;
+  let cxPt = 0;
+  let cyPt = 0;
+  let massRa = 0;
+  let cxRa = 0;
+  let cyRa = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const a = pixelAt(read, w, x, y)[3];
+      massPt += a;
+      cxPt += x * a;
+      cyPt += y * a;
+      const g = pixelAt(raster.gbuffer, w, x, y);
+      const ra = Math.min(1, Math.hypot(g[0], g[1], g[2]));
+      massRa += ra;
+      cxRa += x * ra;
+      cyRa += y * ra;
+    }
+  }
+  const relMass = Math.abs(massPt - massRa) / massRa;
+  const centroidPx = Math.hypot(cxPt / massPt - cxRa / massRa, cyPt / massPt - cyRa / massRa);
+  ok(relMass < 0.02, `e-slot coverage mass within 2% of raster (got ${(relMass * 100).toFixed(2)}%)`);
+  ok(centroidPx < 1.5, `e-slot coverage centroid within 1.5 px of raster (got ${centroidPx.toFixed(2)} px)`);
+
+  pt.dispose();
+  renderer.dispose();
+}
+
 function sum(v: [number, number, number, number]): number {
   return v[0] + v[1] + v[2];
 }
@@ -594,14 +659,75 @@ async function main(): Promise<void> {
     ok(approx(result.size[0], 6, 1e-3) && approx(result.size[1], 2, 1e-3), `scale-2 size [6,2,0] (got [${result.size}])`);
     const bytes = await buildBundle(result);
     const parsed = parseBake(bytes.buffer as ArrayBuffer);
-    ok(parsed.manifest.format === 'isoinfinity-bake/5', `manifest format (got ${parsed.manifest.format})`);
+    ok(parsed.manifest.format === 'isoinfinity-bake/6', `manifest format (got ${parsed.manifest.format})`);
     ok(parsed.render === null, 'no optional passes in a raster-only bundle');
     ok(approx(parsed.manifest.cube.size[0], 6, 1e-3) && approx(parsed.manifest.cube.size[1], 2, 1e-3),
       `manifest cube.size records scaled box (got [${parsed.manifest.cube.size}])`);
     ok(parsed.gbuffer.size > 0, 'g-buffer entry present');
+    ok(parsed.views.length === 0, 'raster-only bundle has no extra views');
+    ok((parsed.manifest.views ?? []).length === 1 &&
+        parsed.manifest.views![0].slot === 'n' &&
+        approx(parsed.manifest.views![0].azimuthDeg, 45, 1e-6),
+      `view table records only north (got ${JSON.stringify(parsed.manifest.views)})`);
     const passNames = Object.keys(parsed.manifest.passes);
     ok(!passNames.includes('albedo') && !passNames.includes('ao'),
       `manifest declares no albedo/ao passes (got [${passNames.join(', ')}])`);
+  }
+
+  // 3c. Multi-view bundles: per-view entries, azimuths, and removal.
+  {
+    log('test: /6 multi-view bundle round trip + remove-view omission');
+    const cube = getCube();
+    const north = bakePrimitive(cube);
+    const east = bakePrimitive(cube, undefined, 135);
+    ok(north.camera.azimuthDeg === 45 && east.camera.azimuthDeg === 135,
+      `slots carry their camera azimuths (n=${north.camera.azimuthDeg}, e=${east.camera.azimuthDeg})`);
+    const bytes = await buildBundle(north, undefined, undefined, [
+      { slot: 'e', result: east },
+    ]);
+    const manifest = JSON.parse(new TextDecoder().decode(
+      (await import('three/examples/jsm/libs/fflate.module.js')).unzipSync(bytes)['manifest.json'],
+    )) as Record<string, unknown>;
+    const views = manifest.views as { slot: string; azimuthDeg: number }[];
+    ok(views.length === 2 && views[0].slot === 'n' && views[1].slot === 'e' &&
+        approx(views[1].azimuthDeg, 135, 1e-6),
+      `manifest view table lists n + e with azimuths (got ${JSON.stringify(views)})`);
+
+    const parsed = parseBake(bytes.buffer as ArrayBuffer);
+    ok(parsed.views.length === 1 && parsed.views[0].slot === 'e', 'parser exposes the e view blob');
+    ok(parsed.views[0].gbuffer.size > 0, 'e g-buffer entry present');
+    ok(approx(parsed.views[0].width, east.width, 0) && approx(parsed.views[0].height, east.height, 0),
+      'e view keeps its sprite rect');
+    // Slot framing is per slot: the cube projects to a taller rect from the
+    // rotated camera in general — here assert both slots frame their own
+    // padded box rect.
+    ok(east.width > PAD_PX * 2 && east.height > PAD_PX * 2, 'e view bakes a real rect');
+
+    // Remove the e view: the next save omits it entirely.
+    const bytesAfterRemove = await buildBundle(north);
+    const parsedAfterRemove = parseBake(bytesAfterRemove.buffer as ArrayBuffer);
+    ok(parsedAfterRemove.views.length === 0 &&
+        (parsedAfterRemove.manifest.views ?? []).length === 1,
+      'removed view is omitted from the next save');
+  }
+
+  // 3d. Open-path decode: a saved /6 bundle restores both views.
+  {
+    log('test: decodeBundle restores extra views');
+    const cube = getCube();
+    const north = bakePrimitive(cube);
+    const east = bakePrimitive(cube, undefined, 135);
+    const bytes = await buildBundle(north, undefined, undefined, [
+      { slot: 'e', result: east },
+    ]);
+    const decoded = await decodeBundle(bytes.buffer as ArrayBuffer);
+    ok(decoded.extraViews.length === 1 && decoded.extraViews[0].slot === 'e',
+      `decoded one extra view (got ${JSON.stringify(decoded.extraViews.map((v) => v.slot))})`);
+    const ev = decoded.extraViews[0];
+    ok(approx(ev.result.camera.azimuthDeg, 135, 1e-6), `e view restores its azimuth (got ${ev.result.camera.azimuthDeg})`);
+    ok(ev.result.width === east.width && ev.result.height === east.height,
+      'e view restores its sprite rect');
+    ok(ev.result.gbuffer.length === east.width * east.height * 4, 'e g-buffer decodes to the full rect');
   }
 
   // 3b. Hand-built fixtures: legacy passes ignored, minimal v5, unknown format.
@@ -634,6 +760,7 @@ async function main(): Promise<void> {
 
     const minimal = parseBake(makeZip(base('isoinfinity-bake/5', gbufferPasses)).buffer as ArrayBuffer);
     ok(minimal.render === null, 'minimal g-buffer-only bundle parses');
+    ok(minimal.views.length === 0, '/5 bundle reads as single-view (no extra views)');
 
     // Legacy manifests still recording albedo/ao entries parse; the parser
     // resolves only g-buffer (+ render) and ignores the rest.
@@ -656,14 +783,14 @@ async function main(): Promise<void> {
     );
     ok(v4.render !== null, 'v4 bundle exposes the render pass blob when present');
 
-    const broken = base('isoinfinity-bake/6', gbufferPasses);
+    const broken = base('isoinfinity-bake/7', gbufferPasses);
     let threw = '';
     try {
       parseBake(makeZip(broken).buffer as ArrayBuffer);
     } catch (err) {
       threw = err instanceof Error ? err.message : String(err);
     }
-    ok(threw.includes('isoinfinity-bake/6'), `unknown format rejected by name (got "${threw}")`);
+    ok(threw.includes('isoinfinity-bake/7'), `unknown format rejected by name (got "${threw}")`);
   }
 
   // 4. Smooth curved glTF geometry bakes unit-length varying normals.
@@ -767,6 +894,9 @@ async function main(): Promise<void> {
 
   // 6. Path-tracer spike: ortho + transparent background + AA + determinism.
   await runPtSpike();
+
+  // 6b. Path-tracer alignment at a non-default slot camera (e).
+  await runSlotAlignmentSpike();
 
   log(`\n${passed} passed, ${failed} failed`, failed === 0 ? 'pass' : 'fail');
 }

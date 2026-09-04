@@ -20,6 +20,8 @@ export interface IsoFrame {
   width: number;
   height: number;
   originPx: [number, number];
+  /** Unit view direction the frame's depth axis is measured against. */
+  viewDir: Vector3;
 }
 
 export function isoDirection(azimuthDeg: number, elevationDeg: number): Vector3 {
@@ -44,17 +46,18 @@ export function reconstructWorldPos(
   const vx = (ndcX * (frame.camera.right - frame.camera.left) + (frame.camera.right + frame.camera.left)) / 2;
   const vy = (ndcY * (frame.camera.top - frame.camera.bottom) + (frame.camera.top + frame.camera.bottom)) / 2;
   out.set(vx, vy, 0).applyMatrix4(frame.camera.matrixWorld);
-  const t = depth - out.dot(ISO_VIEW_DIR);
-  return out.addScaledVector(ISO_VIEW_DIR, t);
+  const t = depth - out.dot(frame.viewDir);
+  return out.addScaledVector(frame.viewDir, t);
 }
 
 export function frameIsoBox(
   size: Vec3,
   pxPerUnit: number,
   padPx: number,
+  azimuthDeg: number = ISO_AZIMUTH_DEG,
 ): IsoFrame {
   const camera = new OrthographicCamera(-1, 1, 1, -1, 1, CAMERA_DISTANCE * 2 + 1);
-  const dir = isoDirection(ISO_AZIMUTH_DEG, ISO_ELEVATION_DEG);
+  const dir = isoDirection(azimuthDeg, ISO_ELEVATION_DEG);
   const center = new Vector3(size[0] / 2, size[1] / 2, size[2] / 2);
   camera.up.set(0, 1, 0);
   camera.position.copy(center).addScaledVector(dir, CAMERA_DISTANCE);
@@ -94,7 +97,7 @@ export function frameIsoBox(
     (1 - (origin.y * 0.5 + 0.5)) * height,
   ];
 
-  return { camera, width, height, originPx };
+  return { camera, width, height, originPx, viewDir: dir.clone() };
 }
 
 /** A point in sprite-pixel space ([x, y], top-down like `originPx`). */
@@ -142,8 +145,9 @@ export function projectBoxFrame(
   size: Vec3,
   pxPerUnit: number,
   padPx: number,
+  azimuthDeg: number = ISO_AZIMUTH_DEG,
 ): BoxFrameProjection {
-  const frame = frameIsoBox(size, pxPerUnit, padPx);
+  const frame = frameIsoBox(size, pxPerUnit, padPx, azimuthDeg);
   const pixels: PxPoint[] = [];
   for (let i = 0; i < 8; i++) {
     const corner = new Vector3(

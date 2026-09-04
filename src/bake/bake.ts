@@ -16,8 +16,8 @@ import {
 import {
   ISO_AZIMUTH_DEG,
   ISO_ELEVATION_DEG,
-  ISO_VIEW_DIR,
   frameIsoBox,
+  isoDirection,
 } from './iso.js';
 import type { Vec3 } from '../shared/iso.js';
 import type { MaterialGroup, Primitive } from './primitives.js';
@@ -172,9 +172,14 @@ function buildDrawGroups(prim: Primitive): { draws: DrawGroup[]; boxPlacement: b
   return { draws, boxPlacement: true };
 }
 
-export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT): BakeResult {
+export function bakePrimitive(
+  prim: Primitive,
+  pxPerUnit: number = PX_PER_UNIT,
+  azimuthDeg: number = ISO_AZIMUTH_DEG,
+): BakeResult {
   const r = getRenderer();
-  const frame = frameIsoBox(prim.size, pxPerUnit, PAD_PX);
+  const frame = frameIsoBox(prim.size, pxPerUnit, PAD_PX, azimuthDeg);
+  const viewDir = isoDirection(azimuthDeg, ISO_ELEVATION_DEG);
   const { width, height } = frame;
   if (width > MAX_SPRITE_PX || height > MAX_SPRITE_PX) {
     throw new Error(
@@ -201,7 +206,7 @@ export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT):
       uniforms: {
         uCubeMin: { value: new Vector3(0, 0, 0) },
         uCubeMax: { value: new Vector3(prim.size[0], prim.size[1], prim.size[2]) },
-        uViewDir: { value: ISO_VIEW_DIR.clone() },
+        uViewDir: { value: viewDir.clone() },
         uAlbedoMap: { value: group.albedoTexture ?? WHITE_TEXEL },
         uFactor: { value: new Vector4(...group.baseColorFactor) },
         uUseMap: { value: group.albedoTexture ? 1 : 0 },
@@ -238,9 +243,9 @@ export function bakePrimitive(prim: Primitive, pxPerUnit: number = PX_PER_UNIT):
     pxPerUnit,
     originPx: frame.originPx,
     camera: {
-      azimuthDeg: ISO_AZIMUTH_DEG,
+      azimuthDeg,
       elevationDeg: ISO_ELEVATION_DEG,
-      viewDir: [ISO_VIEW_DIR.x, ISO_VIEW_DIR.y, ISO_VIEW_DIR.z],
+      viewDir: [viewDir.x, viewDir.y, viewDir.z],
     },
     gbuffer,
   };

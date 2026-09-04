@@ -2,6 +2,7 @@ import type { BakeDocument } from '../document.js';
 import { useRef, useState } from 'react';
 import { MAX_SPRITE_PX, PAD_PX, PX_PER_UNIT } from '../../bake/bake.js';
 import { projectBoxFrame } from '../../bake/iso.js';
+import { slotAzimuthDeg } from '../../shared/iso.js';
 import {
   applyWorkspacePreset,
   deletePreset,
@@ -128,6 +129,8 @@ export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Elemen
   const env = doc.ptEnv;
 
   const modelExtent = doc.source?.kind === 'model' ? (doc.gltf?.extent ?? null) : null;
+  // Pixel-size preview for the active view slot: a slot's projected
+  // footprint (and so the baked size and the cap check) can differ per slot.
   const spritePx = modelExtent
     ? projectBoxFrame(
         [
@@ -137,6 +140,7 @@ export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Elemen
         ],
         PX_PER_UNIT,
         PAD_PX,
+        slotAzimuthDeg(doc.activeSlot),
       )
     : null;
   const overCap =

@@ -4,6 +4,7 @@ import type { GltfSource } from '../bake/gltf.js';
 import type { PtEnvironment, PtImage, PtSettings } from '../bake/pt.js';
 import type { SpriteLayer } from '../runtime/assets.js';
 import type { World } from '../runtime/world.js';
+import type { ViewSlot } from '../shared/iso.js';
 
 export type PrimitiveKind =
   | 'sphere'
@@ -79,6 +80,12 @@ export interface ResourceRef {
   title: string;
 }
 
+/** A view slot's baked passes (g-buffer + optional render). */
+export interface ViewPasses {
+  result: BakeResult;
+  render: PtImage | null;
+}
+
 export interface BakeDocument {
   kind: 'bake';
   docId: string;
@@ -94,8 +101,20 @@ export interface BakeDocument {
   /** Live environment (texture + params) used by the path tracer. */
   ptEnv: PtEnvironment;
   settings: PtSettings;
+  /** North view's g-buffer — the default slot, and what worlds consume. */
   result: BakeResult | null;
+  /** North view's path-traced lit render. */
   render: PtImage | null;
+  /**
+   * Baked passes of the non-default slots (e/s/w); the north slot never
+   * appears here — its passes live in `result`/`render`.
+   */
+  extraViews: Partial<Record<ViewSlot, ViewPasses>>;
+  /**
+   * View slot the viewport displays and per-slot bake actions target.
+   * In-memory editor state only — never written into bundles.
+   */
+  activeSlot: ViewSlot;
   /**
    * Live preview of an in-flight render pass (low-res, partial
    * accumulation). Editor-only state — never written into bundles; the
