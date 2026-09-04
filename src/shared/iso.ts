@@ -14,6 +14,24 @@ export function slotAzimuthDeg(slot: ViewSlot): number {
   return ISO_AZIMUTH_DEG + 90 * VIEW_SLOTS.indexOf(slot);
 }
 
+/**
+ * Yaw (deg, right-hand about +Y) the *model* is rotated by for a view slot.
+ * The slots turn the asset, not the camera: every view is rendered from the
+ * fixed iso camera, so stored world normals and lighting are exactly those
+ * of the asset standing rotated — drop-in for a placement facing that way.
+ */
+export function slotYawDeg(slot: ViewSlot): number {
+  return slotAzimuthDeg(slot) - ISO_AZIMUTH_DEG;
+}
+
+/** Box size after a quarter-turn yaw about the vertical axis: x/z swap. */
+export function yawRotatedBoxSize(size: Vec3, yawDeg: number): Vec3 {
+  const quarter = ((Math.round(yawDeg / 90) % 4) + 4) % 4;
+  return quarter === 1 || quarter === 3
+    ? [size[2], size[1], size[0]]
+    : [size[0], size[1], size[2]];
+}
+
 const AZ = (ISO_AZIMUTH_DEG * Math.PI) / 180;
 const EL = (ISO_ELEVATION_DEG * Math.PI) / 180;
 const SA = Math.sin(AZ);

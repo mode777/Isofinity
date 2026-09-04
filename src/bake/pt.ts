@@ -20,9 +20,10 @@ import {
 } from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { WebGLPathTracer } from 'three-gpu-pathtracer';
-import { PAD_PX, PX_PER_UNIT } from './bake.js';
+import { PAD_PX, PX_PER_UNIT, applySlotModelRotation } from './bake.js';
 import { ISO_AZIMUTH_DEG, frameIsoBox, type IsoFrame } from './iso.js';
 import type { MaterialGroup, Primitive } from './primitives.js';
+import { yawRotatedBoxSize } from '../shared/iso.js';
 
 export { PT_NAME } from './pt-version.js';
 
@@ -266,13 +267,19 @@ export class PtBaker {
 
   /**
    * Rebuilds the PT scene for a new source (and/or view slot); the next
-   * pass regenerates. The slot's azimuth picks the frame camera.
+   * pass regenerates. `azimuthDeg` selects the view slot: like the raster
+   * bake, E/S/W rotate the *model* about the vertical axis while the camera
+   * stays in the fixed iso frame — so the world-fixed environment lights
+   * the rotated asset exactly as it would stand in the world. `prim.size`
+   * is the unrotated box; the frame frames the rotated box.
    */
   setPrimitive(
     prim: Primitive,
     pxPerUnit: number = this.pxPerUnit,
     azimuthDeg: number = ISO_AZIMUTH_DEG,
   ): void {
+    const yawDeg = azimuthDeg - ISO_AZIMUTH_DEG;
+    const boxSize = yawRotatedBoxSize(prim.size, yawDeg);
     for (const mesh of this.meshes) this.scene.remove(mesh);
     this.meshes = [];
 
@@ -280,19 +287,21 @@ export class PtBaker {
       for (const group of prim.groups) {
         const mesh = new Mesh(group.geometry, this.materialFor(group));
         mesh.scale.setScalar(prim.scale ?? 1);
+        applySlotModelRotation(mesh, prim.size, yawDeg);
         this.meshes.push(mesh);
       }
     } else {
       const material = new MeshStandardMaterial({ color: new Color(prim.albedoHex) });
       const mesh = new Mesh(prim.geometry, material);
       mesh.position.set(prim.size[0] / 2, prim.size[1] / 2, prim.size[2] / 2);
+      applySlotModelRotation(mesh, prim.size, yawDeg);
       this.meshes.push(mesh);
     }
     for (const mesh of this.meshes) this.scene.add(mesh);
     normalizeTextures(this.scene);
 
     this.pxPerUnit = pxPerUnit;
-    this.frame = frameIsoBox(prim.size, pxPerUnit, PAD_PX, azimuthDeg);
+    this.frame = frameIsoBox(boxSize, pxPerUnit, PAD_PX);
     // A new camera (slot change) or scene (source change) must be handed to
     // the tracer again before the next pass.
     this.sceneDirty = true;

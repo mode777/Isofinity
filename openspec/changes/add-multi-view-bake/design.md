@@ -37,17 +37,30 @@ Motivation: see proposal.md — Why.
 
 ## Decisions
 
-### D1 — Slot model: azimuth parameter, not rotated geometry
+### D1 — Slot model: rotate the model, keep the camera
 
 `VIEW_SLOTS = ['n','e','s','w']` (shared module next to `iso.ts`), with
-`slotAzimuthDeg(slot) = ISO_AZIMUTH_DEG + 90 * index` — E/S/W add
-+90°/+180°/+270° to the azimuth parameter, elevation untouched. The
-camera rotates; the asset never does, so the box stays `(0,0,0)`-anchored
-and normalization/provenance are view-independent. Alternative considered:
-rotating the mesh per view — rejected (moves the origin anchor, breaks
-provenance scale/size semantics for no gain). If the turntable direction
-feels backwards in review, flipping the sign changes only this constant —
-no format impact.
+`slotAzimuthDeg(slot) = ISO_AZIMUTH_DEG + 90 * index`. Every slot renders
+from the fixed iso camera; E/S/W present the model rotated about the
+vertical axis by `R_y(yaw)` with `yaw = slotAzimuthDeg(slot) −
+ISO_AZIMUTH_DEG` (`slotYawDeg`), re-anchored so the rotated box's min
+corner sits back at the origin (`yawRotatedBoxSize` swaps x/z for
+90°/270°; `applySlotModelRotation` applies the transform to meshes and
+overlay groups).
+
+Review correction: the first implementation rotated the camera and kept
+the asset fixed. The images are pixel-identical between the two
+formulations — a rigid model↔camera transform: `R_y(yaw)` maps the slot's
+virtual camera direction onto the fixed one — but the stored world data is
+not: normals, depth, and environment lighting must belong to the rotated
+model's world frame so each view is a drop-in sprite for a placement
+facing that direction, lit by the world-fixed environment exactly as the
+rotated asset would stand in it. The per-view `azimuthDeg` in `BakeResult`
+and the manifest views table keeps recording the slot's view azimuth (the
+90° step, a stable slot identifier), while g-buffer depth for every view
+is measured along the fixed world view direction. If the turntable
+direction feels backwards in review, flipping the sign changes only
+`slotYawDeg`/`slotAzimuthDeg` — no format impact.
 
 `frameIsoBox(size, pxPerUnit, padPx)` gains an optional
 `azimuthDeg = ISO_AZIMUTH_DEG` parameter (projected-corner loop already

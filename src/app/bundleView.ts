@@ -3,7 +3,6 @@ import { parseBake, type BakeProvenance } from '../bake/bundle.js';
 import type { BakeManifest } from '../bake/export.js';
 import { HalfFloatType, RGBAFormat } from 'three';
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
-import { isoDirection } from '../bake/iso.js';
 import type { PtImage } from '../bake/pt.js';
 import type { BakeResult } from '../bake/bake.js';
 import { decodePng } from '../runtime/assets.js';
@@ -106,7 +105,6 @@ export async function decodeBundle(buffer: ArrayBuffer): Promise<DecodedBundle> 
     const vw = view.width;
     const vh = view.height;
     const viewGbufferGl = decodeExrGbufferGl(await view.gbuffer.arrayBuffer(), vw, vh);
-    const dir = isoDirection(view.azimuthDeg, m.camera.elevationDeg);
     extraViews.push({
       slot: view.slot,
       result: {
@@ -118,9 +116,12 @@ export async function decodeBundle(buffer: ArrayBuffer): Promise<DecodedBundle> 
         pxPerUnit: m.pxPerUnit,
         originPx: view.originPx,
         camera: {
+          // The slot's view azimuth identifies the orientation; viewDir is
+          // the fixed world view direction — the axis g-buffer depth is
+          // measured along for every view.
           azimuthDeg: view.azimuthDeg,
           elevationDeg: m.camera.elevationDeg,
-          viewDir: [dir.x, dir.y, dir.z],
+          viewDir: m.camera.viewDir,
         },
         gbuffer: viewGbufferGl,
       },

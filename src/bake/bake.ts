@@ -12,6 +12,7 @@ import {
   Vector4,
   WebGLRenderTarget,
   WebGLRenderer,
+  type Object3D,
 } from 'three';
 import {
   ISO_AZIMUTH_DEG,
@@ -19,7 +20,7 @@ import {
   frameIsoBox,
   isoDirection,
 } from './iso.js';
-import type { Vec3 } from '../shared/iso.js';
+import { yawRotatedBoxSize, type Vec3 } from '../shared/iso.js';
 import type { MaterialGroup, Primitive } from './primitives.js';
 
 export const PX_PER_UNIT = 128;
@@ -147,7 +148,29 @@ interface DrawGroup {
   mesh: Mesh;
 }
 
-function buildDrawGroups(prim: Primitive): { draws: DrawGroup[]; boxPlacement: boolean } {
+const Y_AXIS = new Vector3(0, 1, 0);
+
+/**
+ * Rotate a bake object (mesh or overlay group) by a slot's model yaw. The
+ * view slots turn the asset about the vertical axis and keep the camera in
+ * the fixed iso frame, so the baked passes are the world-space data of "the
+ * model stood rotated". `primSize` is the unrotated box; the rotated model
+ * is re-anchored so the rotated box's min corner sits back at the origin.
+ * Reads the object's current position as its unrotated anchor.
+ */
+export function applySlotModelRotation(obj: Object3D, primSize: Vec3, yawDeg: number): void {
+  const yaw = (yawDeg * Math.PI) / 180;
+  const c = new Vector3(primSize[0] / 2, primSize[1] / 2, primSize[2] / 2);
+  const s = yawRotatedBoxSize(primSize, yawDeg);
+  const c2 = new Vector3(s[0] / 2, s[1] / 2, s[2] / 2);
+  obj.rotation.y = yaw;
+  obj.position.sub(c).applyAxisAngle(Y_AXIS, yaw).add(c2);
+}
+
+function buildDrawGroups(
+  prim: Primitive,
+  yawDeg: number,
+): { draws: DrawGroup[]; boxPlacement: boolean } {
   if (!prim.groups) {
     // Legacy primitive: one flat-color draw, geometry centered at the box center.
     const group: MaterialGroup = {
@@ -159,6 +182,7 @@ function buildDrawGroups(prim: Primitive): { draws: DrawGroup[]; boxPlacement: b
     };
     const mesh = new Mesh(prim.geometry);
     mesh.position.set(prim.size[0] / 2, prim.size[1] / 2, prim.size[2] / 2);
+    applySlotModelRotation(mesh, prim.size, yawDeg);
     return { draws: [{ group, mesh }], boxPlacement: false };
   }
   // glTF groups: geometry is pre-normalized into the box (min corner at the
@@ -167,19 +191,31 @@ function buildDrawGroups(prim: Primitive): { draws: DrawGroup[]; boxPlacement: b
   const draws = prim.groups.map((group) => {
     const mesh = new Mesh(group.geometry);
     mesh.scale.setScalar(scale);
+    applySlotModelRotation(mesh, prim.size, yawDeg);
     return { group, mesh };
   });
   return { draws, boxPlacement: true };
 }
 
+/**
+ * Bake one pass set for the given source. `azimuthDeg` selects the view
+ * slot: north (45°) renders the asset as-is, E/S/W (135°/225°/315°) render
+ * the asset rotated about the vertical axis by the same 90° steps — the
+ * camera itself stays in the fixed iso frame, so the stored normals and
+ * depth are world-space data of the rotated asset (depth always measured
+ * along the fixed world view direction). `camera.azimuthDeg` in the result
+ * records the slot's view azimuth.
+ */
 export function bakePrimitive(
   prim: Primitive,
   pxPerUnit: number = PX_PER_UNIT,
   azimuthDeg: number = ISO_AZIMUTH_DEG,
 ): BakeResult {
   const r = getRenderer();
-  const frame = frameIsoBox(prim.size, pxPerUnit, PAD_PX, azimuthDeg);
-  const viewDir = isoDirection(azimuthDeg, ISO_ELEVATION_DEG);
+  const yawDeg = azimuthDeg - ISO_AZIMUTH_DEG;
+  const boxSize = yawRotatedBoxSize(prim.size, yawDeg);
+  const frame = frameIsoBox(boxSize, pxPerUnit, PAD_PX);
+  const viewDir = isoDirection(ISO_AZIMUTH_DEG, ISO_ELEVATION_DEG);
   const { width, height } = frame;
   if (width > MAX_SPRITE_PX || height > MAX_SPRITE_PX) {
     throw new Error(
@@ -195,7 +231,7 @@ export function bakePrimitive(
     depthBuffer: true,
   });
 
-  const { draws, boxPlacement } = buildDrawGroups(prim);
+  const { draws, boxPlacement } = buildDrawGroups(prim, yawDeg);
   const scene = new Scene();
   const materials: ShaderMaterial[] = [];
   for (const { group, mesh } of draws) {
@@ -205,7 +241,7 @@ export function bakePrimitive(
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
         uCubeMin: { value: new Vector3(0, 0, 0) },
-        uCubeMax: { value: new Vector3(prim.size[0], prim.size[1], prim.size[2]) },
+        uCubeMax: { value: new Vector3(boxSize[0], boxSize[1], boxSize[2]) },
         uViewDir: { value: viewDir.clone() },
         uAlbedoMap: { value: group.albedoTexture ?? WHITE_TEXEL },
         uFactor: { value: new Vector4(...group.baseColorFactor) },
@@ -237,7 +273,7 @@ export function bakePrimitive(
   return {
     id: prim.id,
     label: prim.label,
-    size: [prim.size[0], prim.size[1], prim.size[2]],
+    size: [boxSize[0], boxSize[1], boxSize[2]],
     width,
     height,
     pxPerUnit,

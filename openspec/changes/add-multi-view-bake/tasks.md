@@ -34,3 +34,13 @@
 
 - [x] 6.1 Extend `src/bake/scratch-verify.ts`: `/6` round trip with E/S/W entries, per-view azimuths and sprite rects, `/4`+`/5` open N-only, remove-view omission on next save, unknown-format rejection; run it and make it pass
 - [x] 6.2 Run `npm run build` (tsc + vite) and resolve all type errors; leave browser-only checks (batch viewport following, switcher interaction) noted for the user
+
+## 7. Model-rotation semantics (review correction)
+
+- [x] 7.1 Add `slotYawDeg` + `yawRotatedBoxSize` to `src/shared/iso.ts`; verify `npm run build`
+- [x] 7.2 `src/bake/bake.ts`: `applySlotModelRotation` helper; raster bake turns the model with the fixed camera (rotated clip box, depth along the fixed world view direction; `BakeResult.camera.azimuthDeg` keeps recording the slot's view azimuth)
+- [x] 7.3 `src/bake/pt.ts`: PT scene turns the model; frame frames the rotated box at the fixed camera, so the world-fixed environment lights the rotated asset
+- [x] 7.4 Realtime preview + its box overlay turn the model (`src/app/realtime.ts`); sprite-editor overlay and pixel-size preview project the rotated box from the fixed camera
+- [x] 7.5 `bundleView.ts`: decoded extra views carry the fixed world viewDir (per-view azimuth stays the slot marker)
+- [x] 7.6 Update the scratch-verify slot spike: rotated-model PT vs slot raster alignment + rotated-normal semantics assertions (original +z face stores world +x; no unrotated −x normal remains); `npm run build` + Node views-verify pass
+- [x] 7.7 Update proposal/design/spec wording to model-rotation semantics

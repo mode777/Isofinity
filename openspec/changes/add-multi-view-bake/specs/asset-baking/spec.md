@@ -65,7 +65,7 @@ the environment used for them (the `.hdr`/`.exr` file name within the
 workspace's `hdri/` folder, or a marker for the built-in procedural
 environment, plus rotation, intensity, exposure, and saturation). The
 manifest SHALL additionally record the stored views: for each, its slot
-(N/E/S/W) and its camera azimuth. The provenance SHALL be written on every
+(N/E/S/W) and its view azimuth. The provenance SHALL be written on every
 sprite save and updated on re-bake.
 
 #### Scenario: Model sprite records its source
@@ -74,7 +74,7 @@ sprite save and updated on re-bake.
   and E views and saves the sprite
 - **THEN** the saved manifest records the source as model `robot.glb` with
   scale 2, the path-trace settings used, the HDRI file name with its
-  environment settings, and both views with their slots and camera
+  environment settings, and both views with their slots and view
   azimuths
 
 #### Scenario: Primitive sprite records its source
@@ -83,7 +83,7 @@ sprite save and updated on re-bake.
   environment and saves the sprite
 - **THEN** the saved manifest records the source as the donut primitive,
   the environment as the procedural one, and the stored views with their
-  camera azimuths
+  view azimuths
 
 ### Requirement: Sprites re-bake from recorded provenance
 
@@ -139,24 +139,29 @@ reference.
 
 ## ADDED Requirements
 
-### Requirement: View slots rotate the bake camera in fixed 90° steps
+### Requirement: View slots rotate the view in fixed 90° steps
 
 The bake tool SHALL offer four fixed view slots per sprite document — N, E,
-S, W. N SHALL be the default slot and SHALL use the existing fixed
-isometric camera unchanged. E, S and W SHALL rotate that camera about the
-world's vertical axis through the asset box in successive 90° yaw steps in
-one fixed direction; elevation, orthographic projection, framing rules
-(padded projected box at the bake's pixels-per-unit) and the asset box
-itself SHALL stay identical across slots, so a slot's sprite rect is
-derived per slot and MAY differ in pixel dimensions between slots. A
-slot's g-buffer and render pass SHALL be baked against the same slot
-camera and stay pixel-aligned with each other.
+S, W. N SHALL be the default slot and SHALL show the asset unrotated. E, S
+and W SHALL present the asset rotated about the world's vertical axis
+through the asset box in successive 90° yaw steps in one fixed direction.
+Every slot SHALL render from the existing fixed isometric camera:
+elevation, orthographic projection, framing rules (padded projected box at
+the bake's pixels-per-unit) and the origin anchor stay unchanged, with each
+slot's sprite rect derived from its rotated box and MAY therefore differ in
+pixel dimensions between slots. The passes of every slot SHALL store the
+rotated asset's world-space data — g-buffer normals and depth as if the
+asset stood rotated in the world, and the render pass lit by the
+environment as placed — so a view can be used facing its direction without
+per-placement rotation. A slot's g-buffer and render pass SHALL be baked
+against the same slot presentation and stay pixel-aligned with each other.
 
-#### Scenario: East view rotates the camera a quarter turn
+#### Scenario: East view presents the model rotated a quarter turn
 
 - **WHEN** the user bakes the same source into the N and E slots
-- **THEN** the E slot's passes show the asset as seen from 90° of yaw away
-  from the N camera, with identical elevation and projection
+- **THEN** the E slot's passes show the asset as if rotated 90° about the
+  vertical axis relative to the N view, and its stored normals are the
+  rotated asset's world normals
 
 #### Scenario: Slot framing is derived per slot
 
@@ -254,7 +259,8 @@ An `isoinfinity-bake/6` bundle SHALL be a single zip containing the
 manifest plus, for every stored view, that view's g-buffer entry and —
 when produced — its render entry, each referenced from that view's record
 in the manifest. The manifest SHALL record per stored view: its slot
-(N/E/S/W), its camera azimuth, and its sprite rect (pixel dimensions,
+(N/E/S/W), its view azimuth (the slot's 90° step from north), and its
+sprite rect (pixel dimensions,
 origin, pixels-per-unit). A saved bundle with passes SHALL always contain
 the N view; E, S and W MAY be absent. The N view's pass entries SHALL keep
 the historical entry naming; additional views' entries SHALL be
@@ -265,7 +271,7 @@ single-view (N) sprites.
 
 - **WHEN** the user saves a document with N and E baked
 - **THEN** the bundle contains separate pass entries for each view and the
-  manifest records both views with their slots, camera azimuths and sprite
+  manifest records both views with their slots, view azimuths and sprite
   rects
 
 #### Scenario: Bundle without extra views stays north-only

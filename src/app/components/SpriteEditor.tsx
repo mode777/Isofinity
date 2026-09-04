@@ -165,14 +165,14 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
     );
     // Bounding-box overlay: box edges neutral, the three origin-adjacent
     // edges per axis, and a cross at the world origin — all in image
-    // pixels so they track zoom/pan with the sprite. Projected with the
-    // active slot's camera so the box matches the displayed view.
+    // pixels so they track zoom/pan with the sprite. The slot's baked box
+    // is the rotated model's (min corner re-anchored), projected from the
+    // fixed world camera.
     if (doc.boxOverlay && passes) {
       const proj = projectBoxFrame(
         passes.result.size as Vec3,
         passes.result.pxPerUnit,
         PAD_PX,
-        slotAzimuthDeg(slot),
       );
       const { zoom, panX, panY } = transform;
       const px = (p: [number, number]): number => panX + p[0] * zoom;

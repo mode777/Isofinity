@@ -19,10 +19,10 @@ import {
   WebGLRenderer,
   type Material,
 } from 'three';
-import { PAD_PX } from '../bake/bake.js';
+import { PAD_PX, applySlotModelRotation } from '../bake/bake.js';
 import { ISO_AZIMUTH_DEG, frameIsoBox } from '../bake/iso.js';
 import type { Primitive } from '../bake/primitives.js';
-import type { Vec3 } from '../shared/iso.js';
+import { yawRotatedBoxSize, type Vec3 } from '../shared/iso.js';
 import type { ViewTransform } from './document.js';
 
 /** Fixed realtime-view lighting (geometry inspection, not look matching). */
@@ -146,13 +146,17 @@ export class RealtimeMeshView {
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.outputColorSpace = SRGBColorSpace;
 
-    // Same camera frame as the bake: the view slot's iso direction, box
-    // center, frustum = the sprite extent plus the bake's padding.
-    const frame = frameIsoBox(prim.size, 128, PAD_PX, azimuthDeg);
+    // Same convention as the bake: the view slot turns the MODEL about the
+    // vertical axis while the camera stays in the fixed iso frame, so the
+    // preview shows the asset exactly as its non-north views bake it.
+    const yawDeg = azimuthDeg - ISO_AZIMUTH_DEG;
+    const boxSize = yawRotatedBoxSize(prim.size, yawDeg);
+    const frame = frameIsoBox(boxSize, 128, PAD_PX);
     this.camera = frame.camera;
     this.fitHalfW = (frame.camera.right - frame.camera.left) / 2;
     this.fitHalfH = (frame.camera.top - frame.camera.bottom) / 2;
-    this.center = new Vector3(prim.size[0] / 2, prim.size[1] / 2, prim.size[2] / 2);
+    const boxCenter = new Vector3(prim.size[0] / 2, prim.size[1] / 2, prim.size[2] / 2);
+    this.center = new Vector3(boxSize[0] / 2, boxSize[1] / 2, boxSize[2] / 2);
     this.basePos = frame.camera.position.clone();
     this.camRight = new Vector3().setFromMatrixColumn(frame.camera.matrixWorld, 0);
     this.camUp = new Vector3().setFromMatrixColumn(frame.camera.matrixWorld, 1);
@@ -170,7 +174,8 @@ export class RealtimeMeshView {
         metalness: 0,
       });
       const mesh = new Mesh(prim.geometry, material);
-      mesh.position.copy(this.center);
+      mesh.position.copy(boxCenter);
+      applySlotModelRotation(mesh, prim.size, yawDeg);
       this.materials.push(material);
       this.scene.add(mesh);
     } else {
@@ -190,12 +195,14 @@ export class RealtimeMeshView {
         });
         const mesh = new Mesh(group.geometry, material);
         mesh.scale.setScalar(scale);
+        applySlotModelRotation(mesh, prim.size, yawDeg);
         this.materials.push(material);
         this.scene.add(mesh);
       }
     }
 
     this.overlay = buildBoxOverlay(prim.size);
+    applySlotModelRotation(this.overlay, prim.size, yawDeg);
     this.overlay.visible = false;
     this.scene.add(this.overlay);
   }

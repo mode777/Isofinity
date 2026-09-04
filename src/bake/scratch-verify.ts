@@ -3,7 +3,8 @@
  * checks that cannot run in Node). Open /scratch-verify.html on the dev
  * server. Not part of the production build.
  */
-import { bakePrimitive, PAD_PX, type BakeResult } from './bake.js';
+import { bakePrimitive, PAD_PX, applySlotModelRotation, type BakeResult } from './bake.js';
+import { yawRotatedBoxSize } from '../shared/iso.js';
 import { buildBundle, parseBake } from './bundle.js';
 import { decodeBundle } from '../app/bundleView.js';
 import {
@@ -533,14 +534,20 @@ async function runPtSpike(): Promise<void> {
 }
 
 /**
- * Slot alignment: the path-traced render pass at a non-default slot's
- * camera must share the slot's sprite rect and coverage footprint with that
- * slot's raster g-buffer (per-view depth/viewDir agreement).
+ * Slot alignment + normal semantics: the e slot turns the model +90° about
+ * the vertical axis (camera fixed), so the path-traced render of the
+ * rotated model must share the slot's sprite rect and coverage footprint
+ * with the slot's raster g-buffer, and the stored normals must be the
+ * ROTATED model's world normals — not the unrotated model's (which would
+ * mean the camera was rotated instead).
  */
 async function runSlotAlignmentSpike(): Promise<void> {
   const PRIM = 128;
   const AZIMUTH = 135; // the e slot
-  const frame = frameIsoBox([1, 1, 1], PRIM, PAD_PX, AZIMUTH);
+  const yaw = AZIMUTH - 45;
+  const prim = getSlab(); // [2, 0.5, 1] — asymmetric, so rotation is visible
+  const boxSize = yawRotatedBoxSize(prim.size, yaw);
+  const frame = frameIsoBox(boxSize, PRIM, PAD_PX); // fixed world camera
   const w = frame.width;
   const h = frame.height;
 
@@ -549,8 +556,9 @@ async function runSlotAlignmentSpike(): Promise<void> {
   renderer.outputColorSpace = SRGBColorSpace;
 
   const scene = new Scene();
-  const mesh = new Mesh(getCube().geometry, new MeshStandardMaterial({ color: 0x4f9e5c }));
-  mesh.position.set(0.5, 0.5, 0.5);
+  const mesh = new Mesh(prim.geometry, new MeshStandardMaterial({ color: 0x4f9e5c }));
+  mesh.position.set(prim.size[0] / 2, prim.size[1] / 2, prim.size[2] / 2);
+  applySlotModelRotation(mesh, prim.size, yaw);
   scene.add(mesh);
   scene.background = null;
   const env = new GradientEquirectTexture(16);
@@ -560,12 +568,12 @@ async function runSlotAlignmentSpike(): Promise<void> {
   scene.environment = env;
   scene.environmentIntensity = 1;
 
-  log('test: PT slot alignment — e-slot camera matches the e-slot raster');
+  log('test: PT slot alignment + rotated-normal semantics (e slot)');
   const pt = spikePathTracer(renderer, scene, frame.camera);
   await accumulate(pt, 32);
   const read = readTarget(renderer, pt.target);
 
-  const raster = bakePrimitive(getCube(), PRIM, AZIMUTH);
+  const raster = bakePrimitive(prim, PRIM, AZIMUTH);
   ok(raster.camera.azimuthDeg === AZIMUTH && raster.width === w && raster.height === h,
     `raster e-slot bake shares the slot rect ${w}x${h}`);
   let massPt = 0;
@@ -591,6 +599,24 @@ async function runSlotAlignmentSpike(): Promise<void> {
   const centroidPx = Math.hypot(cxPt / massPt - cxRa / massRa, cyPt / massPt - cyRa / massRa);
   ok(relMass < 0.02, `e-slot coverage mass within 2% of raster (got ${(relMass * 100).toFixed(2)}%)`);
   ok(centroidPx < 1.5, `e-slot coverage centroid within 1.5 px of raster (got ${centroidPx.toFixed(2)} px)`);
+
+  // Normal semantics: the slab's original +z face must store the world +x
+  // normal, and the original -x face the world +z normal — the rotated
+  // model's frame. A stored (-1,0,0) would mean the camera was rotated
+  // instead of the model.
+  const seen = new Set<string>();
+  for (let y = 0; y < raster.height; y++) {
+    for (let x = 0; x < raster.width; x++) {
+      const s = sample(raster, x, y);
+      if (s.coverage > 0.999) {
+        seen.add([s.nx, s.ny, s.nz].map((v) => Math.round(v)).join(','));
+      }
+    }
+  }
+  ok(seen.has('1,0,0'), `original +z face stores world +x normal (got [${[...seen].join(' ')}])`);
+  ok(seen.has('0,0,1'), 'original -x face stores world +z normal');
+  ok(seen.has('0,1,0'), 'top face keeps world +y normal');
+  ok(!seen.has('-1,0,0'), 'no unrotated -x normal remains — the model rotated, not the camera');
 
   pt.dispose();
   renderer.dispose();

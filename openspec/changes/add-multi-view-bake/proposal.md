@@ -12,9 +12,12 @@ occlusion.
 
 ## What Changes
 
-- Four fixed view slots per sprite document — N, E, S, W — rotating the bake
-  camera about the vertical axis in 90° steps. N is the default slot and is
-  the existing camera; E/S/W add 90°/180°/270° of yaw. Elevation, projection
+- Four fixed view slots per sprite document — N, E, S, W — the model
+  rotated about the vertical axis in 90° steps while the bake camera stays
+  fixed. N is the default slot (unrotated); E/S/W present the asset turned
+  by 90°/180°/270°, with stored world-space data (normals, depth, lit
+  render) of the asset as if it stood rotated, so each view lights
+  correctly as a placement facing that direction. Elevation, projection
   and framing rules stay unchanged.
 - Each slot is baked individually with the existing render-pass action
   (implicit g-buffer re-bake + path-traced render) against the document's
