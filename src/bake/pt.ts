@@ -207,13 +207,15 @@ export interface PtRenderCallbacks {
   isCancelled?: () => boolean;
 }
 
-/** Per-animation-frame draw budget for tile rendering (pacing only). */
-const TICK_BUDGET_MS = 10;
 /** Minimum interval between live-preview readbacks. */
 const PREVIEW_INTERVAL_MS = 100;
 /** Long-axis cap of the live-preview image. */
 const PREVIEW_MAX_PX = 512;
-/** Without sample progress (or while compiling: excluded) a pass errors. */
+/**
+ * No-progress window before a pass errors: covers missing sample progress
+ * and a GPU fence pending far too long (a hung device). Shader compilation
+ * holds the window while active.
+ */
 const STALL_TIMEOUT_MS = 120_000;
 
 export class PtBaker {
@@ -308,11 +310,13 @@ export class PtBaker {
   }
 
   /**
-   * Accumulates the lit render pass over a tile grid, one or more tiles per
-   * animation frame within a wall-time budget, and returns its tone-mapped,
-   * sRGB bytes (GL readback order) — or null when cancelled. Requires an
-   * environment. Cancellation and disposal are checked between draw
-   * batches, so a superseded pass stops before its next draw.
+   * Accumulates the lit render pass over a tile grid and returns its
+   * tone-mapped, sRGB bytes (GL readback order) — or null when cancelled.
+   * Requires an environment. Submissions are paced by GPU completion: each
+   * animation frame polls a fence planted after the previous batch and only
+   * touches the GPU again once the queue has drained, so in-flight work
+   * stays bounded, no readback ever waits on queued draws, and a
+   * superseded pass stops before its next batch.
    */
   async renderPass(callbacks: PtRenderCallbacks = {}): Promise<PtImage | null> {
     const { onProgress, onPreview, isCancelled } = callbacks;
@@ -344,53 +348,112 @@ export class PtBaker {
 
     // Derived per pass from the frame size: the grid shapes the accumulated
     // bytes (the RNG state advances per tile draw), so it is deterministic
-    // per frame size and recorded in provenance. Pacing below groups tiles
-    // freely across frames — that never affects bytes.
+    // per frame size and recorded in provenance. Pacing below regroups
+    // tiles across frames — that never affects bytes.
     const tiles = tileGridFor(this.frame.width, this.frame.height);
     tracer.tiles.set(tiles, tiles);
     this.settings = { ...this.settings, tiles };
 
+    const gl = renderer.getContext() as WebGL2RenderingContext;
     const total = this.settings.samples;
+    const totalTiles = tiles * tiles;
+
+    // Pacing on GPU completion, never on submission time: WebGL draws
+    // queue asynchronously, so a wall-clock budget on submissions would
+    // queue the whole render up front and freeze the page at the next
+    // readback. One fence per batch tracks when the GPU has caught up;
+    // in-flight work is bounded by the batch, which adapts to GPU speed.
+    let batch = 1;
+    let inflight: WebGLSync | null = null;
+    let inflightT0 = 0;
+    let pendingFrames = 0;
     let stallT0 = performance.now();
     let reportedSamples = -1;
     let reportedCompiling = false;
     let lastPreview = -Infinity;
 
+    /** Non-blocking fence poll; reports how long the batch has been pending. */
+    const drainInflight = (): 'drained' | 'busy' => {
+      if (!inflight) return 'drained';
+      const status = gl.clientWaitSync(inflight, 0, 0);
+      if (status === gl.TIMEOUT_EXPIRED) {
+        pendingFrames += 1;
+        return 'busy';
+      }
+      gl.deleteSync(inflight);
+      inflight = null;
+      // WAIT_FAILED (lost context) reads as drained: the next draw surfaces
+      // the GL error through the normal error path.
+      return 'drained';
+    };
+
     await new Promise<void>((resolve, reject) => {
       const tick = () => {
         if (this.disposed || isCancelled?.()) return resolve();
-        const compiling = (tracer as CompilingTracer).isCompiling;
-        const samples = Math.min(total, Math.floor(tracer.samples));
         const now = performance.now();
-        // The guard watches for a pass that stops making progress; shader
-        // compilation blocks progress legitimately and holds the window.
-        if (compiling || samples !== reportedSamples) stallT0 = now;
-        if (samples !== reportedSamples || compiling !== reportedCompiling) {
+
+        if ((tracer as CompilingTracer).isCompiling) {
+          // Compilation blocks progress legitimately and holds the window.
+          stallT0 = now;
+          if (!reportedCompiling) {
+            reportedCompiling = true;
+            onProgress?.(Math.min(total, Math.floor(tracer.samples)), total, true);
+          }
+          requestAnimationFrame(tick);
+          return;
+        }
+        if (reportedCompiling) {
+          reportedCompiling = false;
+          reportedSamples = -1; // re-report the current count after compiling
+        }
+
+        if (drainInflight() === 'busy') {
+          // GPU still chewing the last batch: leave the frame free (never
+          // wait synchronously) and retry next frame.
+          if (now - inflightT0 > STALL_TIMEOUT_MS) {
+            reject(new Error('render pass stalled waiting for the GPU'));
+            return;
+          }
+          requestAnimationFrame(tick);
+          return;
+        }
+
+        // Adapt the batch to GPU speed: the last one drained within a frame
+        // -> grow; it needed two frames -> hold; more -> shrink.
+        if (pendingFrames === 0) batch = Math.min(batch * 2, totalTiles);
+        else if (pendingFrames > 1) batch = Math.max(1, batch >> 1);
+        pendingFrames = 0;
+
+        // Queue drained — progress, preview, and the next batch are all
+        // cheap here: a readback below never waits on queued work.
+        const samples = Math.min(total, Math.floor(tracer.samples));
+        if (samples !== reportedSamples) {
           reportedSamples = samples;
-          reportedCompiling = compiling;
-          onProgress?.(samples, total, compiling);
+          stallT0 = now;
+          onProgress?.(samples, total, false);
         }
         if (now - stallT0 > STALL_TIMEOUT_MS) {
           reject(new Error(`render pass stalled at ${samples} samples`));
           return;
         }
-        if (!compiling) {
-          const frameT0 = performance.now();
-          do {
-            tracer.renderSample();
-          } while (
-            !this.disposed &&
-            !isCancelled?.() &&
-            tracer.samples < total &&
-            performance.now() - frameT0 < TICK_BUDGET_MS
-          );
-          if (this.disposed || isCancelled?.()) return resolve();
-          if (onPreview && now - lastPreview >= PREVIEW_INTERVAL_MS) {
-            lastPreview = now;
-            onPreview(this.preview(tracer.target));
-          }
+        if (onPreview && now - lastPreview >= PREVIEW_INTERVAL_MS) {
+          lastPreview = now;
+          onPreview(this.preview(tracer.target));
         }
+
         if (tracer.samples >= total) return resolve();
+
+        const remainingTiles = Math.max(
+          1,
+          Math.ceil((total - tracer.samples) * totalTiles - 1e-4),
+        );
+        const count = Math.min(batch, remainingTiles);
+        for (let i = 0; i < count; i++) tracer.renderSample();
+        inflight = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        inflightT0 = now;
+        gl.flush();
+        pendingFrames = 0;
+
         requestAnimationFrame(tick);
       };
       requestAnimationFrame(tick);

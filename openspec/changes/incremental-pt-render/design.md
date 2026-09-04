@@ -55,19 +55,30 @@ worst case). The derived grid is stored into `PtSettings` at pass start
 manifest's render settings as `tiles: N` (grid is NxN). Parsers already
 tolerate unknown/missing fields; absence means "derive from frame size".
 
-### D2: rAF-driven loop with a wall-time budget; multiple tiles per frame
+### D2: rAF loop paced by GPU completion (fences), not submission time
 
-Each `requestAnimationFrame` tick: check the generation token, then call
-`tracer.renderSample()` repeatedly until a per-tick wall-time budget
-(~10 ms) is spent or the target sample count is reached. Rationale: one tile
-per rAF (the examples' pacing) multiplies minimum wall time by the grid —
-4096 samples at 8x8 would be ~9 min of pure pacing overhead; a time budget
-paces to the GPU's actual speed and never affects bytes (D1 invariant).
-`setTimeout(0)` is replaced outright (4 ms nesting clamp, no compositing
-alignment). The 120 s stall guard stays, with its timer reset while
-`tracer.isCompiling` is true (first-pass shader compile can take tens of
-seconds); while compiling, the status message says so and the loop keeps
-ticking.
+Each `requestAnimationFrame` tick polls a `fenceSync` planted after the
+previous batch of tile draws (`clientWaitSync` with timeout 0 — never
+blocking); only when the GPU has drained the queue does the tick report
+progress, refresh the preview, and submit the next batch: one tile,
+doubling up to one full sample per frame while the GPU keeps up (finished
+within one frame), holding or halving when batches run long. Rationale:
+**WebGL submissions are asynchronous** — the originally designed ~10 ms
+wall-time budget measured CPU submission time, which queued the entire
+render up front (the CPU-side sample counter reached the target in
+milliseconds) and froze the page for the whole pass at the next readback
+(observed in browser testing: status stuck at 0/N, one long block, then the
+finished image). Pacing on completion keeps in-flight GPU work bounded by
+one adaptive batch, so nothing ever blocks the main thread; preview and
+final readbacks — full pipeline syncs — run only on drained queues and are
+therefore cheap. Completion requires a drained queue, so the final
+full-resolution readback is instant. `setTimeout(0)` is replaced outright
+(4 ms nesting clamp, no compositing alignment). The 120 s stall guard
+covers two failure shapes: no sample progress, and a fence pending far too
+long (hung device); shader compilation (`tracer.isCompiling`) holds the
+window while active and the status message says "compiling shaders".
+Pacing only regroups tiles across frames — bytes are unaffected (D1
+invariant).
 
 ### D3: Preview = tonemap of the partial target into a small target
 

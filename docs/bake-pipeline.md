@@ -174,14 +174,17 @@ for anti-aliasing, so sprite edges converge to true AA.
   raster g-buffer; only display uses the render alpha.
 - **Accumulation**: the pass accumulates incrementally over a tile grid —
   the grid edge is a pure function of the frame pixel count (`tileGridFor`
-  in `src/bake/pt.ts`), and each animation frame draws tiles within a ~10 ms
-  wall-time budget, so no single GPU draw ever covers the whole frame and
-  the page stays responsive at any legal bake size. While samples
+  in `src/bake/pt.ts`) — and submissions are paced by GPU completion: each
+  animation frame polls a fence planted after the previous batch of tile
+  draws and only then submits the next batch (one tile, growing to at most
+  one full sample per frame while the GPU keeps up), so in-flight GPU work
+  stays bounded, no single draw covers the whole frame, and no submission
+  or readback ever blocks the page at any legal bake size. While samples
   accumulate, the sprite viewport shows a live preview: the same tonemap
-  applied to the partial accumulation at reduced resolution (~10 Hz); the
-  committed pass is the full-resolution tonemap and matches the converged
-  preview by construction. How tiles group across frames is pacing only and
-  never affects bytes — the grid itself does.
+  applied to the partial accumulation at reduced resolution (~10 Hz, only
+  on a drained queue); the committed pass is the full-resolution tonemap
+  and matches the converged preview by construction. How tiles group across
+  frames is pacing only and never affects bytes — the grid itself does.
 - **Illumination**: `scene.environment` (equirect `.hdr` via `HDRLoader`)
    is the sole light source, with rotation/intensity/exposure/saturation
    controls; changing any of them only updates document state — an in-flight
