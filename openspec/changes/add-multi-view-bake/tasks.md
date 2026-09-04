@@ -32,5 +32,5 @@
 
 ## 6. Verification
 
-- [ ] 6.1 Extend `src/bake/scratch-verify.ts`: `/6` round trip with E/S/W entries, per-view azimuths and sprite rects, `/4`+`/5` open N-only, remove-view omission on next save, unknown-format rejection; run it and make it pass
+- [x] 6.1 Extend `src/bake/scratch-verify.ts`: `/6` round trip with E/S/W entries, per-view azimuths and sprite rects, `/4`+`/5` open N-only, remove-view omission on next save, unknown-format rejection; run it and make it pass
 - [x] 6.2 Run `npm run build` (tsc + vite) and resolve all type errors; leave browser-only checks (batch viewport following, switcher interaction) noted for the user

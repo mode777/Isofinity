@@ -19,7 +19,7 @@ occlusion.
 - Each slot is baked individually with the existing render-pass action
   (implicit g-buffer re-bake + path-traced render) against the document's
   current source and settings.
-- The bake viewport gains a slot switcher in its top-right corner: one icon
+- The bake viewport gains a slot switcher in its top-left corner: one icon
   per slot, color-coded to show whether that slot already holds a baked
   render; switching slots swaps which view the viewport displays.
 - The sprite editor toolbar gains two actions:

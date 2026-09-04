@@ -119,7 +119,7 @@ per sprite, provenance/quarantine pain, no consumer for it.
 ### D5 — Switcher + toolbar
 
 Slot switcher: small React component overlaid in the sprite viewport's
-top-right (`SpriteEditor.tsx`), four letter icons in N,E,S,W order; fill
+top-left (`SpriteEditor.tsx`), four letter icons in N,E,S,W order; fill
 color = baked (`viewPasses(doc, slot) != null`) vs empty, active slot
 outlined; disabled when view-only and the slot has no stored passes (or
 while busy). Click → `setActiveSlot`. The box overlay and pixel-size

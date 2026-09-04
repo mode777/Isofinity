@@ -384,14 +384,13 @@ h2 {
   pointer-events: none;
 }
 
-/* Viewport corner overlays: the view-slot switcher (top-right corner), the
-   view switcher just below it, and the zoom cluster (bottom-right) share
-   one floating-panel look. */
+/* Viewport corner overlays: the view-slot switcher (top-left corner), the
+   view switcher (top-right) and the zoom cluster (bottom-right) share one
+   floating-panel look. */
 .slot-switcher,
 .view-controls,
 .zoom-controls {
   position: absolute;
-  right: 0.6rem;
   z-index: 2;
   display: flex;
   align-items: center;
@@ -404,6 +403,7 @@ h2 {
 
 .slot-switcher {
   top: 0.6rem;
+  left: 0.6rem;
 }
 
 /* One letter per view slot. Color shows whether the slot holds baked
@@ -429,7 +429,8 @@ h2 {
 }
 
 .view-controls {
-  top: 3.1rem;
+  top: 0.6rem;
+  right: 0.6rem;
 }
 
 .view-controls button,
@@ -444,6 +445,7 @@ h2 {
 
 .zoom-controls {
   bottom: 0.6rem;
+  right: 0.6rem;
 }
 
 .zoom-value {

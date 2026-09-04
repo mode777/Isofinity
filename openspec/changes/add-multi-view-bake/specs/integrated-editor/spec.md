@@ -139,7 +139,7 @@ document SHALL stay usable for an explicit re-render.
 
 ### Requirement: Sprite viewport view-slot switcher
 
-The sprite viewport SHALL show a view-slot switcher in its top-right
+The sprite viewport SHALL show a view-slot switcher in its top-left
 corner: one icon per view slot in fixed N, E, S, W order, labelled with
 the slot's direction. Each icon SHALL be color-coded to show whether that
 slot currently holds baked passes. Activating an icon SHALL select that
