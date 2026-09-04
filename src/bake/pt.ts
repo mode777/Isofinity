@@ -26,6 +26,13 @@ import type { MaterialGroup, Primitive } from './primitives.js';
 
 export { PT_NAME } from './pt-version.js';
 
+/**
+ * `WebGLPathTracer.isCompiling` exists in the pinned release's JavaScript (a
+ * getter over the internal path tracer) but is missing from its index.d.ts —
+ * read it through this narrowed view.
+ */
+type CompilingTracer = WebGLPathTracer & { readonly isCompiling: boolean };
+
 export interface PtSettings {
   /** Target accumulated sample count for the render pass. */
   samples: number;
@@ -35,6 +42,29 @@ export interface PtSettings {
   textureSize: number;
   /** Recorded in the manifest; the screen-space denoiser ships disabled. */
   denoise: boolean;
+  /**
+   * Tile-grid edge (the grid is N x N) derived from the frame size at pass
+   * start. Not user-editable and not preset material — the grid shapes the
+   * accumulated bytes, so it is recorded in provenance and re-derived
+   * (identically) on re-bake.
+   */
+  tiles?: number;
+}
+
+/** Per-tile GPU-work budget: a tile draws at most ~this many frame pixels. */
+const TILE_BUDGET_PX = 512 * 512;
+/** Tile-grid ceiling; bounds the per-sample draw count for the largest frames. */
+const TILE_GRID_MAX = 8;
+
+/**
+ * Tile-grid edge for a frame size — a pure function of the pixel count, so
+ * the same frame always renders (and re-bakes) with the same grid: the
+ * accumulated bytes depend on the grid, never on how tiles are grouped
+ * across animation frames.
+ */
+export function tileGridFor(width: number, height: number): number {
+  const px = Math.max(1, width) * Math.max(1, height);
+  return Math.min(TILE_GRID_MAX, Math.max(1, Math.ceil(Math.sqrt(px / TILE_BUDGET_PX))));
 }
 
 export const DEFAULT_PT_SETTINGS: PtSettings = {
@@ -151,8 +181,6 @@ function fallbackMaterialForGroup(group: MaterialGroup): MeshStandardMaterial {
   return material;
 }
 
-const yieldFrame = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
-
 let sharedRenderer: WebGLRenderer | null = null;
 
 /** One WebGL context for the page; sized per bake (PT targets follow it). */
@@ -165,6 +193,29 @@ function getRenderer(): WebGLRenderer {
   return sharedRenderer;
 }
 
+/** Callbacks driving an accumulating render pass. */
+export interface PtRenderCallbacks {
+  /**
+   * Sample progress, reported when the completed-sample count or the
+   * compiling state changes. `samples` is floored — the library's counter
+   * advances fractionally within a sample while tiles render.
+   */
+  onProgress?: (samples: number, total: number, compiling: boolean) => void;
+  /** Throttled low-res tonemap of the partial accumulation (live preview). */
+  onPreview?: (image: PtImage) => void;
+  /** Checked before every draw batch; a true return cancels the pass. */
+  isCancelled?: () => boolean;
+}
+
+/** Per-animation-frame draw budget for tile rendering (pacing only). */
+const TICK_BUDGET_MS = 10;
+/** Minimum interval between live-preview readbacks. */
+const PREVIEW_INTERVAL_MS = 100;
+/** Long-axis cap of the live-preview image. */
+const PREVIEW_MAX_PX = 512;
+/** Without sample progress (or while compiling: excluded) a pass errors. */
+const STALL_TIMEOUT_MS = 120_000;
+
 export class PtBaker {
   private scene = new Scene();
   private frame: IsoFrame;
@@ -174,6 +225,10 @@ export class PtBaker {
 
   private tracer: WebGLPathTracer | null = null;
   private sceneDirty = true;
+  /** Set by dispose(); the running pass checks it between draw batches. */
+  private disposed = false;
+  private previewTarget: WebGLRenderTarget | null = null;
+  private previewPixels: Uint8Array | null = null;
 
   private tonemapMaterial: ShaderMaterial;
   private tonemapQuad: FullScreenQuad;
@@ -200,6 +255,11 @@ export class PtBaker {
 
   get height(): number {
     return this.frame.height;
+  }
+
+  /** The tile grid derived for the last (or running) pass; null before one. */
+  get tileGrid(): number | null {
+    return this.settings.tiles ?? null;
   }
 
   /** Rebuilds the PT scene for a new source; the next pass regenerates. */
@@ -248,12 +308,14 @@ export class PtBaker {
   }
 
   /**
-   * Accumulates the lit render pass and returns its tone-mapped, sRGB
-   * bytes (GL readback order). Requires an environment.
+   * Accumulates the lit render pass over a tile grid, one or more tiles per
+   * animation frame within a wall-time budget, and returns its tone-mapped,
+   * sRGB bytes (GL readback order) — or null when cancelled. Requires an
+   * environment. Cancellation and disposal are checked between draw
+   * batches, so a superseded pass stops before its next draw.
    */
-  async renderPass(
-    onProgress?: (samples: number, total: number) => void,
-  ): Promise<PtImage> {
+  async renderPass(callbacks: PtRenderCallbacks = {}): Promise<PtImage | null> {
+    const { onProgress, onPreview, isCancelled } = callbacks;
     if (!this.env.texture) {
       throw new Error('render pass needs an HDRI environment — load one first');
     }
@@ -270,7 +332,6 @@ export class PtBaker {
     tracer.renderToCanvas = false;
     tracer.rasterizeScene = false;
     tracer.textureSize = new Vector2(this.settings.textureSize, this.settings.textureSize);
-    tracer.tiles.set(1, 1);
 
     if (this.sceneDirty) {
       tracer.setScene(this.scene, this.frame.camera);
@@ -281,22 +342,66 @@ export class PtBaker {
     }
     tracer.reset();
 
-    const t0 = performance.now();
-    while (tracer.samples < this.settings.samples) {
-      if (performance.now() - t0 > 120_000) {
-        throw new Error(`render pass stalled at ${tracer.samples} samples`);
-      }
-      tracer.renderSample();
-      onProgress?.(tracer.samples, this.settings.samples);
-      await yieldFrame();
-    }
+    // Derived per pass from the frame size: the grid shapes the accumulated
+    // bytes (the RNG state advances per tile draw), so it is deterministic
+    // per frame size and recorded in provenance. Pacing below groups tiles
+    // freely across frames — that never affects bytes.
+    const tiles = tileGridFor(this.frame.width, this.frame.height);
+    tracer.tiles.set(tiles, tiles);
+    this.settings = { ...this.settings, tiles };
 
+    const total = this.settings.samples;
+    let stallT0 = performance.now();
+    let reportedSamples = -1;
+    let reportedCompiling = false;
+    let lastPreview = -Infinity;
+
+    await new Promise<void>((resolve, reject) => {
+      const tick = () => {
+        if (this.disposed || isCancelled?.()) return resolve();
+        const compiling = (tracer as CompilingTracer).isCompiling;
+        const samples = Math.min(total, Math.floor(tracer.samples));
+        const now = performance.now();
+        // The guard watches for a pass that stops making progress; shader
+        // compilation blocks progress legitimately and holds the window.
+        if (compiling || samples !== reportedSamples) stallT0 = now;
+        if (samples !== reportedSamples || compiling !== reportedCompiling) {
+          reportedSamples = samples;
+          reportedCompiling = compiling;
+          onProgress?.(samples, total, compiling);
+        }
+        if (now - stallT0 > STALL_TIMEOUT_MS) {
+          reject(new Error(`render pass stalled at ${samples} samples`));
+          return;
+        }
+        if (!compiling) {
+          const frameT0 = performance.now();
+          do {
+            tracer.renderSample();
+          } while (
+            !this.disposed &&
+            !isCancelled?.() &&
+            tracer.samples < total &&
+            performance.now() - frameT0 < TICK_BUDGET_MS
+          );
+          if (this.disposed || isCancelled?.()) return resolve();
+          if (onPreview && now - lastPreview >= PREVIEW_INTERVAL_MS) {
+            lastPreview = now;
+            onPreview(this.preview(tracer.target));
+          }
+        }
+        if (tracer.samples >= total) return resolve();
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+
+    if (this.disposed || isCancelled?.()) return null;
     return this.tonemap(tracer.target);
   }
 
   /** ACES tonemap + sRGB encode into RGBA8, readback in GL order. */
   private tonemap(source: WebGLRenderTarget): PtImage {
-    const renderer = getRenderer();
     const w = source.width;
     const h = source.height;
     const target = new WebGLRenderTarget(w, h, {
@@ -306,20 +411,60 @@ export class PtBaker {
       magFilter: NearestFilter,
       depthBuffer: false,
     });
-    this.tonemapMaterial.uniforms.uMap.value = source.texture;
-    renderer.setRenderTarget(target);
-    this.tonemapQuad.render(renderer);
+    this.tonemapInto(source, target);
     const rgba = new Uint8Array(w * h * 4);
-    renderer.readRenderTargetPixels(target, 0, 0, w, h, rgba);
-    renderer.setRenderTarget(null);
+    getRenderer().readRenderTargetPixels(target, 0, 0, w, h, rgba);
     target.dispose();
-    this.tonemapMaterial.uniforms.uMap.value = null;
     return { width: w, height: h, rgba };
   }
 
+  /**
+   * Downsampled tonemap of the partial accumulation for the live preview:
+   * the same shader at preview resolution, read back into a reused buffer
+   * and copied per frame (each image lands in store state as owned data).
+   */
+  private preview(source: WebGLRenderTarget): PtImage {
+    const long = Math.max(source.width, source.height);
+    const scale = Math.min(1, PREVIEW_MAX_PX / long);
+    const w = Math.max(1, Math.round(source.width * scale));
+    const h = Math.max(1, Math.round(source.height * scale));
+    if (
+      !this.previewTarget ||
+      this.previewTarget.width !== w ||
+      this.previewTarget.height !== h
+    ) {
+      this.previewTarget?.dispose();
+      this.previewTarget = new WebGLRenderTarget(w, h, {
+        format: RGBAFormat,
+        type: UnsignedByteType,
+        minFilter: LinearFilter,
+        magFilter: LinearFilter,
+        depthBuffer: false,
+      });
+      this.previewPixels = new Uint8Array(w * h * 4);
+    }
+    this.tonemapInto(source, this.previewTarget);
+    const rgba = this.previewPixels!;
+    getRenderer().readRenderTargetPixels(this.previewTarget, 0, 0, w, h, rgba);
+    return { width: w, height: h, rgba: rgba.slice() };
+  }
+
+  private tonemapInto(source: WebGLRenderTarget, target: WebGLRenderTarget): void {
+    const renderer = getRenderer();
+    this.tonemapMaterial.uniforms.uMap.value = source.texture;
+    renderer.setRenderTarget(target);
+    this.tonemapQuad.render(renderer);
+    renderer.setRenderTarget(null);
+    this.tonemapMaterial.uniforms.uMap.value = null;
+  }
+
   dispose(): void {
+    this.disposed = true;
     this.tracer?.dispose();
     this.tracer = null;
+    this.previewTarget?.dispose();
+    this.previewTarget = null;
+    this.previewPixels = null;
     this.tonemapQuad.dispose();
     this.tonemapMaterial.dispose();
   }

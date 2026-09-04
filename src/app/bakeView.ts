@@ -15,7 +15,7 @@ export const VIEW_MODES: BakeViewMode[] = ['realtime', 'normals', 'depth', 'rend
 const FALLBACK_ORDER: BakeViewMode[] = ['realtime', 'render', 'normals', 'depth'];
 
 export function viewAvailability(
-  doc: Pick<BakeDocument, 'source' | 'gltf' | 'result' | 'render'>,
+  doc: Pick<BakeDocument, 'source' | 'gltf' | 'result' | 'render' | 'busy'>,
 ): BakeViewAvailability {
   const realtime =
     doc.source !== null &&
@@ -24,7 +24,9 @@ export function viewAvailability(
     realtime,
     normals: doc.result !== null,
     depth: doc.result !== null,
-    render: doc.render !== null,
+    // Available while a pass accumulates: the render view shows the live
+    // preview (possibly an empty canvas until the first preview lands).
+    render: doc.render !== null || doc.busy,
   };
 }
 
@@ -66,7 +68,9 @@ export function viewPlaceholder(
 }
 
 /** The view the viewport displays: the stored choice, else the default. */
-export function resolvedView(doc: Pick<BakeDocument, 'view' | 'source' | 'gltf' | 'result' | 'render'>): BakeViewMode {
+export function resolvedView(
+  doc: Pick<BakeDocument, 'view' | 'source' | 'gltf' | 'result' | 'render' | 'busy'>,
+): BakeViewMode {
   if (doc.view !== null) return doc.view;
   const avail = viewAvailability(doc);
   for (const mode of FALLBACK_ORDER) {

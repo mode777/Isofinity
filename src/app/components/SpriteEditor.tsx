@@ -93,12 +93,16 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
       });
     }
     if (view === 'render') {
-      return doc.render
-        ? rgbaBytesToCanvas(doc.render.rgba, doc.render.width, doc.render.height)
+      // While a pass accumulates, the live preview stands in for the
+      // committed render so the image converges visibly; it never alters
+      // the stored pass.
+      const shown = doc.busy && doc.preview ? doc.preview : doc.render;
+      return shown
+        ? rgbaBytesToCanvas(shown.rgba, shown.width, shown.height)
         : null;
     }
     return null;
-  }, [doc.result, doc.render, view]);
+  }, [doc.result, doc.render, doc.preview, doc.busy, view]);
 
   // Zoom/pan: the active view's stored transform, or its default (the 2D
   // fit / the realtime framing). Stored per view — the views use different

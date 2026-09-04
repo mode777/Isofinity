@@ -102,6 +102,12 @@ export interface BakeProvenance {
     samples: number;
     bounces: number;
     textureSize: number;
+    /**
+     * Tile-grid edge (grid is N x N) the render pass accumulated over —
+     * present when the producing tool derived it; re-bakes re-derive it
+     * from the frame size when absent (older manifests).
+     */
+    tiles?: number;
   };
   environment:
     | { procedural: true }

@@ -116,6 +116,7 @@ function baseBakeDoc(title: string): BakeDocument {
     settings: { ...DEFAULT_PT_SETTINGS },
     result: null,
     render: null,
+    preview: null,
     notes: [],
     bundleBytes: null,
     provenance: null,
@@ -219,6 +220,7 @@ async function offerSpecGlossFix(fileName: string, key: string): Promise<boolean
         d.gltf = source;
         d.result = null;
         d.render = null;
+        d.preview = null;
         d.bundleBytes = null;
         d.notes = [];
       });
@@ -421,6 +423,7 @@ function invalidateRunningRender(): void {
   renderingDocId = null;
   update(docId, (d) => {
     d.busy = false;
+    d.preview = null;
   });
 }
 
@@ -429,9 +432,11 @@ function invalidateRunningRender(): void {
  * action. It implicitly (re)bakes the raster g-buffer first, so both passes
  * are current with the document's source and settings and stay
  * pixel-aligned; the raster draw is synchronous and its status line
- * precedes the render progress. Safe to invoke while another accumulation
- * runs: the new run resets the tracer for the current settings and the
- * stale run's commit is discarded by its generation token.
+ * precedes the render progress. The accumulation runs incrementally over a
+ * tile grid with a live preview in the viewport. Safe to invoke while
+ * another accumulation runs: the new run resets the tracer for the current
+ * settings and the stale run stops before its next tile draw, its commit
+ * discarded by its generation token.
  */
 export async function runRenderPass(docId: string): Promise<void> {
   const doc = bakeDoc(docId);
@@ -440,6 +445,10 @@ export async function runRenderPass(docId: string): Promise<void> {
   renderingDocId = docId;
   update(docId, (d) => {
     d.busy = true;
+    d.preview = null;
+    // The accumulating pass is the thing to watch: switch to the render
+    // view up front so the image converges visibly (editor-only state).
+    d.view = 'render';
   });
   try {
     // The render pass implies a fresh g-buffer: bake it first (a
@@ -452,16 +461,34 @@ export async function runRenderPass(docId: string): Promise<void> {
     b.applySettings(baked.settings);
     b.setEnvironment(baked.ptEnv);
     b.setPrimitive(primitiveFor(baked), baked.result.pxPerUnit);
-    const image = await b.renderPass((samples, total) => {
-      if (gen === renderGen) {
-        ed().setStatus(`${baked.title}: rendering ${samples}/${total} samples…`);
-      }
+    const image = await b.renderPass({
+      onProgress: (samples, total, compiling) => {
+        if (gen === renderGen) {
+          ed().setStatus(
+            compiling
+              ? `${baked.title}: compiling shaders…`
+              : `${baked.title}: rendering ${samples}/${total} samples…`,
+          );
+        }
+      },
+      onPreview: (img) => {
+        if (gen === renderGen) {
+          update(docId, (d) => {
+            d.preview = img;
+          });
+        }
+      },
+      isCancelled: () => gen !== renderGen,
     });
-    if (gen !== renderGen) return;
+    if (gen !== renderGen || !image) return;
     update(docId, (d) => {
       d.render = image;
-      // A finished render pass is the freshest thing to look at — always
-      // bring it up (editor-only state; does not affect dirty).
+      d.preview = null;
+      // Mirror the derived tile grid into the settings so provenance
+      // records the grid this pass actually used.
+      if (b.tileGrid !== null) d.settings = { ...d.settings, tiles: b.tileGrid };
+      // A finished render pass is the freshest thing to look at — stay on
+      // it (editor-only state; does not affect dirty).
       d.view = 'render';
     });
     ed().markDirty(docId);
@@ -478,6 +505,7 @@ export async function runRenderPass(docId: string): Promise<void> {
       renderingDocId = null;
       update(docId, (d) => {
         d.busy = false;
+        d.preview = null;
       });
     }
   }
@@ -671,6 +699,7 @@ function provenanceOf(doc: BakeDocument): BakeProvenance | null {
       samples: doc.settings.samples,
       bounces: doc.settings.bounces,
       textureSize: doc.settings.textureSize,
+      tiles: doc.settings.tiles,
     },
     environment: environmentOf(doc),
   };
@@ -875,9 +904,12 @@ export async function bakePrimitiveLayer(primitive: PrimitiveKind): Promise<Spri
     baker.applySettings(settings);
     baker.setEnvironment(proceduralEnvironment());
     baker.setPrimitive(prim, result.pxPerUnit);
-    const render = await baker.renderPass((samples, total) => {
-      ed().setStatus(`Baking ${primitive} brush: ${samples}/${total} samples…`);
+    const render = await baker.renderPass({
+      onProgress: (samples, total) => {
+        ed().setStatus(`Baking ${primitive} brush: ${samples}/${total} samples…`);
+      },
     });
+    if (!render) throw new Error('primitive brush bake was cancelled');
     return {
       id: result.id,
       pxPerUnit: result.pxPerUnit,

@@ -172,6 +172,16 @@ for anti-aliasing, so sprite edges converge to true AA.
   antialiased coverage. Note it is *softer* than the raster pass's hard
   0/1 g-buffer emptiness: occlusion and hit-testing keep consuming the
   raster g-buffer; only display uses the render alpha.
+- **Accumulation**: the pass accumulates incrementally over a tile grid —
+  the grid edge is a pure function of the frame pixel count (`tileGridFor`
+  in `src/bake/pt.ts`), and each animation frame draws tiles within a ~10 ms
+  wall-time budget, so no single GPU draw ever covers the whole frame and
+  the page stays responsive at any legal bake size. While samples
+  accumulate, the sprite viewport shows a live preview: the same tonemap
+  applied to the partial accumulation at reduced resolution (~10 Hz); the
+  committed pass is the full-resolution tonemap and matches the converged
+  preview by construction. How tiles group across frames is pacing only and
+  never affects bytes — the grid itself does.
 - **Illumination**: `scene.environment` (equirect `.hdr` via `HDRLoader`)
    is the sole light source, with rotation/intensity/exposure/saturation
    controls; changing any of them only updates document state — an in-flight
@@ -194,12 +204,18 @@ for anti-aliasing, so sprite edges converge to true AA.
   requirement) and repacked into a texture array capped by the
   `tex-size` setting (default 1024) — larger albedo maps downscale.
 - **Determinism**: the library resets its RNG seed per bake and seeds per
-  sample. A fixed settings set reproduces a bake bit-for-bit on the same
-  hardware/driver; cross-GPU byte equality is not a goal.
+  sample, and its stratified state advances once per tile draw — so the
+  bytes depend on the sample count and the tile grid (derived per frame
+  size, recorded in provenance; pacing never matters). A fixed settings set
+  reproduces a bake bit-for-bit on the same hardware/driver; cross-GPU byte
+  equality is not a goal.
 - **Manifest provenance**: when the render pass is included, the manifest
   records an `environment` block (hdri name, rotation, intensity, exposure,
-  saturation) and a `renderer` block (name/version, samples, bounces,
-  denoise, seed) so a bake is reproducible from its bundle.
+  saturation), a `renderer` block (name/version, samples, bounces, denoise,
+  seed), and — in the `provenance` block — the path-trace settings including
+  the derived tile grid (`bake.tiles`; absent in older manifests, where
+  re-bakes re-derive it from the frame size) so a bake is reproducible from
+  its bundle.
 
 ### Sprite placement
 
@@ -221,7 +237,9 @@ entries — the parser resolves only the g-buffer and optional render entries
 and ignores the rest, so old bundles keep loading unchanged; the g-buffer
 EXR keeps the v3 byte conventions exactly). v5 adds the editor-facing
 `provenance` block: the bake source (a primitive name, or a workspace model
-file name + uniform scale), the path-trace settings, and the environment (a
+file name + uniform scale), the path-trace settings (sample count, bounces,
+texture size, and the render pass's derived tile grid once one has run),
+and the environment (a
 `procedural` marker or an `hdri/` file name + parameters) — so the
 integrated editor can re-open a sprite editable and re-bake it in place.
 v5 without a `provenance` block is valid; the editor then opens it

@@ -96,6 +96,12 @@ export interface BakeDocument {
   settings: PtSettings;
   result: BakeResult | null;
   render: PtImage | null;
+  /**
+   * Live preview of an in-flight render pass (low-res, partial
+   * accumulation). Editor-only state — never written into bundles; the
+   * viewport shows it in place of the committed render while `busy`.
+   */
+  preview: PtImage | null;
   /** Notes about skipped glTF content for the current source. */
   notes: string[];
   /**
