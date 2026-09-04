@@ -2,9 +2,10 @@
 
 How Isofinity assets are authored: a primitive (or a glTF model) is rendered
 from the fixed isometric camera into per-pixel data passes and stored as a
-sprite set plus a manifest. Two renderers produce passes over the **same
-scene and camera**: a raster draw (merged g-buffer: normals + depth) and a
-GPU path tracer (`three-gpu-pathtracer`) for the optional lit `render` pass.
+sprite set plus a manifest (format `isoinfinity-bake/6`, multi-view). Two
+renderers produce passes over the **same scene and camera**: a raster draw
+(merged g-buffer: normals + depth) and a GPU path tracer
+(`three-gpu-pathtracer`) for the optional lit `render` pass.
 
 Run `npm run dev` and open the integrated editor (`index.html`). Open a
 primitive or model from the **project browser** (or "Import glTF file…")
@@ -45,6 +46,13 @@ everything falls back to file dialogs and downloads exactly as before
   cube have pixel slope `sin(elevation)` = `sin(30°)` = 0.5 — the exact 2:1
   tile grid of classic isometric games — and the world +Y axis stays exactly
   vertical on screen. Constants: `src/bake/iso.ts`.
+- **View slots**: multi-view bakes render N/E/S/W (`VIEW_SLOTS`,
+  `src/shared/iso.ts`) at 90° azimuth steps — but always from this one
+  fixed camera: non-N slots present the model yaw-rotated about the
+  vertical axis and re-anchored to the origin, so stored normals, depth,
+  and environment lighting belong to the rotated model's world frame (each
+  view bakes exactly as the turned asset would stand in the world). Why:
+  `docs/decisions/0005-multi-view-rotates-the-model-not-the-camera.md`.
 - The sprite rect is computed by projecting the 8 corners of the unit cube
   into view space — no hand-tuned dimensions; any camera angle keeps working.
 
@@ -157,6 +165,25 @@ planned KTX2/UASTC delivery would carry.
 - Row order: GL readback is bottom-up; PNG gets flipped to top-down, EXR
   does not (the exporter compensates for GL order internally).
 
+### View slots (multi-view bakes)
+
+A bake covers one view slot; the sprite editor can bake up to four
+(N/E/S/W) per document. Each slot produces its own pass pair over the same
+fixed camera with the model yaw-rotated (see Camera above):
+
+- Slot → passes: N keeps the historical top-level result/`<id>-*` zip
+  entries; E/S/W store beside it (manifest `views` table, entries
+  `<id>-<slot>-gbuffer.exr` / `<id>-<slot>-render.png`).
+- Provenance (source, path-trace settings, environment) is
+  **view-independent** — all slots share it, so re-bakes reproduce every
+  stored slot.
+- **Bake All** runs the per-slot render action (implicit g-buffer re-bake +
+  PT render) sequentially over N→E→S→W; a failed slot ends the batch with
+  its named error and earlier slots keep their passes. Changing settings
+  mid-batch discards the in-flight pass and stops the loop.
+- Worlds consume only the N view today; placing non-N views (placement
+  orientation) is planned (`docs/roadmap.md`).
+
 ### Path-traced pass (`render`)
 
 The path tracer (`three-gpu-pathtracer`, WebGL2 + BVH; see `src/bake/pt.ts`)
@@ -232,21 +259,41 @@ moves quad size + sprite texel size into per-instance attributes.
 
 ### Manifest (`<id>-bake.json`)
 
+Format history (the parser accepts `/4`, `/5`, `/6`; anything else is
+rejected by name):
+
+| Format | Delta | Parser tolerance |
+| ------ | ----- | ---------------- |
+| `/1`–`/3` | Early loose-file eras; `/3` fixed the g-buffer EXR byte conventions still in force | not accepted |
+| `/4` | Single-file `.sprite` zip; albedo PNG ships alongside the g-buffer (ao appears in path-traced-era manifests) | loads; albedo/ao entries ignored |
+| `/5` | Albedo/ao passes removed (ADR 0002); `provenance` block added | loads N-only; without `provenance` → view-only |
+| `/6` | Multi-view: optional `views[]` table + per-slot zip entries (ADR 0005) | loads; extra views decode into the editor's slot set |
+
 Records camera angles and view direction, `pxPerUnit`, sprite size, origin,
 depth semantics/range and per-pass channel semantics
-(`format: "isoinfinity-bake/5"`; v4 and earlier stored an albedo PNG
-alongside the g-buffer and their manifests may still record albedo/ao pass
-entries — the parser resolves only the g-buffer and optional render entries
-and ignores the rest, so old bundles keep loading unchanged; the g-buffer
-EXR keeps the v3 byte conventions exactly). v5 adds the editor-facing
-`provenance` block: the bake source (a primitive name, or a workspace model
-file name + uniform scale), the path-trace settings (sample count, bounces,
-texture size, and the render pass's derived tile grid once one has run),
-and the environment (a
+(`format: "isoinfinity-bake/6"`; the history and tolerance table above —
+v4 and earlier stored an albedo PNG alongside the g-buffer and their
+manifests may still
+record albedo/ao pass entries — the parser resolves only the g-buffer and
+optional render entries and ignores the rest, so old bundles keep loading
+unchanged; the g-buffer EXR keeps the v3 byte conventions exactly). The
+editor-facing `provenance` block (added in `/5`) records the bake source (a
+primitive name, or a workspace model file name + uniform scale), the
+path-trace settings (sample count, bounces, texture size, and the render
+pass's derived tile grid once one has run), and the environment (a
 `procedural` marker or an `hdri/` file name + parameters) — so the
 integrated editor can re-open a sprite editable and re-bake it in place.
-v5 without a `provenance` block is valid; the editor then opens it
-view-only.
+`/5` and later without a `provenance` block is valid; the editor then opens
+it view-only.
+
+`/6` adds one optional field: `views[]`, the table of stored view slots
+(always including `n`, whose entry mirrors the top-level camera/sprite/
+passes data so the table is the authoritative view list). Each entry holds
+`slot`, the slot's view `azimuthDeg`, its `sprite` rect + origin, and its
+`passes` table; extra views' zip entries are named
+`<id>-<slot>-gbuffer.exr` / `<id>-<slot>-render.png`. Top-level fields stay
+the N view's data, so a `/5`-era reader can still consume the N view of a
+`/6` bundle.
 
 ### Bundle (`<id>.sprite`)
 
@@ -259,23 +306,27 @@ the parser never looked at extensions:
 
 ```
 <id>.sprite
-├─ manifest.json          deflated
-├─ <id>-gbuffer.exr       deflated (raw float + zero padding compress well)
-└─ <id>-render.png        stored, when baked
+├─ manifest.json                  deflated
+├─ <id>-gbuffer.exr               deflated (raw float + zero padding compress well)
+├─ <id>-render.png                stored, when baked
+├─ <id>-<slot>-gbuffer.exr        deflated, per non-N stored view slot (/6)
+└─ <id>-<slot>-render.png         stored, per non-N stored view slot (/6)
 ```
 
-Entry names are exactly the file names the manifest's `passes` table
-references, and the parts are byte-identical to the loose passes — the
-container is pure transport, so any zip tool opens it and each pass stays
-individually diffable. Entries carry a fixed mtime so re-baking the same
-primitive with the same settings yields identical bytes. `parseBake()`
+Entry names are exactly the file names the manifest's `passes`/`views`
+tables reference, and the parts are byte-identical to the loose passes —
+the container is pure transport, so any zip tool opens it and each pass
+stays individually diffable. Entries carry a fixed mtime so re-baking the
+same primitive with the same settings yields identical bytes. `parseBake()`
 (`src/bake/bundle.ts`) is the matching reader: unzip, validate the `format`
-prefix (`/4` and `/5` accepted, anything else rejected by name), resolve
-entries via the manifest — the g-buffer entry is required, the render entry
-is optional, and legacy albedo/ao entries are ignored — and expose which
-optional passes are present plus the `provenance` block when recorded. The
+prefix (`/4`, `/5` and `/6` accepted, anything else rejected by name),
+resolve entries via the manifest — the g-buffer entry is required, the
+render entry is optional, and legacy albedo/ao entries are ignored — and
+expose which optional passes are present plus the `provenance` block when
+recorded (`/6` also exposes the extra views' blobs for `decodeBundle`). The
 integrated editor consumes bundles through the project browser's
-`sprites/` listing.
+`sprites/` listing. Container conventions:
+`docs/decisions/0004-single-file-sprite-zip-container.md`.
 
 ### Bake setting presets (`presets/<name>.json`)
 
@@ -301,47 +352,5 @@ drag-drop.
 
 ## Current state / next steps
 
-- Done: sphere, donut, cube, cylinder, capsule, plane and slab (2×0.5×1)
-  test primitives, box-frame camera math (arbitrary cuboids), raster bake
-  (merged g-buffer), PNG + EXR export, single-file zip bundle, debug
-  position dump, manifest, visual pass preview.
-- Done: glTF sources (`.glb` and `.gltf` + `.bin` + textures) — static
-  meshes only, per-material merged draw groups, alpha-mask coverage,
-  origin normalization with a UI uniform-scale control, compressed-payload
-  rejection, same bundle output. `scratch-verify.html` (dev server)
-  exercises the GPU-side checks and prints primitive bundle hashes (note:
-  the albedo/ao pass removal changed all hashes — re-baseline before
-  comparing across format versions).
-- Done: path-traced `render` pass (`three-gpu-pathtracer` 0.0.24) over the
-  same ortho camera — HDRI environments with rotation/intensity/exposure,
-  full PBR materials for glTF sources, ACES export identical to the
-  preview, deterministic accumulation, optional pass and provenance
-  blocks.
-- Removed: the unlit `albedo` pass (no runtime consumer — per-pixel color
-  ships through the required render pass) and the path-traced `ao` pass
-  (accumulated empty output on tested hardware; removed end to end rather
-  than shipped broken — a future change may reintroduce occlusion with a
-  different approach). Bundles carrying the legacy passes still load; the
-  entries are ignored.
-- Done: workspace folders (File System Access API, `src/shared/workspace.ts`)
-  — `hdri/ models/ sprites/ worlds/` convention, workspace-backed model/
-  HDRI listings, bundle saves to `sprites/<id>.sprite`, `.sprite` bundle
-  naming everywhere (bytes unchanged), IndexedDB handle persistence with
-  one-click reconnect, graceful degradation to dialogs/downloads elsewhere.
-- Done: the integrated React editor (`src/app/`) replacing the separate
-  `bake.html` + runtime pages — editor tabs over in-memory documents,
-  project browser, context-sensitive properties panel, `isoinfinity-bake/5`
-  provenance with re-bake, and in-memory place-into-world.
-- Done: bake setting presets (`isoinfinity-bake-preset/1` JSON in the
-  workspace's `presets/` folder) — save/apply/delete from the sprite
-  properties panel, HDRI resolved from `hdri/` with atomic named-error
-  handling, texture size excluded, download/import fallback without a
-  workspace.
-- Planned: supersampling (render at N× and box-downsample), multi-cube
-  composite assets, geometry-level clipping (CSG) instead of shader discard,
-  KTX2/UASTC packaging for delivery (the merged g-buffer is already in the
-  packed delivery layout), raytraced golden-image diff as a validator,
-  Draco/Meshopt/KTX2 decode for glTF inputs, skinned bind-pose extraction,
-  bake "application" shell (sessions/projects, batch queue, HDRI library),
-  screen-space denoiser option (field exists, wired off), OIDN-class
-  denoising for low-sample bakes.
+See `docs/roadmap.md` — kept there so this document stays
+conventions-and-format only.

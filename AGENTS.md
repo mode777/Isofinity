@@ -31,6 +31,8 @@ it as the reference architecture; design against it.
   This environment cannot launch one; verify what is verifiable statically
   (`npm run build`, Node-runnable logic) and leave browser checks to the
   user.
+- `/tmp/opencode` is root-owned and not writeable in this environment; use
+  `/tmp` directly for temporary files instead.
 - Vite for dev/build; site hosted on GitHub Pages
   (https://mode777.github.io/Isofinity/), deployed by
   `.github/workflows/deploy.yml` on every push to `main`.
@@ -40,7 +42,16 @@ it as the reference architecture; design against it.
 - `npm run dev` — dev server
 - `npm run build` — typecheck (`tsc --noEmit`) + production build to `dist/`
 - `npm run preview` — serve the built `dist/`
-- No test or lint setup yet.
+- `npm run verify:bundles` — Node-runnable bundle/multi-view checks
+  (`src/bake/views-verify.ts`: manifest shape, parse round trips,
+  old-format tolerance, rejection cases). Run after touching
+  `src/bake/bundle.ts` or `src/bake/export.ts`.
+- Browser harness: `npm run dev` → `/scratch-verify.html` — bake/GL
+  checks and primitive bundle hashes for regression diffs. Needs a
+  browser: update it when bake behavior changes, but leave the actual
+  browser run to the user.
+- No test framework or lint setup; the two harnesses above plus
+  `npm run build` are the gates.
 - `openspec` is not on PATH; run it via `npx openspec ...` (verified:
   `npx openspec --version` → 1.11.0).
 
@@ -61,38 +72,60 @@ it as the reference architecture; design against it.
 - Builds without git metadata (zip download, unusual CI) fall back to
   `dev`. The Pages deploy uses `fetch-depth: 0` so the count is exact.
 
+## Documentation
+
+- `docs/poe-rendering-baseline.md` — the POE reference architecture;
+  design against it.
+- `docs/bake-pipeline.md` — bake conventions and the bundle format: the
+  invariants (camera, depth semantics, row order, pass/channel layout)
+  and the format-history table.
+- `docs/runtime.md` — editor shell, document model, world rendering and
+  input.
+- `docs/glossary.md` — one-line definitions of every term the code and
+  docs use (pass, view slot, provenance, placement, …).
+- `docs/recipes.md` — touchpoint checklists per feature shape (format
+  change, editor property, bake pass, primitive, world state).
+- `docs/roadmap.md` — done/planned summary; update it when a change
+  lands.
+- `docs/decisions/` — architecture decision records (ADRs): the durable
+  *why* behind cross-cutting invariants (depth-not-position, shading
+  model, pass set, container, view slots).
+
+Dividing rule: `openspec/specs/` pin required behavior, `docs/` hold
+invariants and rationale, this file points rather than restates. When work
+settles a durable architecture decision — a trade-off future changes must
+respect — document it as a short ADR in `docs/decisions/` (new numbered
+file + a row in its index). Full design/process records stay in
+`openspec/changes/`; the ADR extracts only what outlives the change.
+
 ## Current state
 
 - Integrated editor (`index.html`, `src/app/`, a React application over
   framework-agnostic engines): one page with a top bar (workspace
   connection), a tab bar of in-memory editor documents, a project browser
-  (built-in primitives + workspace `sprites/`, `models/`, `worlds/`),
-  a context-sensitive properties panel (bake options for sprite tabs,
-  light/sun for world tabs), editor area, and a status bar. Opening a
-  resource opens/focuses a tab; documents survive tab switches without
-  saving; one live editor context per editor kind. See `docs/runtime.md`.
-- Bake pipeline (`src/bake/`): bakes test primitives (sphere, donut,
-  cube, cylinder, capsule, plane, slab) and glTF models into per-asset
-  sprite passes — a merged g-buffer (float EXR: rgb = world normals,
-  a = linear ray depth) and an optional path-traced `render` pass
-  (HDRI-lit, ACES; required for placement) — shipped as a zip-byte bundle
-  named `<id>.sprite` with a manifest (`format: isoinfinity-bake/5`,
-  carrying `provenance`: source, bake settings, environment so sprites
-  re-bake in place; `/4` opens view-only). Legacy bundles that still
-  record albedo/ao pass entries load with those entries ignored.
-  Arbitrary cuboids bake directly; the 1×1×1 cube is just the default
-  cell.
-- Sprite→world handoff: a baked sprite document's passes become a world
-  document layer in memory ("Place in world") — no bundle round trip.
+  (workspace `sprites/`, `models/`, `worlds/`), a context-sensitive
+  properties panel, editor area, and a status bar. Documents survive tab
+  switches without saving; one live editor context per editor kind.
+  Shell/model details: `docs/runtime.md`.
+- Bake pipeline (`src/bake/`): bakes test primitives and glTF models into
+  per-asset sprite passes — a merged g-buffer (float EXR: rgb = world
+  normals, a = linear ray depth) and a path-traced `render` pass
+  (HDRI-lit, ACES; required for placement) — shipped as `<id>.sprite`
+  zip-byte bundles with a manifest (`format: isoinfinity-bake/6`: N/E/S/W
+  view slots, view-independent `provenance` so sprites re-bake in place;
+  `/4`+`/5` open view-only/N-only). Worlds consume the N view. Pipeline
+  details: `docs/bake-pipeline.md`.
+- Sprite→world handoff: a baked sprite document's N-view passes become a
+  world document layer in memory ("Place in world") — no bundle round
+  trip.
 - Workspace binding (File System Access API, `src/shared/workspace.ts`;
   convention: `hdri/`, `models/`, `sprites/`, `worlds/`, `presets/`) is surfaced
   through the top bar, project browser and panels, with dialogs/downloads
-  as fallback. Conventions in `docs/bake-pipeline.md`. Worlds
-  (placements + light state) save/load as `isoinfinity-world/1` JSON in
-  the workspace's `worlds/` folder.
+  as fallback. Worlds (placements + light state) save/load as
+  `isoinfinity-world/1` JSON in the workspace's `worlds/` folder.
 - Raw WebGL2 compositor (`src/runtime/renderer.ts`) with per-pixel sprite
   occlusion, deferred-style directional lighting (key + ambient, shades
-  the baked render image by the g-buffer normals), and a global
-  dynamic-light switch.
+  the baked render image by the g-buffer normals — multiplicatively, see
+  `docs/decisions/0003`), and a global dynamic-light switch.
 - No released API: expect breaking changes while the architecture is under
   design.

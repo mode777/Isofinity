@@ -23,8 +23,10 @@ opens (or focuses) a tab. Each tab holds an **in-memory document**,
 independent of any render context:
 
 - a **sprite document** carries its source (primitive or model + scale),
-  path-trace settings, environment, and the baked passes (`BakeResult`
-  float arrays, `PtImage` bytes);
+  path-trace settings, environment, and the baked passes per view slot
+  (N in `result`/`render`, E/S/W in `extraViews`; `BakeResult` float
+  arrays, `PtImage` bytes) plus in-memory editor state (active slot, view,
+  zoom/pan, box overlay);
 - a **world document** carries its sprite layers, placements (`World`),
   and light/sun state.
 
@@ -34,7 +36,9 @@ work: activating a tab re-creates its editor view from the stored document
 re-uploads the layer set). One live editor context exists per editor kind;
 closing a tab disposes its engine objects (glTF source, path tracer). A
 dirty dot marks unsaved documents; closing a dirty tab asks for
-confirmation. Documents become clean only on save.
+confirmation. Documents become clean only on save. The state-layer split
+(persisted / in-memory / engine objects) is
+`docs/decisions/0006-three-layer-state-model.md`.
 
 The React layer owns chrome only: editor components mount engines through
 refs, state lives in Zustand stores (`src/app/store/`), and the long-running
@@ -52,35 +56,64 @@ still starts sprite documents.
 
 ## Sprite editing
 
-Sprite editors show the pass canvases (g-buffer normal/depth, render). The
-properties panel offers, top to bottom: preset management (save / list /
-delete / import), the source (model scale), the path-trace settings, and
-environment controls (HDRI file or workspace `hdri/`,
-rotation/intensity/exposure/saturation). The panel has no bake or render
-buttons: the sprite editor toolbar holds the render pass action, which
-implicitly re-bakes the raster g-buffer from the current source and settings
-before accumulating, so both passes stay current and pixel-aligned. Opening
-a model auto-bakes the raster pass; the render pass runs from the toolbar.
-A picked preset applies immediately — a failed application (missing HDRI,
-unknown format) reports a named error and reverts the dropdown.
+The sprite viewport shows one of four views at a time (toolbar order):
+**Realtime 3D**, **Normals** (g-buffer rgb), **Depth** (g-buffer alpha) and
+**Render**. All views share per-view zoom/pan state (`src/app/bakeView.ts`).
+A view-slot switcher (N/E/S/W, top-left overlay) selects which slot's
+passes the 2D views display and which slot bake actions target; baked
+slots fill, the active slot is outlined, and unbaked non-N slots are
+disabled when the document is view-only.
 
-### Provenance (isoinfinity-bake/5)
+- **Realtime 3D** (`src/app/realtime.ts`) is a classic three.js lit mesh
+  preview of the document's source — geometry inspection, not a shading of
+  any baked pass. Its lighting is fixed (not look-matching), the camera
+  reuses the bake's fixed isometric frame, and it applies the active
+  slot's model yaw so the preview shows the asset exactly as that slot
+  bakes.
+- **Box overlay** (per-document toggle in the view-controls row): the
+  baked asset box from the world origin with origin-adjacent edges colored
+  per axis (X red, Y green, Z blue) and an origin marker — drawn as a
+  hairline overlay in the 2D views (`projectBoxFrame`, `src/bake/iso.ts`)
+  and as scene-space `LineSegments` in the realtime view.
+- The properties panel offers, top to bottom: preset management (save /
+  list / delete / import), the source (model scale), the path-trace
+  settings, and environment controls (HDRI file or workspace `hdri/`,
+  rotation/intensity/exposure/saturation). Model scale can be entered as a
+  **height in meters** — derived from the model's native extent (`scale =
+  height / extentY`); the scale stays the canonical stored value and
+  provenance keeps recording it, so the meters value itself is never
+  persisted. The panel shows a px-size warning when the active slot's
+  projected sprite would exceed the 8192 px cap before baking.
+- The panel has no bake or render buttons: the sprite editor toolbar holds
+  the render pass action (plus **Bake All** over N→E→S→W and **Remove
+  view** for non-N slots), which implicitly re-bakes the raster g-buffer
+  from the current source and settings before accumulating, so both passes
+  stay current and pixel-aligned. Opening a model auto-bakes the raster
+  pass; the render pass runs from the toolbar.
+- A picked preset applies immediately — a failed application (missing
+  HDRI, unknown format) reports a named error and reverts the dropdown.
+
+### Provenance (isoinfinity-bake/6)
 
 Saved bundles carry a `provenance` manifest section: the source (primitive
 name, or workspace model file + scale), the path-trace settings, and the
-environment (procedural marker or `hdri/` file name + parameters). Opening
-a `/5` bundle restores this into the document so it can be edited and
-re-baked in place; saving writes updated provenance. Bundles without
-provenance (`/4`), or whose model/HDRI references no longer resolve,
-open **view-only** (passes visible, save/export available) with the reason
-in the editor and status bar.
+environment (procedural marker or `hdri/` file name + parameters).
+Provenance is view-independent — all baked slots of a document share it.
+Opening a `/6` bundle restores it into the document together with the
+stored non-N views (`/4` and `/5` open as N-only); the document can then
+be edited and re-baked in place, per slot, and saving writes updated
+provenance. Bundles without provenance (`/4`), or whose model/HDRI
+references no longer resolve, open **view-only** (passes visible,
+save/export available) with the reason in the editor and status bar.
 
 ### Place in world
 
 A sprite document with baked passes (including a render pass) can be
-placed into a world document — the passes convert to a `SpriteLayer` in
-memory (row-flip + half-float g-buffer, same helpers as the old boot
-bake), become a placement tool, and one instance is placed. No bundle is
+placed into a world document — the **N view's** passes convert to a
+`SpriteLayer` in memory (row-flip + half-float g-buffer, same helpers as
+the old boot bake; non-N views are editor-side only until a
+placement-orientation change lands, see `docs/roadmap.md`), become a
+placement tool, and one instance is placed. No bundle is
 written; the world document turns dirty. With no world tab open, a new
 world document is created. Saving the world records the sprite's asset id;
 reloading resolves it against `sprites/<id>.sprite` (missing bundles are
@@ -132,8 +165,9 @@ bundles are skipped and named in the status line.
 ### Loading sprite bundles
 
 Opening a `.sprite` (or legacy `.zip`) goes through exactly one parser:
-`parseBake()` unpacks manifest + passes (formats `isoinfinity-bake/4` and
-`/5` accepted; anything else is rejected by name), the render PNG decodes
+`parseBake()` unpacks manifest + passes (formats `isoinfinity-bake/4`,
+`/5` and `/6` accepted; anything else is rejected by name; `/6`'s extra
+views decode into the document's slot set), the render PNG decodes
 via `createImageBitmap` and the EXR via `EXRLoader.parse`. Placing into a
 world **requires** the render pass. Row order differs per decoder and both
 must end top-down (row 0 = sprite top) for upload: the PNG decodes top-down
@@ -243,6 +277,10 @@ checkerboard is a visual reference only.
 - `src/app/document.ts` — document/tab types and defaults
 - `src/app/store/` — Zustand stores: editor (tabs + documents + status),
   workspace adapter, project listings, bake actions, world actions
+- `src/app/bakeView.ts` — viewport view modes/availability, per-slot pass
+  resolution, shared zoom/pan constants
+- `src/app/realtime.ts` — realtime 3D mesh preview (three.js over the
+  bake's fixed iso frame, box overlay)
 - `src/app/bundleView.ts` — bundle → in-memory pass buffers (decoder
   conventions above)
 - `src/app/components/` — shell, tab bar, project browser, properties

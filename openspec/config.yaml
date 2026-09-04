@@ -4,34 +4,56 @@ schema: spec-driven
 # This is shown to AI when creating artifacts.
 # Add your tech stack, conventions, style guides, domain knowledge, etc.
 context: |
-  Tech stack: TypeScript, WebGL2 rendering, Vite for dev/build.
-  Site hosted on GitHub Pages (https://mode777.github.io/Isofinity/),
-  deployed by .github/workflows/deploy.yml on every push to main.
-  Commands: npm run dev | build (tsc --noEmit + vite build) | preview.
-  No test or lint setup yet.
+  Tech stack: TypeScript, WebGL2 rendering, React (integrated editor),
+  Vite for dev/build. Site hosted on GitHub Pages
+  (https://mode777.github.io/Isofinity/), deployed by
+  .github/workflows/deploy.yml on every push to main.
+  Commands: npm run dev | build (tsc --noEmit + vite build) | preview |
+  verify:bundles (Node-runnable bundle checks). Browser harness:
+  npm run dev -> /scratch-verify.html (prints primitive bundle hashes).
 
   Domain: Isofinity renders a fixed top-down isometric world of
   pre-rendered objects (Baldur's Gate 1/2 and Pillars of Eternity style)
   with real-time dynamic lighting on top.
 
   Key design constraint: every pre-rendered asset carries per-pixel
-  color (albedo), baked world-space position, and baked normal data —
-  never model assets as plain RGBA images and never treat lighting as
-  purely baked or screen-space.
+  color (albedo via the path-traced render pass), baked world-space
+  positional data, and baked normal data — never model assets as plain
+  RGBA images and never treat lighting as purely baked or screen-space.
 
   Reference architecture: docs/poe-rendering-baseline.md (Obsidian's
   four-pass bake: final, depth, normal, albedo; deferred lights over
   the prerendered plane). Design changes against that baseline.
 
+  Doc map: docs/bake-pipeline.md (bake conventions + bundle format,
+  incl. the format-history table), docs/runtime.md (editor shell,
+  document model, world rendering), docs/glossary.md (vocabulary),
+  docs/recipes.md (touchpoint checklists per feature shape),
+  docs/roadmap.md (done/planned), docs/decisions/ (ADRs — the durable
+  why behind cross-cutting invariants). openspec/specs/ pin required
+  behavior; docs hold invariants and rationale; AGENTS.md points
+  rather than restates.
+
+  Current asset format: isoinfinity-bake/6 (N/E/S/W view slots baked by
+  rotating the model, not the camera — ADR 0005). Worlds consume the N
+  view. Shading is multiplicative over the prerendered image (ADR 0003).
+  Editor state model: docs/decisions/0006 (persisted / in-memory /
+  engine objects — never serialize editor chrome into bundles).
+
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+rules:
+  proposal:
+    - Name the affected docs (bake-pipeline/runtime/glossary/roadmap) and whether an ADR is needed
+    - State explicitly what is out of scope (Non-goals)
+    - State the format-version impact, if any (new field? tolerance for old bundles?)
+  tasks:
+    - Include a docs update task whenever invariants, formats, or user-visible behavior change
+    - Include a verification task naming the harness: npm run verify:bundles and/or scratch-verify.html, plus npm run build
+  design:
+    - Record rejected alternatives with the reason they lost
+    - Mark in-memory editor state explicitly as never serialized (ADR 0006)
+
 
 # Per-operation guidance (optional)
 # Add advisory guidance for how apply and archive work should be conducted.
