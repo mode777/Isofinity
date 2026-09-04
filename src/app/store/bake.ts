@@ -1,7 +1,7 @@
 import { bakePrimitive } from '../../bake/bake.js';
 import { buildBundle, type BakeProvenance } from '../../bake/bundle.js';
 import { debugPositionCanvas, download } from '../../bake/export.js';
-import { loadGltf, detectSpecGloss, readGlbJsonSlice, type GltfSource, type SpecGlossDetection } from '../../bake/gltf.js';
+import { loadGltf, detectSpecGloss, readGlbJsonSlice, type GltfSource } from '../../bake/gltf.js';
 import { convertSpecGlossToMR } from '../../bake/specgloss.js';
 import {
   DEFAULT_PT_SETTINGS,
@@ -184,18 +184,33 @@ function openModelWithSource(key: string, fileName: string, source: GltfSource):
  * Picker/drop opens and `.gltf` file sets never reach this.
  */
 async function offerSpecGlossFix(fileName: string, key: string): Promise<boolean> {
-  if (!fileName.toLowerCase().endsWith('.glb')) return false;
+  if (!fileName.toLowerCase().endsWith('.glb')) {
+    console.info(`[specgloss] ${fileName}: not a .glb — fix offers are .glb-only`);
+    return false;
+  }
   let file: File;
-  let detection: SpecGlossDetection;
+  let json: Record<string, unknown> | null = null;
   try {
     file = await readWorkspaceFile('models', fileName);
-    const json = await readGlbJsonSlice(file);
-    if (!json) return false;
-    detection = detectSpecGloss(json);
-  } catch {
-    return false; // unreadable container: the normal load path reports it
+    json = await readGlbJsonSlice(file);
+  } catch (err) {
+    console.info(
+      `[specgloss] ${fileName}: container unreadable (${err instanceof Error ? err.message : String(err)}) — no fix offer`,
+    );
+    return false;
   }
-  if (!detection.used) return false;
+  if (!json) {
+    console.info(`[specgloss] ${fileName}: not a GLB 2.0 container — no fix offer`);
+    return false;
+  }
+  const detection = detectSpecGloss(json);
+  if (!detection.used) {
+    console.info(
+      `[specgloss] ${fileName}: 0 of ${((json.materials as unknown[] | undefined) ?? []).length} materials use ` +
+        `KHR_materials_pbrSpecularGlossiness (extensionsUsed: ${JSON.stringify(json.extensionsUsed ?? [])}) — no fix offer`,
+    );
+    return false;
+  }
 
   const accept = window.confirm(
     `${fileName}: ${detection.materialCount} material(s) use the deprecated ` +
