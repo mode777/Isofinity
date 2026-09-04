@@ -147,6 +147,7 @@ export function openPrimitiveDoc(primitive: PrimitiveKind): string {
 /** Open (or focus) a sprite document for a workspace model file. */
 export async function openModelDoc(fileName: string): Promise<void> {
   const key = `model:${fileName}`;
+  console.log('[specgloss] project-browser model open:', JSON.stringify(fileName));
   if (await offerSpecGlossFix(fileName, key)) return;
   const existing = findDocByRef(key);
   if (existing) {
@@ -185,7 +186,7 @@ function openModelWithSource(key: string, fileName: string, source: GltfSource):
  */
 async function offerSpecGlossFix(fileName: string, key: string): Promise<boolean> {
   if (!fileName.toLowerCase().endsWith('.glb')) {
-    console.info(`[specgloss] ${fileName}: not a .glb — fix offers are .glb-only`);
+    console.log(`[specgloss] ${fileName}: not a .glb — fix offers are .glb-only`);
     return false;
   }
   let file: File;
@@ -194,24 +195,23 @@ async function offerSpecGlossFix(fileName: string, key: string): Promise<boolean
     file = await readWorkspaceFile('models', fileName);
     json = await readGlbJsonSlice(file);
   } catch (err) {
-    console.info(
+    console.log(
       `[specgloss] ${fileName}: container unreadable (${err instanceof Error ? err.message : String(err)}) — no fix offer`,
     );
     return false;
   }
   if (!json) {
-    console.info(`[specgloss] ${fileName}: not a GLB 2.0 container — no fix offer`);
+    console.log(`[specgloss] ${fileName}: not a GLB 2.0 container — no fix offer`);
     return false;
   }
   const detection = detectSpecGloss(json);
   if (!detection.used) {
-    console.info(
+    console.log(
       `[specgloss] ${fileName}: 0 of ${((json.materials as unknown[] | undefined) ?? []).length} materials use ` +
         `KHR_materials_pbrSpecularGlossiness (extensionsUsed: ${JSON.stringify(json.extensionsUsed ?? [])}) — no fix offer`,
     );
     return false;
   }
-
   const accept = window.confirm(
     `${fileName}: ${detection.materialCount} material(s) use the deprecated ` +
       'specular-glossiness workflow and would bake as plain white metal.\n\n' +
@@ -261,6 +261,9 @@ async function offerSpecGlossFix(fileName: string, key: string): Promise<boolean
 export async function openGltfFiles(files: File[]): Promise<void> {
   const modelFile = files.find((f) => /\.(glb|gltf)$/i.test(f.name));
   if (!modelFile) return;
+  console.log(
+    `[specgloss] picker/drop open: ${modelFile.name} — fix offers apply only to project-browser opens`,
+  );
   ed().setStatus(`Loading ${modelFile.name}…`);
   try {
     const source = await loadGltf(files);
@@ -317,6 +320,9 @@ export async function openBundleDoc(fileName: string): Promise<void> {
       } else {
         doc.source = { kind: 'model', fileName: prov.source.model };
         doc.scale = prov.source.scale;
+        console.log(
+          `[specgloss] bundle re-load of model ${prov.source.model} — no fix offer on bundle opens`,
+        );
         try {
           doc.gltf = await loadModelFromWorkspace(prov.source.model);
         } catch (err) {
