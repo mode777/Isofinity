@@ -14,8 +14,9 @@ grid.
 - Reorganize the sprite editor content area into a single viewport panel
   that fills the remaining editor space (between toolbar and status bar,
   inside the center region).
-- The viewport shows exactly one of four views at a time, selected from the
-  sprite toolbar:
+- The viewport shows exactly one of four views at a time, selected from a
+  view-mode switcher overlaying the viewport's top-right corner (styled
+  like the zoom controls):
   - **Realtime 3D** — a real-time 3D render of the document's source
     geometry (classic Three.js mesh render with a fixed default light),
     drawn from the bake's fixed isometric camera so it stays comparable
@@ -29,8 +30,9 @@ grid.
 - Zoom controls overlay the viewport's corner: `−`, a percentage readout,
   and `+` (e.g. `− 75% +`), plus a fit action; wheel zooms around the
   cursor and dragging pans.
-- View mode and zoom/pan state are per-document in-memory state, restored
-  on tab re-activation, not saved into bundles.
+- View mode and zoom/pan state are per-document in-memory state (each view
+  keeps its own zoom/pan — the views use different zoom baselines),
+  restored on tab re-activation, not saved into bundles.
 
 ## Capabilities
 

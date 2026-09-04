@@ -44,16 +44,21 @@ runtime dependency. The environment cannot run a browser; verification is
 
 ### D1: Viewport state lives on `BakeDocument`, not React state
 
-Add optional in-memory fields to `BakeDocument`: `view: BakeViewMode`
+Add in-memory fields to `BakeDocument`: `view: BakeViewMode | null`
 (default `'render'`, falling back to the first available view) and
-`viewTransform: { zoom: number; panX: number; panY: number }` (default
-fit). Mutators in `store/bake.ts` (`setBakeView`, `setViewTransform`) keep
-documents the single source of truth, matching the existing "documents
-survive tab switches" architecture. `SpriteEditor` is keyed by `docId`, so
-component state would reset on every tab switch; per-document state does
-not. Not persisted by `buildBundle()` — bundles stay unchanged.
-Alternative: a module-level `Map<docId, state>` — rejected as a second
-source of truth next to the store.
+`viewTransforms: Partial<Record<BakeViewMode, ViewTransform>>` where a
+missing entry means fit for that view. Mutators in `store/bake.ts`
+(`setBakeView`, `setViewTransform`) keep documents the single source of
+truth, matching the existing "documents survive tab switches"
+architecture. `SpriteEditor` is keyed by `docId`, so component state would
+reset on every tab switch; per-document state does not. Not persisted by
+`buildBundle()` — bundles stay unchanged. The transform is stored per view:
+the 2D views baseline zoom at image-native pixels (100%) while Realtime 3D
+baselines at the framed mesh (100%), so one shared transform moves the
+framing on every view switch. Alternative: one shared transform — shipped
+first, rejected after browser testing showed exactly that framing jump;
+a second alternative, a module-level `Map<docId, state>` — rejected as a
+second source of truth next to the store.
 
 ### D2: One zoom/pan model, applied per view
 
@@ -106,13 +111,18 @@ loaded and the geometry is three.js `BufferGeometry`.
 `height: 100%; display: flex; column` (toolbar / optional view-only note /
 viewport `flex: 1; min-height: 0; position: relative`), and `.center` gets
 `overflow: hidden` for bake docs via a wrapper class so panning isn't
-fought by page scroll. The zoom control cluster is `position: absolute` in
-the viewport's bottom-right corner. The realtime renderer is created only
-while the Realtime 3D view is active and disposed on view switch, tab
-switch, or close (`useEffect` cleanup), preserving the
-one-live-context-per-editor-kind rule: WebGL context count stays bounded
-(sprite realtime view + world compositor at most). The `.passes` figure
-CSS and the g-buffer caption toggle are removed.
+fought by page scroll. Both control clusters overlay the viewport itself
+with one floating-panel look: the view-mode switcher in the top-right
+corner, the zoom cluster (`− <n>% + Fit`) in the bottom-right. The sprite
+toolbar keeps only Save and Place in world. Because the drag-to-pan
+handler lives on the viewport container, its pointerdown handler MUST
+ignore events originating inside the control overlays — capturing the
+pointer there retargets pointerup and swallows the buttons' clicks. The
+realtime renderer is created only while the Realtime 3D view is active and
+disposed on view switch, tab switch, or close (`useEffect` cleanup),
+preserving the one-live-context-per-editor-kind rule: WebGL context count
+stays bounded (sprite realtime view + world compositor at most). The
+`.passes` figure CSS and the g-buffer caption toggle are removed.
 
 ## Risks / Trade-offs
 

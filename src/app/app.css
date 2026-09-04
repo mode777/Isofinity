@@ -384,10 +384,12 @@ h2 {
   pointer-events: none;
 }
 
+/* Viewport corner overlays: the view switcher (top-right) and the zoom
+   cluster (bottom-right) share one floating-panel look. */
+.view-controls,
 .zoom-controls {
   position: absolute;
   right: 0.6rem;
-  bottom: 0.6rem;
   z-index: 2;
   display: flex;
   align-items: center;
@@ -398,9 +400,22 @@ h2 {
   background: var(--panel);
 }
 
+.view-controls {
+  top: 0.6rem;
+}
+
+.view-controls button,
 .zoom-controls button {
   padding: 0.1rem 0.5rem;
   font-size: 0.8rem;
+}
+
+.view-controls button.active {
+  border-color: var(--accent);
+}
+
+.zoom-controls {
+  bottom: 0.6rem;
 }
 
 .zoom-value {
@@ -410,13 +425,6 @@ h2 {
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
   user-select: none;
-}
-
-.toolbar-sep {
-  width: 1px;
-  align-self: stretch;
-  margin: 0 0.2rem;
-  background: var(--panel-border);
 }
 
 canvas {

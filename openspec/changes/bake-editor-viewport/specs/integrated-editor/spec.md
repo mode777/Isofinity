@@ -2,19 +2,17 @@
 
 ### Requirement: Sprite editor toolbar
 
-A sprite editor SHALL render a toolbar above its content offering Save,
-Place in world, and a viewport view-mode switcher. Save SHALL prompt for a
-file name, offering the document's current name as the default; cancelling
-the prompt SHALL abort the save without writing a file or clearing the
-dirty state. With a workspace connected, Save SHALL write the bundle to the
-workspace's `sprites/` folder under the chosen name; without a connection it
-SHALL fall back to downloading the bundle. Place in world SHALL behave as
-specified by the placement requirement (target an open world tab or create
-a new world). The view-mode switcher SHALL offer the four viewport views —
-Realtime 3D, Normals, Depth, Render — with the active view marked; a view
-whose required data is unavailable SHALL be disabled and explain why on
-hover. The toolbar SHALL NOT duplicate the properties panel's bake and
-render pass actions.
+A sprite editor SHALL render a toolbar above its content offering Save and
+Place in world. Save SHALL prompt for a file name, offering the document's
+current name as the default; cancelling the prompt SHALL abort the save
+without writing a file or clearing the dirty state. With a workspace
+connected, Save SHALL write the bundle to the workspace's `sprites/` folder
+under the chosen name; without a connection it SHALL fall back to
+downloading the bundle. Place in world SHALL behave as specified by the
+placement requirement (target an open world tab or create a new world).
+The toolbar SHALL NOT offer the viewport's view or zoom controls (those
+overlay the viewport itself) and SHALL NOT duplicate the properties
+panel's bake and render pass actions.
 
 #### Scenario: Save prompts with the current name
 
@@ -40,18 +38,11 @@ render pass actions.
 - **THEN** the sprite becomes a placeable layer in the active world
   document (or a new world when none is open), with no bundle file written
 
-#### Scenario: View-mode switcher marks the active view
+#### Scenario: Toolbar stays free of viewport controls
 
-- **WHEN** the user activates Depth in the sprite toolbar
-- **THEN** Depth is marked active, the viewport shows the depth view only,
-  and the previously active view is no longer shown
-
-#### Scenario: Unavailable views are disabled
-
-- **WHEN** a sprite document has no render pass yet
-- **THEN** the Render view button is disabled with a tooltip explaining
-  that the render pass must be baked first, while the toolbar still offers
-  no bake or render action — those live in the properties panel
+- **WHEN** the user looks at a sprite editor's toolbar
+- **THEN** it offers only Save and Place in world — the view switcher and
+  zoom controls live in the viewport's corner overlays
 
 ## ADDED Requirements
 
@@ -60,8 +51,11 @@ render pass actions.
 The sprite editor's content area SHALL be a single viewport panel that
 fills the remaining editor space between the toolbar and the status bar
 (within the center editor region), replacing the side-by-side pass figures.
-The viewport SHALL display exactly one of four views at a time, selected by
-the toolbar's view-mode switcher:
+A view-mode switcher SHALL overlay the viewport's top-right corner
+offering the four views — Realtime 3D, Normals, Depth, Render — with the
+active view marked; a view whose required data is unavailable SHALL be
+disabled and explain why on hover. The viewport SHALL display exactly one
+of the four views at a time, selected by that switcher:
 
 - **Realtime 3D** — a real-time 3D render of the document's source
   geometry (its primitive or loaded model mesh) lit by a fixed default
@@ -85,6 +79,20 @@ documents SHALL still display their baked passes (Normals, Depth, Render).
 - **WHEN** the user switches a sprite viewport from Normals to Render
 - **THEN** only the baked render is displayed — the normals image is not
   shown anywhere in the editor
+
+#### Scenario: View-mode switcher marks the active view
+
+- **WHEN** the user activates Depth in the viewport's view switcher
+- **THEN** Depth is marked active in the switcher, the viewport shows the
+  depth view only, and the previously active view is no longer shown
+
+#### Scenario: Unavailable views are disabled
+
+- **WHEN** a sprite document has no render pass yet
+- **THEN** the Render view button in the switcher is disabled with a
+  tooltip explaining that the render pass must be baked first, and the
+  switcher offers no bake or render action — those live in the properties
+  panel
 
 #### Scenario: Realtime 3D shows live geometry
 
@@ -111,15 +119,15 @@ documents SHALL still display their baked passes (Normals, Depth, Render).
 ### Requirement: Viewport pan and zoom with corner zoom controls
 
 The sprite viewport SHALL support panning and zooming the displayed view.
-Zoom controls SHALL overlay one corner of the viewport offering zoom out,
-a zoom percentage readout, zoom in, and a fit action (for example
-`− 75% + ⤢`). The zoom percentage SHALL be relative to the image's native
-pixel size (100% = one image pixel per screen pixel) and SHALL update as
-zoom changes. Mouse-wheel zooming SHALL zoom around the cursor position;
-dragging SHALL pan; zoom SHALL be clamped to a finite range. The fit action
-SHALL restore a zoom and pan that shows the whole image. In the Realtime 3D
-view the same controls SHALL zoom and pan the 3D camera's view of the
-mesh.
+Zoom controls SHALL overlay the viewport's bottom-right corner offering
+zoom out, a zoom percentage readout, zoom in, and a fit action (for
+example `− 75% + Fit`). The zoom percentage SHALL be relative to the
+image's native pixel size (100% = one image pixel per screen pixel) and
+SHALL update as zoom changes. Mouse-wheel zooming SHALL zoom around the
+cursor position; dragging SHALL pan; zoom SHALL be clamped to a finite
+range. The fit action SHALL restore a zoom and pan that shows the whole
+image. In the Realtime 3D view the same controls SHALL zoom and pan the 3D
+camera's view of the mesh.
 
 #### Scenario: Corner controls adjust zoom
 
@@ -154,11 +162,14 @@ mesh.
 
 ### Requirement: Sprite viewport state is per-document in-memory
 
-The sprite viewport's view mode, zoom, and pan SHALL be held per sprite
-document in memory. Switching to another tab and back SHALL restore the
-view exactly as left, without re-baking. This state SHALL NOT be written
-into saved bundles; reopening a sprite SHALL start at the default view
-(fit zoom, first available view).
+The sprite viewport's view mode and zoom/pan SHALL be held per sprite
+document in memory, with each view keeping its own zoom/pan — the views
+use different zoom baselines (the 2D views: 100% = image-native pixels;
+Realtime 3D: 100% = the framed mesh), so one shared transform would move
+the framing on every switch. Switching to another tab and back SHALL
+restore the view exactly as left, without re-baking. This state SHALL NOT
+be written into saved bundles; reopening a sprite SHALL start at the
+default view (fit zoom, first available view).
 
 #### Scenario: View survives a tab round trip
 
@@ -166,6 +177,13 @@ into saved bundles; reopening a sprite SHALL start at the default view
   switches to a world tab, and switches back
 - **THEN** the sprite tab shows the Depth view at 150% zoom immediately,
   with no new bake run
+
+#### Scenario: Each view keeps its own framing
+
+- **WHEN** the user zooms the Realtime 3D view, switches to the Normals
+  view (which fits the panel), and switches back to Realtime 3D
+- **THEN** the Realtime 3D view resumes exactly its previous zoom and pan,
+  not the Normals view's transform
 
 #### Scenario: View state is not saved into bundles
 

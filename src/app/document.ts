@@ -117,10 +117,12 @@ export interface BakeDocument {
    */
   view: BakeViewMode | null;
   /**
-   * Viewport zoom/pan; null = fit the panel. In-memory editor state only —
-   * never written into bundles.
+   * Viewport zoom/pan per view; a missing entry = fit for that view. The
+   * views use different baselines (2D: zoom 1 = image-native pixels;
+   * Realtime 3D: zoom 1 = the framed mesh), so each keeps its own
+   * transform. In-memory editor state only — never written into bundles.
    */
-  viewTransform: ViewTransform | null;
+  viewTransforms: Partial<Record<BakeViewMode, ViewTransform>>;
 }
 
 export interface WorldDocument {

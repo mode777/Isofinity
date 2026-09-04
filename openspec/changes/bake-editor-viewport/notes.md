@@ -48,3 +48,22 @@ verification is static; browser scenarios are listed for the user.
 6. Tab round trip restores view mode + zoom/pan without re-baking.
 7. Save + reopen starts at the default view (fit, first available).
 8. World editor unaffected (canvas editing, no page-scroll changes).
+
+## Fix round after first browser test
+
+- Zoom controls were dead: the viewport's drag handler captured the
+  pointer for pointerdowns that started on the control buttons, which
+  retargets pointerup to the viewport div and swallows the click. The
+  handler now ignores pointerdowns inside the overlays.
+- Realtime↔2D framing jump: diagnosed — the views baseline zoom
+  differently (2D: native pixels; realtime: framed mesh), so a shared
+  transform is meaningless across views. Transforms are now stored per
+  view (`viewTransforms`), which also preserves each view's zoom memory;
+  the reset-on-switch fallback was not needed.
+- The view-mode switcher moved from the sprite toolbar into a viewport
+  top-right overlay styled like the zoom cluster; proposal, delta spec
+  (toolbar, viewport, state requirements), and design D1/D5 were updated
+  to match.
+- `npm run build` + `openspec validate` pass after the fixes. The browser
+  scenarios above still apply; add: −/+/Fit work, and each view resumes
+  its own framing after a switch.

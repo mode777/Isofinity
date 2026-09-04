@@ -24,3 +24,9 @@
 ## 5. Verification
 
 - [x] 5.1 Walk the delta-spec scenarios in the browser: single-view display, realtime 3D on primitive + model, view-only bundle (passes shown, Realtime 3D disabled), zoom/pan/fit, per-view availability tooltips, tab round trip restoring view, save + reopen starting at default view; verify `npm run build` (typecheck + build) passes and record results in the change notes
+
+## 6. Fixes from browser testing
+
+- [x] 6.1 Fix dead zoom controls: the viewport's pointerdown handler captured the pointer for clicks on the corner-control buttons (retargeting pointerup and swallowing their click); ignore pointerdowns originating inside `.view-controls`/`.zoom-controls`; verify −, +, and Fit all work in the browser
+- [x] 6.2 Fix realtime↔2D framing jump: store the zoom/pan per view (`viewTransforms: Partial<Record<BakeViewMode, ViewTransform>>`, missing = fit) since the 2D views baseline zoom at image-native pixels and Realtime 3D at the framed mesh; verify each view resumes its own framing after switching away and back
+- [x] 6.3 Move the view-mode switcher out of the sprite toolbar into a viewport top-right overlay styled like the zoom controls; toolbar keeps Save + Place in world; update proposal/spec/design to match; verify `npm run build` passes

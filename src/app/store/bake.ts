@@ -122,7 +122,7 @@ function baseBakeDoc(title: string): BakeDocument {
     viewOnlyReason: null,
     busy: false,
     view: null,
-    viewTransform: null,
+    viewTransforms: {},
   };
 }
 
@@ -401,14 +401,24 @@ export function setBakeView(docId: string, view: BakeViewMode): void {
 }
 
 /**
- * Set the viewport zoom/pan (null = fit). Editor-only state: never marks
- * the document dirty and never reaches a bundle.
+ * Set the viewport zoom/pan for one view (null = fit that view). The
+ * transform is stored per view — the views use different zoom baselines,
+ * so sharing one transform would throw the framing off on every switch.
+ * Editor-only state: never marks the document dirty, never reaches a
+ * bundle.
  */
-export function setViewTransform(docId: string, transform: ViewTransform | null): void {
+export function setViewTransform(
+  docId: string,
+  view: BakeViewMode,
+  transform: ViewTransform | null,
+): void {
   const doc = bakeDoc(docId);
   if (!doc) return;
   update(docId, (d) => {
-    d.viewTransform = transform;
+    const transforms = { ...d.viewTransforms };
+    if (transform) transforms[view] = transform;
+    else delete transforms[view];
+    d.viewTransforms = transforms;
   });
 }
 

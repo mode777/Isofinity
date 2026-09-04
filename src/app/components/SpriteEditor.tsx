@@ -97,12 +97,17 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
     return null;
   }, [doc.result, doc.render, view]);
 
-  // Zoom/pan: stored state, or the per-view default (fit / identity).
+  // Zoom/pan: the active view's stored transform, or its default (the 2D
+  // fit / the realtime framing). Stored per view — the views use different
+  // zoom baselines, so sharing one transform would break framing on every
+  // switch.
+  const storedTransform = doc.viewTransforms[view];
   const transform: ViewTransform | null = useMemo(() => {
-    if (view === 'realtime') return doc.viewTransform ?? REALTIME_FIT;
+    if (storedTransform) return storedTransform;
+    if (view === 'realtime') return REALTIME_FIT;
     if (!image || !panel) return null;
-    return doc.viewTransform ?? fitTransform(image.width, image.height, panel.w, panel.h);
-  }, [view, doc.viewTransform, image, panel]);
+    return fitTransform(image.width, image.height, panel.w, panel.h);
+  }, [storedTransform, view, image, panel]);
 
   // Latest view state for native listeners (avoids re-binding per frame).
   const liveRef = useRef({ view, transform, panel });
@@ -158,7 +163,7 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
         e.clientY - rect.top,
         Math.exp(-e.deltaY * 0.0012),
       );
-      setViewTransform(doc.docId, next);
+      setViewTransform(doc.docId, liveRef.current.view, next);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
@@ -166,6 +171,9 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
     if (e.button !== 0 || !transform) return;
+    // Clicks on the corner controls must reach their buttons: capturing
+    // the pointer here would retarget pointerup and swallow the click.
+    if ((e.target as HTMLElement).closest('.view-controls, .zoom-controls')) return;
     dragRef.current = {
       x: e.clientX,
       y: e.clientY,
@@ -182,6 +190,7 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
     if (!d) return;
     setViewTransform(
       doc.docId,
+      liveRef.current.view,
       panned({ zoom: d.zoom, panX: d.panX, panY: d.panY }, e.clientX - d.x, e.clientY - d.y),
     );
   };
@@ -200,6 +209,7 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
     if (!transform) return;
     setViewTransform(
       doc.docId,
+      liveRef.current.view,
       zoomAround(transform, (panel?.w ?? 0) / 2, (panel?.h ?? 0) / 2, factor),
     );
   };
@@ -221,22 +231,6 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
         >
           Place in world
         </button>
-        <span className="toolbar-sep" />
-        {VIEW_MODES.map((m) => (
-          <button
-            key={m}
-            disabled={!avail[m]}
-            className={view === m ? 'active' : ''}
-            title={
-              avail[m]
-                ? `View: ${VIEW_LABELS[m]}`
-                : `${VIEW_LABELS[m]} — ${viewUnavailableReason(m, doc)}`
-            }
-            onClick={() => setBakeView(doc.docId, m)}
-          >
-            {VIEW_LABELS[m]}
-          </button>
-        ))}
       </EditorToolbar>
       {doc.viewOnly ? (
         <p className="viewonly">View-only — {doc.viewOnlyReason}</p>
@@ -259,6 +253,23 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
             <p>{viewPlaceholder(view, doc)}</p>
           </div>
         ) : null}
+        <div className="view-controls">
+          {VIEW_MODES.map((m) => (
+            <button
+              key={m}
+              disabled={!avail[m]}
+              className={view === m ? 'active' : ''}
+              title={
+                avail[m]
+                  ? `View: ${VIEW_LABELS[m]}`
+                  : `${VIEW_LABELS[m]} — ${viewUnavailableReason(m, doc)}`
+              }
+              onClick={() => setBakeView(doc.docId, m)}
+            >
+              {VIEW_LABELS[m]}
+            </button>
+          ))}
+        </div>
         <div className="zoom-controls">
           <button
             title="Zoom out"
@@ -275,8 +286,8 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
           </button>
           <button
             title="Fit the view to the panel"
-            disabled={doc.viewTransform === null}
-            onClick={() => setViewTransform(doc.docId, null)}
+            disabled={!storedTransform}
+            onClick={() => setViewTransform(doc.docId, view, null)}
           >
             Fit
           </button>
