@@ -37,7 +37,6 @@ the status bar. The version display SHALL show the shared build version.
 - **WHEN** the user switches from a sprite tab to a world tab
 - **THEN** the toolbar above the editor content changes from the sprite
   toolbar to the world toolbar
-
 ### Requirement: Opening a resource opens or focuses an editor tab
 
 Opening a sprite resource (built-in primitive, workspace model, or sprite
@@ -58,7 +57,6 @@ them.
 - **WHEN** the user has a sprite tab and a world tab open and alternates
   between them
 - **THEN** both tabs stay open and each activates its own editor
-
 ### Requirement: Editor documents persist in memory across tab switches
 
 Each open tab SHALL hold its editor document in memory, independent of any
@@ -94,7 +92,6 @@ only when saved to the workspace (or downloaded).
 
 - **WHEN** the user saves a dirty document to the workspace
 - **THEN** the tab's dirty indicator clears
-
 ### Requirement: Editor contexts are recreated from documents
 
 The editor SHALL keep at most one live render context per editor kind.
@@ -109,7 +106,6 @@ recreation SHALL not leak GPU resources across switches.
 - **THEN** the sprite editor now shows the second document's source,
   settings, and passes, and the first document's state is retained in its
   tab
-
 ### Requirement: Project browser lists workspace assets
 
 The project browser SHALL list the workspace's convention folders — `sprites/`
@@ -152,7 +148,6 @@ workspace assets need a connection.
 - **WHEN** no workspace is connected and the user imports a glTF through the
   browser's import dialog
 - **THEN** a sprite editor tab opens with that model as its bake source
-
 ### Requirement: Properties panel follows the active editor
 
 The properties panel SHALL show controls matching the active tab's editor
@@ -201,7 +196,6 @@ document only.
   switches to another sprite tab
 - **THEN** the second tab's properties show its own environment settings,
   unchanged by the first tab's edit
-
 ### Requirement: Place a baked sprite into a world document
 
 From a sprite editor whose document holds baked passes (including a
@@ -232,23 +226,31 @@ dirty.
 - **THEN** the placement restores from the bundle by asset id; when the
   bundle is absent the placement is reported as skipped, as with any
   missing sprite asset
-
 ### Requirement: Sprite editor toolbar
 
 A sprite editor SHALL render a toolbar above its content offering Save, the
-render pass action, and Place in world. The render pass action SHALL first
-bake the raster g-buffer pass (world-space normals + linear ray depth) from
-the document's current source and settings, then accumulate the path-traced
-render pass against that g-buffer, so the two passes stay pixel-aligned and
-current without a separate bake action. The action SHALL be disabled for
-view-only documents and while a render pass is accumulating, and its label
-SHALL reflect state (Render pass, Re-render pass once a rendered pass exists,
-Rendering… while busy). Progress and completion SHALL be reported through the
-status bar. Save SHALL prompt for a file name, offering the document's
+render pass action, Bake All, Remove view, and Place in world. The render
+pass action SHALL first bake the raster g-buffer pass (world-space normals
++ linear ray depth) from the document's current source and settings, then
+accumulate the path-traced render pass against that g-buffer, so the two
+passes stay pixel-aligned and current without a separate bake action; both
+passes are produced for the view slot currently selected in the viewport
+(N by default), as specified by the asset-baking capability. Bake All
+SHALL batch-bake all four view slots in N, E, S, W order as specified by
+the asset-baking capability, switching the viewport to each slot as its
+passes are produced, and SHALL be disabled for view-only documents and
+while a pass accumulates. Remove view SHALL discard the baked passes of
+the selected slot and SHALL be unavailable for the N slot, for slots
+without baked passes, for view-only documents, and while a pass
+accumulates. The render pass action SHALL be disabled for view-only
+documents and while a render pass is accumulating, and its label SHALL
+reflect state (Render pass, Re-render pass once a rendered pass exists,
+Rendering… while busy). Progress and completion SHALL be reported through
+the status bar. Save SHALL prompt for a file name, offering the document's
 current name as the default; cancelling the prompt SHALL abort the save
 without writing a file or clearing the dirty state. With a workspace
-connected, Save SHALL write the bundle to the workspace's `sprites/` folder
-under the chosen name; without a connection it SHALL fall back to
+connected, Save SHALL write the bundle to the workspace's `sprites/`
+folder under the chosen name; without a connection it SHALL fall back to
 downloading the bundle. Place in world SHALL behave as specified by the
 placement requirement (target an open world tab or create a new world).
 
@@ -278,11 +280,18 @@ placement requirement (target an open world tab or create a new world).
 
 #### Scenario: Render action bakes the g-buffer first
 
-- **WHEN** the user changes a model source's uniform scale and activates the
-  render pass action
+- **WHEN** the user changes a model source's uniform scale and activates
+  the render pass action
 - **THEN** the g-buffer is re-baked at the new scale and the render pass
   accumulates against it, with both passes pixel-aligned and no separate
   bake button used
+
+#### Scenario: Render action bakes the selected slot
+
+- **WHEN** the user selects the E slot in the viewport and activates the
+  render pass action
+- **THEN** the E slot's g-buffer and render pass are produced and the
+  other slots' passes are untouched
 
 #### Scenario: Render action reflects its state
 
@@ -295,6 +304,18 @@ placement requirement (target an open world tab or create a new world).
 - **WHEN** a view-only sprite tab is active
 - **THEN** the toolbar's render pass action is disabled
 
+#### Scenario: Bake All works through every slot
+
+- **WHEN** the user activates Bake All on a document where only N is baked
+- **THEN** the viewport shows each slot in turn as its passes are produced
+  (N, E, S, W) and all four slots hold baked passes afterwards
+
+#### Scenario: Remove view is unavailable for north and empty slots
+
+- **WHEN** the N slot is selected, or the selected slot holds no baked
+  passes
+- **THEN** Remove view is disabled; selecting a non-N slot with baked
+  passes enables it and activating it discards that slot's passes
 ### Requirement: World editor toolbar
 
 A world editor SHALL render a toolbar above its content offering Save, a
@@ -335,7 +356,6 @@ strip.
 - **WHEN** the user toggles the eraser and clicks a placed sprite, or
   right-clicks a placed sprite with the pencil active
 - **THEN** that placement is removed
-
 ### Requirement: Selecting a brush makes it placeable in the world
 
 Selecting a brush in a world editor SHALL make that brush placeable in that
@@ -375,7 +395,6 @@ turn the world document dirty.
   the workspace
 - **THEN** the status bar names the failure, the tool state is unchanged,
   and no placement occurs
-
 ### Requirement: Slider rows accept precise numeric input
 
 Every numeric slider in the properties panel (world key-light and
@@ -430,17 +449,16 @@ defines). A disabled slider SHALL disable its value field.
 
 - **WHEN** a view-only sprite tab shows the environment sliders
 - **THEN** the value fields cannot be edited, same as the sliders
-
 ### Requirement: Only explicit bake actions bake or render
 
-Editing a properties-panel control SHALL update the active document's state
-only: no input other than the sprite editor toolbar's render pass action
-SHALL trigger a raster bake or a path-traced render pass. The render pass
-action includes its implicit raster g-buffer bake as specified by the sprite
-editor toolbar requirement. Opening a resource SHALL keep performing its
-initial bake. When an input makes an in-flight render pass stale, the pass
-SHALL be discarded — not restarted — and the document SHALL stay usable for
-an explicit re-render.
+Editing a properties-panel control SHALL update the active document's
+state only: no input other than the sprite editor toolbar's render pass
+and Bake All actions SHALL trigger a raster bake or a path-traced render
+pass. The render pass action includes its implicit raster g-buffer bake as
+specified by the sprite editor toolbar requirement. Opening a resource
+SHALL keep performing its initial bake. When an input makes an in-flight
+render pass stale, the pass SHALL be discarded — not restarted — and the
+document SHALL stay usable for an explicit re-render.
 
 #### Scenario: Environment slider change does not render
 
@@ -470,10 +488,10 @@ an explicit re-render.
 
 #### Scenario: Explicit buttons still bake and render
 
-- **WHEN** the user activates the render pass action in the sprite toolbar
+- **WHEN** the user activates the render pass action or Bake All in the
+  sprite toolbar
 - **THEN** the g-buffer re-bakes from the document's current source and
   settings and the path-traced render pass runs against it
-
 ### Requirement: Sprite viewport bounding-box overlay
 
 The sprite viewport SHALL offer a toggleable bounding-box overlay that
@@ -529,3 +547,39 @@ switches and tab switches, not saved into sprite bundles.
   another sprite tab
 - **THEN** each tab's viewport reflects its own overlay state, and
   switching back restores the first tab's enabled overlay
+### Requirement: Sprite viewport view-slot switcher
+
+The sprite viewport SHALL show a view-slot switcher in its top-left
+corner: one icon per view slot in fixed N, E, S, W order, labelled with
+the slot's direction. Each icon SHALL be color-coded to show whether that
+slot currently holds baked passes. Activating an icon SHALL select that
+slot; the viewport SHALL then display the selected slot's stored passes in
+whichever view mode (realtime/normals/depth/render) is active, and the
+toolbar's per-slot actions SHALL apply to it. On editable documents an
+empty slot SHALL be selectable so it can be baked; on view-only documents
+only slots holding stored passes SHALL be selectable.
+
+#### Scenario: Icon color reflects baked state
+
+- **WHEN** a document has N and W baked and E, S empty
+- **THEN** the N and W icons show the baked color and the E and S icons
+  show the empty color
+
+#### Scenario: Switching slots swaps the displayed passes
+
+- **WHEN** the user activates the E icon on a document with baked N and E
+  views while the render view mode is active
+- **THEN** the viewport displays the E view's render pass without changing
+  the view mode
+
+#### Scenario: Switching marks the selection for bake actions
+
+- **WHEN** the user activates the S icon and then the toolbar's render
+  pass action
+- **THEN** the S slot is baked
+
+#### Scenario: View-only documents show stored views only
+
+- **WHEN** a view-only document stores N and E views
+- **THEN** the N and E icons are selectable and show their passes, while
+  the S and W icons are not selectable
