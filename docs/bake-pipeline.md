@@ -72,6 +72,15 @@ everything falls back to file dialogs and downloads exactly as before
 - **Scope**: static meshes only. Skins, animations, and multi-material
   meshes are skipped with a status note; DRACO, Meshopt, and KTX2/Basis
   payloads are rejected by name (no decoder dependencies).
+- **Deprecated materials**: models whose materials use the removed
+  `KHR_materials_pbrSpecularGlossiness` workflow would silently bake as
+  plain white metal (three's GLTFLoader ignores the extension). When a
+  workspace `.glb` using it is opened from the project browser, the editor
+  offers an in-place conversion to metallic-roughness — confirmed via
+  dialog, converted with glTF-Transform (textures re-encoded per texel),
+  and the file is overwritten in `models/` with no backup. Declining (or
+  opening via dialog/drop, or a multi-file `.gltf` set) loads the model
+  unchanged, as before.
 - **Placement**: the model is translated so its bounding-box minimum corner
   sits at `(0,0,0)`; native dimensions are preserved. A uniform scale
   control rescales at bake time (applied as the mesh transform, so the box

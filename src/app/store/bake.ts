@@ -1,7 +1,8 @@
 import { bakePrimitive } from '../../bake/bake.js';
 import { buildBundle, type BakeProvenance } from '../../bake/bundle.js';
 import { debugPositionCanvas, download } from '../../bake/export.js';
-import { loadGltf } from '../../bake/gltf.js';
+import { loadGltf, detectSpecGloss, readGlbJsonSlice, type GltfSource, type SpecGlossDetection } from '../../bake/gltf.js';
+import { convertSpecGlossToMR } from '../../bake/specgloss.js';
 import {
   DEFAULT_PT_SETTINGS,
   PtBaker,
@@ -146,6 +147,7 @@ export function openPrimitiveDoc(primitive: PrimitiveKind): string {
 /** Open (or focus) a sprite document for a workspace model file. */
 export async function openModelDoc(fileName: string): Promise<void> {
   const key = `model:${fileName}`;
+  if (await offerSpecGlossFix(fileName, key)) return;
   const existing = findDocByRef(key);
   if (existing) {
     ed().focusDoc(existing.docId);
@@ -154,16 +156,89 @@ export async function openModelDoc(fileName: string): Promise<void> {
   ed().setStatus(`Loading ${fileName}…`);
   try {
     const source = await loadModelFromWorkspace(fileName);
-    const doc = baseBakeDoc(fileName);
-    doc.ref = { key, title: fileName };
-    doc.source = { kind: 'model', fileName };
-    doc.gltf = source;
-    ed().addDoc(doc);
-    ed().setStatus(`${source.label}: loaded${activeNotes(source.skipped)}`);
-    bakeRaster(doc.docId);
+    openModelWithSource(key, fileName, source);
   } catch (err) {
     ed().setStatus(`Model load failed: ${err instanceof Error ? err.message : String(err)}`);
     console.error(err);
+  }
+}
+
+/** Build and bake a sprite document for an already-loaded model source. */
+function openModelWithSource(key: string, fileName: string, source: GltfSource): void {
+  const doc = baseBakeDoc(fileName);
+  doc.ref = { key, title: fileName };
+  doc.source = { kind: 'model', fileName };
+  doc.gltf = source;
+  ed().addDoc(doc);
+  ed().setStatus(`${source.label}: loaded${activeNotes(source.skipped)}`);
+  bakeRaster(doc.docId);
+}
+
+/**
+ * Workspace `.glb` opens offer an in-place specGloss → metallic-roughness
+ * fix (model-material-migration spec): detect in the container JSON, confirm,
+ * convert, overwrite the file, and open the sprite document from the
+ * converted bytes. Returns true when this call fully handled the open action
+ * — fix accepted (document opened, or a failure reported and nothing
+ * opened); false when the caller should continue loading normally.
+ * Picker/drop opens and `.gltf` file sets never reach this.
+ */
+async function offerSpecGlossFix(fileName: string, key: string): Promise<boolean> {
+  if (!fileName.toLowerCase().endsWith('.glb')) return false;
+  let file: File;
+  let detection: SpecGlossDetection;
+  try {
+    file = await readWorkspaceFile('models', fileName);
+    const json = await readGlbJsonSlice(file);
+    if (!json) return false;
+    detection = detectSpecGloss(json);
+  } catch {
+    return false; // unreadable container: the normal load path reports it
+  }
+  if (!detection.used) return false;
+
+  const accept = window.confirm(
+    `${fileName}: ${detection.materialCount} material(s) use the deprecated ` +
+      'specular-glossiness workflow and would bake as plain white metal.\n\n' +
+      'Convert the file to metallic-roughness in place? The original file is overwritten.',
+  );
+  if (!accept) return false;
+
+  try {
+    ed().setStatus(`Converting ${fileName} to metallic-roughness…`);
+    const bytes = await convertSpecGlossToMR(file);
+    await writeWorkspaceFile('models', fileName, bytes);
+    // Open from the converted bytes in memory — identical to what was just
+    // written to disk, so the bake always matches the saved file.
+    const converted = new File([bytes], fileName, { type: 'model/gltf-binary' });
+    const source = await loadGltf([converted]);
+    const existing = findDocByRef(key);
+    if (existing && existing.kind === 'bake') {
+      // Refresh the already-open tab from the converted bytes instead of
+      // leaving it on the stale pre-fix model.
+      existing.gltf?.dispose();
+      update(existing.docId, (d) => {
+        d.gltf = source;
+        d.result = null;
+        d.render = null;
+        d.bundleBytes = null;
+        d.notes = [];
+      });
+      ed().focusDoc(existing.docId);
+      bakeRaster(existing.docId);
+    } else {
+      openModelWithSource(key, fileName, source);
+    }
+    ed().setStatus(`${fileName}: converted to metallic-roughness in place`);
+    return true;
+  } catch (err) {
+    // The write happens only after a successful conversion, so the original
+    // file stays untouched; no document is opened.
+    ed().setStatus(
+      `Specular-glossiness fix failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    console.error(err);
+    return true;
   }
 }
 

@@ -71,7 +71,7 @@ function fileKey(file: File): string {
 }
 
 /** Read the JSON section out of a `.gltf` (raw text) or `.glb` (container). */
-function readContainerJson(name: string, buffer: ArrayBuffer): Record<string, unknown> {
+export function readContainerJson(name: string, buffer: ArrayBuffer): Record<string, unknown> {
   if (name.toLowerCase().endsWith('.glb')) {
     const view = new DataView(buffer);
     if (view.byteLength < 20 || view.getUint32(0, true) !== GLB_MAGIC) {
@@ -89,6 +89,44 @@ function readContainerJson(name: string, buffer: ArrayBuffer): Record<string, un
     return JSON.parse(text) as Record<string, unknown>;
   }
   return JSON.parse(new TextDecoder().decode(buffer)) as Record<string, unknown>;
+}
+
+export const SPEC_GLOSS_EXTENSION = 'KHR_materials_pbrSpecularGlossiness';
+
+/**
+ * Read only the JSON chunk of a GLB `Blob` (header + JSON chunk slices, so
+ * multi-hundred-MB models cost two small reads) for cheap pre-load
+ * inspection. Returns null when the blob is not a GLB 2.0 container with a
+ * JSON first chunk; malformed JSON throws.
+ */
+export async function readGlbJsonSlice(file: Blob): Promise<Record<string, unknown> | null> {
+  const head = new DataView(await file.slice(0, 20).arrayBuffer());
+  if (head.byteLength < 20 || head.getUint32(0, true) !== GLB_MAGIC) return null;
+  if (head.getUint32(4, true) !== 2) return null;
+  if (head.getUint32(16, true) !== GLB_JSON_CHUNK) return null;
+  const chunkLength = head.getUint32(12, true);
+  const json = await file.slice(20, 20 + chunkLength).arrayBuffer();
+  return JSON.parse(new TextDecoder().decode(json)) as Record<string, unknown>;
+}
+
+export interface SpecGlossDetection {
+  used: boolean;
+  materialCount: number;
+}
+
+/**
+ * Detect the deprecated specGloss material workflow in already-parsed
+ * container JSON, ahead of GLTFLoader (which ignores it and yields default
+ * metallic materials). Counting materials — not just extensionsUsed — keeps
+ * files that merely list the extension from being offered a no-op fix.
+ */
+export function detectSpecGloss(json: Record<string, unknown>): SpecGlossDetection {
+  const materials = (json.materials as Record<string, unknown>[] | undefined) ?? [];
+  const materialCount = materials.filter(
+    (m) =>
+      !!(m.extensions as Record<string, unknown> | undefined)?.[SPEC_GLOSS_EXTENSION],
+  ).length;
+  return { used: materialCount > 0, materialCount };
 }
 
 function rejectUnsupportedExtensions(name: string, json: Record<string, unknown>): void {

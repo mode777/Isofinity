@@ -18,6 +18,9 @@
     "vite": "^7.1.5"
   },
   "dependencies": {
+    "@gltf-transform/core": "^4.5.0",
+    "@gltf-transform/extensions": "^4.5.0",
+    "@gltf-transform/functions": "^4.5.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "three": "^0.185.1",
