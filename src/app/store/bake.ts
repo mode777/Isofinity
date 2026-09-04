@@ -127,23 +127,6 @@ function baseBakeDoc(title: string): BakeDocument {
   };
 }
 
-/** Open (or focus) a sprite document for a built-in primitive and bake it. */
-export function openPrimitiveDoc(primitive: PrimitiveKind): string {
-  const key = `builtin:${primitive}`;
-  const existing = findDocByRef(key);
-  if (existing) {
-    ed().focusDoc(existing.docId);
-    return existing.docId;
-  }
-  const doc = baseBakeDoc(primitive);
-  doc.ref = { key, title: primitive };
-  doc.source = { kind: 'primitive', primitive };
-  ed().addDoc(doc);
-  bakeRaster(doc.docId);
-  void runRenderPass(doc.docId);
-  return doc.docId;
-}
-
 /** Open (or focus) a sprite document for a workspace model file. */
 export async function openModelDoc(fileName: string): Promise<void> {
   const key = `model:${fileName}`;
@@ -401,8 +384,12 @@ function primitiveFor(doc: BakeDocument): Primitive {
 
 // --- pass actions ---------------------------------------------------------
 
-/** Raster bake (g-buffer) for the document's current source. */
-export function bakeRaster(docId: string): void {
+/**
+ * Raster bake (g-buffer) for the document's current source. Internal step:
+ * run by the document-open paths and implicitly by the render pass action —
+ * the UI exposes no dedicated raster bake button.
+ */
+function bakeRaster(docId: string): void {
   const doc = bakeDoc(docId);
   if (!doc || doc.viewOnly) return;
   try {
@@ -426,7 +413,7 @@ let renderGen = 0;
 let renderingDocId: string | null = null;
 
 /** Discard an in-flight render pass whose settings just went stale — no new
- * pass is started: only the explicitly labeled bake/render buttons render. */
+ * pass is started: only the sprite editor's render action starts a pass. */
 function invalidateRunningRender(): void {
   const docId = renderingDocId;
   if (!docId) return;
@@ -437,26 +424,37 @@ function invalidateRunningRender(): void {
   });
 }
 
-/** Path-traced lit render pass. Requires a raster bake and an environment.
- * Safe to invoke while another accumulation runs: the new run resets the
- * tracer for the current settings and the stale run's commit is discarded
- * by its generation token. */
+/**
+ * Path-traced lit render pass — the sprite editor's single explicit bake
+ * action. It implicitly (re)bakes the raster g-buffer first, so both passes
+ * are current with the document's source and settings and stay
+ * pixel-aligned; the raster draw is synchronous and its status line
+ * precedes the render progress. Safe to invoke while another accumulation
+ * runs: the new run resets the tracer for the current settings and the
+ * stale run's commit is discarded by its generation token.
+ */
 export async function runRenderPass(docId: string): Promise<void> {
   const doc = bakeDoc(docId);
-  if (!doc || doc.viewOnly || !doc.result || !doc.ptEnv.texture) return;
+  if (!doc || doc.viewOnly || !doc.ptEnv.texture) return;
   const gen = ++renderGen;
   renderingDocId = docId;
   update(docId, (d) => {
     d.busy = true;
   });
   try {
-    const b = getBaker(doc);
-    b.applySettings(doc.settings);
-    b.setEnvironment(doc.ptEnv);
-    b.setPrimitive(primitiveFor(doc), doc.result.pxPerUnit);
+    // The render pass implies a fresh g-buffer: bake it first (a
+    // synchronous raster draw — no token interaction). A failed bake
+    // leaves no result behind; its error is already in the status bar.
+    bakeRaster(docId);
+    const baked = bakeDoc(docId);
+    if (!baked?.result) return;
+    const b = getBaker(baked);
+    b.applySettings(baked.settings);
+    b.setEnvironment(baked.ptEnv);
+    b.setPrimitive(primitiveFor(baked), baked.result.pxPerUnit);
     const image = await b.renderPass((samples, total) => {
       if (gen === renderGen) {
-        ed().setStatus(`${doc.title}: rendering ${samples}/${total} samples…`);
+        ed().setStatus(`${baked.title}: rendering ${samples}/${total} samples…`);
       }
     });
     if (gen !== renderGen) return;
@@ -770,11 +768,12 @@ export async function savePreset(docId: string, rawName: string): Promise<void> 
  * untouched — then settings and environment commit in one update. Texture
  * size is not part of a preset and stays unchanged. Applying never starts a
  * render pass: an in-flight pass is discarded, and the user re-renders
- * explicitly.
+ * explicitly. Returns whether the preset was applied (false for a missing
+ * or view-only document, and for callers to revert a failed selection).
  */
-export async function applyPreset(docId: string, preset: BakePreset): Promise<void> {
+export async function applyPreset(docId: string, preset: BakePreset): Promise<boolean> {
   const doc = bakeDoc(docId);
-  if (!doc || doc.viewOnly) return;
+  if (!doc || doc.viewOnly) return false;
   let env: BakeDocument['env'] = { kind: 'procedural' };
   let ptEnv: PtEnvironment | null = null;
   if ('hdri' in preset.environment) {
@@ -804,16 +803,23 @@ export async function applyPreset(docId: string, preset: BakePreset): Promise<vo
       ptEnv ? ptEnv.name : 'procedural sky'
     }`,
   );
+  return true;
 }
 
-/** Read and apply a preset listed in the workspace's presets/ folder. */
-export async function applyWorkspacePreset(docId: string, fileName: string): Promise<void> {
+/** Read and apply a preset listed in the workspace's presets/ folder.
+ * Returns whether the preset was applied; failures are reported in the
+ * status bar with a named error. */
+export async function applyWorkspacePreset(
+  docId: string,
+  fileName: string,
+): Promise<boolean> {
   try {
     const file = await readWorkspaceFile('presets', fileName);
-    await applyPreset(docId, parsePreset(await file.text()));
+    return await applyPreset(docId, parsePreset(await file.text()));
   } catch (err) {
     ed().setStatus(`Preset apply failed: ${err instanceof Error ? err.message : String(err)}`);
     console.error(err);
+    return false;
   }
 }
 

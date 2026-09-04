@@ -1,7 +1,5 @@
 import { useRef } from 'react';
-import type { PrimitiveKind } from '../document.js';
-import { PRIMITIVE_KINDS } from '../document.js';
-import { openBundleDoc, openGltfFiles, openModelDoc, openPrimitiveDoc } from '../store/bake.js';
+import { openBundleDoc, openGltfFiles, openModelDoc } from '../store/bake.js';
 import { useProject } from '../store/project.js';
 import { newWorldDoc, openWorldDoc } from '../store/world.js';
 import { useWorkspace } from '../store/workspace.js';
@@ -27,17 +25,6 @@ export function ProjectBrowser(): React.JSX.Element {
           refresh
         </button>
       </div>
-
-      <section>
-        <h3>Primitives</h3>
-        <ul>
-          {PRIMITIVE_KINDS.map((p: PrimitiveKind) => (
-            <li key={p}>
-              <button onClick={() => openPrimitiveDoc(p)}>{p}</button>
-            </li>
-          ))}
-        </ul>
-      </section>
 
       <section>
         <h3>Sprites</h3>
@@ -82,8 +69,8 @@ export function ProjectBrowser(): React.JSX.Element {
 
       {!connected ? (
         <p className="hint">
-          Built-in primitives are always available; workspace assets need a
-          connected folder.
+          Import a glTF file to start a sprite without a workspace; workspace
+          assets need a connected folder.
         </p>
       ) : null}
     </div>

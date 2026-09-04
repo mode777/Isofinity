@@ -4,13 +4,11 @@ import { MAX_SPRITE_PX, PAD_PX, PX_PER_UNIT } from '../../bake/bake.js';
 import { projectBoxFrame } from '../../bake/iso.js';
 import {
   applyWorkspacePreset,
-  bakeRaster,
   deletePreset,
   downloadPositionDebug,
   importPresetFile,
   loadHdriFile,
   loadHdriFromWorkspace,
-  runRenderPass,
   savePreset,
   setEnvParams,
   setModelHeight,
@@ -35,6 +33,14 @@ function PresetsSection(props: { doc: BakeDocument }): React.JSX.Element {
   const importFiles = (files: FileList | null): void => {
     const file = files?.[0];
     if (file) void importPresetFile(doc.docId, file);
+  };
+  // Picking a preset applies it immediately; a failed application (missing
+  // HDRI, unknown format) reports its named error and reverts the dropdown.
+  const apply = (fileName: string): void => {
+    setSelected(fileName);
+    void applyWorkspacePreset(doc.docId, fileName).then((applied) => {
+      if (!applied) setSelected('');
+    });
   };
 
   return (
@@ -67,7 +73,9 @@ function PresetsSection(props: { doc: BakeDocument }): React.JSX.Element {
           title="Workspace presets"
           value={selected}
           disabled={doc.viewOnly}
-          onChange={(e) => setSelected(e.target.value)}
+          onChange={(e) => {
+            if (e.target.value) apply(e.target.value);
+          }}
         >
           <option value="">
             {presets.length > 0 ? 'workspace presets…' : 'no presets in the workspace'}
@@ -79,12 +87,6 @@ function PresetsSection(props: { doc: BakeDocument }): React.JSX.Element {
           ))}
         </select>
         <div className="preset-actions">
-          <button
-            disabled={doc.viewOnly || !selected}
-            onClick={() => void applyWorkspacePreset(doc.docId, selected)}
-          >
-            Apply
-          </button>
           <button
             disabled={!selected}
             onClick={() => {
@@ -144,6 +146,8 @@ export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Elemen
 
   return (
     <>
+      <PresetsSection doc={doc} />
+
       <Section title="Source">
         <p className="hint">
           {doc.title} —{' '}
@@ -188,12 +192,6 @@ export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Elemen
             ) : null}
           </>
         ) : null}
-        <button
-          disabled={doc.viewOnly || !doc.source}
-          onClick={() => bakeRaster(doc.docId)}
-        >
-          Re-bake raster
-        </button>
       </Section>
 
       <Section title="Path tracing">
@@ -301,16 +299,7 @@ export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Elemen
           onChange={(v) => setEnvParams(doc.docId, { saturation: v })}
           disabled={doc.viewOnly}
         />
-        <button
-          disabled={!doc.result || doc.viewOnly || doc.busy || !env.texture}
-          title="Render the lit pass with the current environment"
-          onClick={() => void runRenderPass(doc.docId)}
-        >
-          {doc.busy ? 'Rendering…' : doc.render ? 'Re-render pass' : 'Bake render pass'}
-        </button>
       </Section>
-
-      <PresetsSection doc={doc} />
 
       <Section title="Debug">
         <button disabled={!doc.result} onClick={() => downloadPositionDebug(doc.docId)}>

@@ -18,9 +18,9 @@ land in the status bar.
 
 ## Tabs and documents
 
-Opening a resource — built-in primitive, workspace model, `.sprite` bundle,
-or world JSON — opens (or focuses) a tab. Each tab holds an **in-memory
-document**, independent of any render context:
+Opening a resource — workspace model, `.sprite` bundle, or world JSON —
+opens (or focuses) a tab. Each tab holds an **in-memory document**,
+independent of any render context:
 
 - a **sprite document** carries its source (primitive or model + scale),
   path-trace settings, environment, and the baked passes (`BakeResult`
@@ -42,22 +42,27 @@ path-traced passes are store actions guarded by generation tokens.
 
 ## Project browser
 
-Always lists the built-in test primitives. With a workspace connected it
-additionally lists `sprites/` (bundles), `models/` (glTF files), and
-`worlds/` (JSON), extension-filtered, with a refresh action. Activate an
-entry to open it; buttons offer "Import glTF file…" (dialog; drag-drop is
-not wired) and "New world". Without a workspace the built-ins keep
-working.
+Lists the workspace's convention folders when connected — `sprites/`
+(bundles), `models/` (glTF files), and `worlds/` (JSON) —
+extension-filtered, with a refresh action. Activate an entry to open it;
+buttons offer "Import glTF file…" (dialog; drag-drop is not wired) and "New
+world". The browser does not list built-in primitives — primitives enter the
+pipeline only as world-editor brushes. Without a workspace the import dialog
+still starts sprite documents.
 
 ## Sprite editing
 
 Sprite editors show the pass canvases (g-buffer normal/depth, render). The
-properties panel offers the source (model scale), the path-trace settings,
+properties panel offers, top to bottom: preset management (save / list /
+delete / import), the source (model scale), the path-trace settings, and
 environment controls (HDRI file or workspace `hdri/`,
-rotation/intensity/exposure/saturation), the render pass action, and
-export. Built-in primitives auto-bake (raster + render pass against the
-built-in procedural environment) when opened — placement needs no user
-assets.
+rotation/intensity/exposure/saturation). The panel has no bake or render
+buttons: the sprite editor toolbar holds the render pass action, which
+implicitly re-bakes the raster g-buffer from the current source and settings
+before accumulating, so both passes stay current and pixel-aligned. Opening
+a model auto-bakes the raster pass; the render pass runs from the toolbar.
+A picked preset applies immediately — a failed application (missing HDRI,
+unknown format) reports a named error and reverts the dropdown.
 
 ### Provenance (isoinfinity-bake/5)
 

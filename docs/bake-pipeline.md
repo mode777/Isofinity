@@ -176,9 +176,9 @@ for anti-aliasing, so sprite edges converge to true AA.
    is the sole light source, with rotation/intensity/exposure/saturation
    controls; changing any of them only updates document state — an in-flight
    accumulation is discarded, never restarted, and rendering happens only
-   through the explicit render-pass buttons. No background image is ever
-   captured into the pass. Without an environment the render pass is simply
-   not produced.
+   through the sprite editor toolbar's render pass action, which implicitly
+   re-bakes the raster g-buffer first so both passes stay pixel-aligned. No
+   background image is ever captured into the pass.
 - **Tonemapping/export**: the accumulated linear float target is composited
   through a fullscreen quad using three's `<tonemapping_fragment>`
   (ACES filmic) plus an explicit sRGB transfer and a display-referred
@@ -263,14 +263,16 @@ Named, reusable bake looks stored in the workspace's `presets/` folder
 counts plus the environment in the provenance shape — a `procedural`
 marker, or an `hdri/` file name with rotation/intensity/exposure/saturation.
 Texture size is deliberately not part of a preset (it is model-dependent
-and stays per-document). The sprite properties panel's Presets section
-saves the current settings under a name (overwriting on the same name),
-applies a listed preset — resolving the HDRI from `hdri/` first, so a
-missing file is a named error that changes nothing — and deletes presets.
-Applying fills the values into the panel and triggers nothing: like every
-properties-panel input, it never starts a bake or render pass; only the
-explicitly labeled bake buttons do (an in-flight pass is discarded when
-inputs change). Saved/edited by hand only insofar as the strict parser
+and stays per-document). The sprite properties panel's Presets section —
+placed first, above the rendering settings — saves the current settings
+under a name (overwriting on the same name), lists the workspace presets,
+and deletes presets. Picking a preset applies it immediately: the HDRI is
+resolved from `hdri/` first, so a missing file is a named error that changes
+nothing and reverts the dropdown. Applying fills the values into the panel
+and triggers nothing: like every properties-panel input, it never starts a
+bake or render pass; only the sprite editor toolbar's render action does
+(an in-flight pass is discarded when inputs change). Saved/edited by hand
+only insofar as the strict parser
 accepts them: exact format match, finite numbers, known environment shapes,
 rejected by name otherwise. Without a workspace, saving downloads the
 `.json` and applying accepts a preset file through the file dialog or

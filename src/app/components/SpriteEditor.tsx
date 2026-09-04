@@ -20,6 +20,7 @@ import {
 } from '../bakeView.js';
 import { placeInWorld } from '../store/world.js';
 import {
+  runRenderPass,
   saveSprite,
   setBakeView,
   setBoxOverlay,
@@ -276,6 +277,13 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
           onClick={onSave}
         >
           Save
+        </button>
+        <button
+          disabled={doc.viewOnly || doc.busy}
+          title="Bake the g-buffer from the current source, then render the lit pass with the current environment"
+          onClick={() => void runRenderPass(doc.docId)}
+        >
+          {doc.busy ? 'Rendering…' : doc.render ? 'Re-render pass' : 'Render pass'}
         </button>
         <button
           disabled={!doc.result || !doc.render}

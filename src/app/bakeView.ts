@@ -40,9 +40,9 @@ export function viewUnavailableReason(
         : 'source model is not loaded — re-open this sprite with the model in models/';
     case 'normals':
     case 'depth':
-      return 'bake the raster passes first (Re-bake raster in the properties panel)';
+      return 'bake the raster passes first (Render pass in the sprite toolbar)';
     case 'render':
-      return 'bake the render pass first (Bake render pass in the properties panel)';
+      return 'bake the render pass first (Render pass in the sprite toolbar)';
   }
 }
 
@@ -57,11 +57,11 @@ export function viewPlaceholder(
         ? 'No source geometry — this view needs a sprite with provenance. Re-bake it or save the bundle to restore the source.'
         : 'Source model is not loaded — re-open this sprite to preview it in 3D.';
     case 'normals':
-      return 'No raster bake yet — run "Re-bake raster" in the properties panel.';
+      return 'No raster bake yet — run "Render pass" in the sprite toolbar.';
     case 'depth':
-      return 'No raster bake yet — run "Re-bake raster" in the properties panel.';
+      return 'No raster bake yet — run "Render pass" in the sprite toolbar.';
     case 'render':
-      return 'No rendered pass yet — run "Bake render pass" in the properties panel.';
+      return 'No rendered pass yet — run "Render pass" in the sprite toolbar.';
   }
 }
 
