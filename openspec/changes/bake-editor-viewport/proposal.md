@@ -23,7 +23,8 @@ grid.
     with the baked passes.
   - **Normals** — the g-buffer world-normal visualization.
   - **Depth** — the g-buffer ray-depth visualization.
-  - **Render** — the path-traced baked render pass.
+  - **Render** — the path-traced baked render pass; the viewport switches
+    to it automatically whenever a render pass completes.
 - The old side-by-side pass figures, the g-buffer caption toggle, and the
   render figcaption button go away; bake/re-render actions already live in
   the properties panel.

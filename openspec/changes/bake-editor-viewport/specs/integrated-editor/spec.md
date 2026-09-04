@@ -71,8 +71,10 @@ of the four views at a time, selected by that switcher:
 
 When the active view's data is unavailable (for example after opening a
 bundle without provenance or before the first bake), the viewport SHALL
-show a placeholder naming what is needed instead of a blank area. View-only
-documents SHALL still display their baked passes (Normals, Depth, Render).
+show a placeholder naming what is needed instead of a blank area. When a
+render pass completes, the viewport SHALL switch to the Render view so the
+fresh result is shown. View-only documents SHALL still display their baked
+passes (Normals, Depth, Render).
 
 #### Scenario: Only one view is displayed
 
@@ -101,6 +103,13 @@ documents SHALL still display their baked passes (Normals, Depth, Render).
 - **THEN** the viewport renders that source's actual mesh in real time
   under a fixed default light from the isometric bake camera, independent
   of any baked pass
+
+#### Scenario: Render completion selects the Render view
+
+- **WHEN** a sprite document's render pass finishes while the viewport is
+  on another view (for example Realtime 3D)
+- **THEN** the viewport switches to the Render view and displays the fresh
+  render, without changing that view's zoom or pan
 
 #### Scenario: Views before the first bake
 

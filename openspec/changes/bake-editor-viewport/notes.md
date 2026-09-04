@@ -82,3 +82,12 @@ verification is static; browser scenarios are listed for the user.
 - Node-verified the anchor invariant for both origins (cursor, corner,
   center anchors; center-button reduction; 2D closed-form regression;
   clamp). `tsc --noEmit`, `vite build`, `openspec validate` pass.
+
+## Follow-up: auto-switch after rendering
+
+- When a render pass completes, the viewport now always switches to the
+  Render view (`view: 'render'` set in the success commit of
+  `runRenderPass`, so discarded stale passes never switch). The Render
+  view's own stored zoom/pan (or fit) applies — no transform reset.
+  Proposal, delta spec (viewport requirement + new scenario), and tasks
+  updated.

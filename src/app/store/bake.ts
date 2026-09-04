@@ -366,6 +366,9 @@ export async function runRenderPass(docId: string): Promise<void> {
     if (gen !== renderGen) return;
     update(docId, (d) => {
       d.render = image;
+      // A finished render pass is the freshest thing to look at — always
+      // bring it up (editor-only state; does not affect dirty).
+      d.view = 'render';
     });
     ed().markDirty(docId);
     ed().setStatus(
