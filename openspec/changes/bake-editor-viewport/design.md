@@ -67,13 +67,19 @@ zoom/pan from the image size vs. viewport size on demand (button) and for
 the default. 2D views (Normals/Depth/Render) draw the pass canvas into a
 display canvas with a `drawImage(src, …)` transform — image pixels map 1:1
 at zoom 1; `imageSmoothingEnabled = false` keeps texels crisp above 100%.
-Wheel zoom multiplies around the cursor: `pan' = cursor - (cursor - pan) *
-(z'/z)`; buttons step ×1.25; the readout shows `Math.round(zoom * 100)%`.
-Drag pans with pointer capture. The Realtime 3D view maps the same zoom to
-the orthographic frustum half-height (`fit / zoom`) and pan to camera
-offset in the view plane, so the corner controls read identically in all
-views. Alternative: CSS transforms on the canvas — rejected; resolution
-would not improve when zooming in.
+Wheel zoom multiplies around the cursor; buttons step ×1.25; the readout
+shows `Math.round(zoom * 100)%`. Drag pans with pointer capture. Pan has a
+per-view origin: top-left for the 2D views (content draws from there),
+panel center for Realtime 3D (content sits centered at pan 0) — so the
+zoom anchor formula is `pan' = k·pan + (1−k)·(anchor − origin)`, with
+`origin = 0` for 2D and the center for Realtime 3D. Using the top-left
+origin for the realtime camera too anchored its zooms at the bottom-right
+corner (the invariant point of the mismatched formula lands at 2×center).
+The Realtime 3D view maps the same zoom to the orthographic frustum
+half-height (`fit / zoom`) and pan to camera offset in the view plane, so
+the corner controls read identically in all views. Alternative: CSS
+transforms on the canvas — rejected; resolution would not improve when
+zooming in.
 
 ### D3: Realtime 3D view is a small three.js scene, not the runtime `Renderer`
 

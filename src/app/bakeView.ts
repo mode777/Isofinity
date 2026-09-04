@@ -93,16 +93,25 @@ export function fitTransform(imgW: number, imgH: number, panelW: number, panelH:
 }
 
 /**
- * Zoom by `factor` keeping the viewport point (cx, cy) fixed:
- * pan' = c - (c - pan) * (z'/z).
+ * Zoom by `factor` keeping the viewport point (cx, cy) fixed. Pan is
+ * measured from the view's pan origin — the top-left for the 2D views
+ * (their content draws from there), the panel center for Realtime 3D
+ * (whose content sits centered at pan 0): pan' = k·pan + (1−k)·(c − o).
  */
-export function zoomAround(t: ViewTransform, cx: number, cy: number, factor: number): ViewTransform {
+export function zoomAround(
+  t: ViewTransform,
+  cx: number,
+  cy: number,
+  factor: number,
+  originX = 0,
+  originY = 0,
+): ViewTransform {
   const zoom = clampZoom(t.zoom * factor);
   const k = zoom / t.zoom;
   return {
     zoom,
-    panX: cx - (cx - t.panX) * k,
-    panY: cy - (cy - t.panY) * k,
+    panX: k * t.panX + (1 - k) * (cx - originX),
+    panY: k * t.panY + (1 - k) * (cy - originY),
   };
 }
 

@@ -149,21 +149,29 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
   }, [view, image, panel, transform]);
 
   // Wheel zoom around the cursor (native listener so preventDefault works).
+  // Realtime 3D measures pan from the panel center, the 2D views from the
+  // top-left — zoomAround needs the origin to anchor correctly.
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
-      const { transform } = liveRef.current;
+      const { view, transform, panel } = liveRef.current;
       if (!transform) return;
       const rect = el.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const ox = view === 'realtime' ? (panel?.w ?? 0) / 2 : 0;
+      const oy = view === 'realtime' ? (panel?.h ?? 0) / 2 : 0;
       const next = zoomAround(
         transform,
-        e.clientX - rect.left,
-        e.clientY - rect.top,
+        cx,
+        cy,
         Math.exp(-e.deltaY * 0.0012),
+        ox,
+        oy,
       );
-      setViewTransform(doc.docId, liveRef.current.view, next);
+      setViewTransform(doc.docId, view, next);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
@@ -205,12 +213,15 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
   };
 
   const zoomBy = (factor: number): void => {
-    const { transform } = liveRef.current;
+    const { view, transform, panel } = liveRef.current;
     if (!transform) return;
+    // Anchor at the panel center, in the view's pan-origin space.
+    const ox = view === 'realtime' ? (panel?.w ?? 0) / 2 : 0;
+    const oy = view === 'realtime' ? (panel?.h ?? 0) / 2 : 0;
     setViewTransform(
       doc.docId,
-      liveRef.current.view,
-      zoomAround(transform, (panel?.w ?? 0) / 2, (panel?.h ?? 0) / 2, factor),
+      view,
+      zoomAround(transform, (panel?.w ?? 0) / 2, (panel?.h ?? 0) / 2, factor, ox, oy),
     );
   };
 

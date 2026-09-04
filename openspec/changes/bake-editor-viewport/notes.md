@@ -67,3 +67,18 @@ verification is static; browser scenarios are listed for the user.
 - `npm run build` + `openspec validate` pass after the fixes. The browser
   scenarios above still apply; add: −/+/Fit work, and each view resumes
   its own framing after a switch.
+
+## Fix round 2: realtime zoom anchoring
+
+- Realtime zooms anchored at the bottom-right corner instead of the
+  anchor point. Diagnosed: realtime content maps to
+  `screen = center + pan + world·z` (pan origin = panel center) while
+  `zoomAround` solved the anchor for a top-left origin; with a center
+  anchor the invariant point of that mismatch is exactly 2×center = the
+  bottom-right corner. `zoomAround` now takes the pan origin and the
+  editor passes the panel center for Realtime 3D (wheel and ± buttons;
+  center-anchored buttons reduce to `pan' = k·pan`). 2D behavior is
+  bit-identical to before (origin 0).
+- Node-verified the anchor invariant for both origins (cursor, corner,
+  center anchors; center-button reduction; 2D closed-form regression;
+  clamp). `tsc --noEmit`, `vite build`, `openspec validate` pass.
