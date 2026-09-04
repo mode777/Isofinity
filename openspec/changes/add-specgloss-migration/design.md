@@ -97,10 +97,19 @@ shape.
   considering the flow done. Common cases (white-ish dielectric speculars,
   tinted metals) convert essentially exactly.
 - [`WebGLPathTracer` handling of the specular-extension material] →
-  verification task bakes one converted model end to end; if the tracer
-  mishandles `KHR_materials_specular` inputs, the fallback is clamping the
-  conversion output to plain MR (drop the specular extension) rather than
-  tracer work.
+  confirmed in practice: `metalRough()` emits `KHR_materials_ior` with
+  `ior = 1000` so three's *realtime* shader saturates its ior-derived F0 —
+  and realtime looks right because its Lambert diffuse is not reduced
+  against F0. The path tracer instead treats ior physically
+  (`f0 = ((ior-1)/(ior+1))² ≈ 1`, diffuse weighted by `1 − disneyFresnel`),
+  so the diffuse term is annihilated and baked renders come out nearly
+  black. Fix applied in `clampDegenerateIor` (`src/bake/specgloss.ts`):
+  rewrite degenerate ior values (outside [1, 2]) to the glTF-normal 1.5
+  after the transform, keeping the specular extension (harmless at
+  F0 = 0.04 × tint in both renderers, and preserves any legitimate
+  specular-tint data). Previously considered but rejected: stripping the
+  specular extension entirely — equivalent in the path tracer, strictly
+  less information in the realtime preview.
 - [Exact `@gltf-transform` v4 read/write API shape] → first task is a
   spike; the blob-URL route minimizes surface, and the JSONDocument route
   is the documented fallback.

@@ -24,10 +24,20 @@
  *   G channel = 1 − A·glossiness), metalness stays 0, preserves tinted
  *   specular via KHR_materials_specular (+ KHR_materials_ior, ior 1000).
  *   Both extensions are handled by the installed three GLTFLoader.
+ * - The ior = 1000 trick saturates three's realtime ior-derived F0
+ *   (min(pow2((ior−1)/(ior+1)) × tint, 1)) so the specular look survives,
+ *   and its Lambert diffuse is not reduced against F0 — the realtime view
+ *   looks right. three-gpu-pathtracer instead treats ior physically
+ *   (f0 = ((ior−1)/(ior+1))² ≈ 1 and diffuse × (1 − disneyFresnel)), so
+ *   baked renders come out nearly black. `clampDegenerateIor` below
+ *   rewrites ior to the glTF-normal 1.5 after the transform: both
+ *   renderers then see a standard dielectric (F0 = 0.04 × tint).
  *
  * The gltf-transform packages are imported dynamically so they stay in a
  * lazy chunk outside the editor's main bundle.
  */
+import type { Document } from '@gltf-transform/core';
+import type { IOR } from '@gltf-transform/extensions';
 import { readContainerJson } from './gltf.js';
 
 /** Refuse anything but .glb — the .gltf file-set workflow is out of scope. */
@@ -43,6 +53,19 @@ function asGlbBytes(file: File): Promise<Uint8Array<ArrayBuffer>> {
     readContainerJson(file.name, buffer); // throws on bad magic/version/chunks
     return new Uint8Array(buffer);
   });
+}
+
+/**
+ * metalRough() emits ior = 1000 (see header); clamp degenerate values to
+ * the glTF-normal 1.5 so the path tracer's physical ior handling cannot
+ * annihilate the diffuse term. Legitimate KHR_materials_ior values live in
+ * roughly [1, 2] and are left untouched.
+ */
+function clampDegenerateIor(doc: Document): void {
+  for (const material of doc.getRoot().listMaterials()) {
+    const ior = material.getExtension<IOR>('KHR_materials_ior');
+    if (ior && (ior.getIOR() > 2 || ior.getIOR() < 1)) ior.setIOR(1.5);
+  }
 }
 
 /**
@@ -67,6 +90,7 @@ export async function convertSpecGlossToMR(file: File): Promise<Uint8Array<Array
     ]);
     const doc = await io.readBinary(bytes);
     await doc.transform(metalRough());
+    clampDegenerateIor(doc);
     return await io.writeBinary(doc);
   } catch (err) {
     throw new Error(
