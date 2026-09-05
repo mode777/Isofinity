@@ -749,7 +749,14 @@ export class Renderer {
         gl.uniform3f(this.uMeshOrigin, mesh.origin[0], mesh.origin[1], mesh.origin[2]);
         gl.uniformMatrix3fv(this.uMeshYaw, false, mesh.yawMat);
         gl.bindBuffer(gl.ARRAY_BUFFER, this.meshPosNorVbo);
-        gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.DYNAMIC_DRAW);
+        // Size-only (orphaning) allocation: bufferData with an array would
+        // resize the store to positions alone and the normals overflow it.
+        gl.bufferData(
+          gl.ARRAY_BUFFER,
+          mesh.positions.byteLength + mesh.normals.byteLength,
+          gl.DYNAMIC_DRAW,
+        );
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, mesh.positions);
         gl.bufferSubData(gl.ARRAY_BUFFER, mesh.positions.byteLength, mesh.normals);
         gl.drawElements(gl.TRIANGLES, this.meshIndexCount, gl.UNSIGNED_INT, 0);
       }
