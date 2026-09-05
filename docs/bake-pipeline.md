@@ -55,6 +55,12 @@ everything falls back to file dialogs and downloads exactly as before
   `docs/decisions/0005-multi-view-rotates-the-model-not-the-camera.md`.
 - The sprite rect is computed by projecting the 8 corners of the unit cube
   into view space — no hand-tuned dimensions; any camera angle keeps working.
+- The **depth clip planes derive from the same corner projection**, not from
+  fixed constants: the camera keeps its parked distance (4 units) for boxes
+  that fit and backs off deep boxes along the view direction, and near/far
+  span the projected corner depths with a small margin. The clip volume
+  always contains the whole framed box, so no view slot clips geometry the
+  lateral framing includes.
 
 ### Asset bounds
 

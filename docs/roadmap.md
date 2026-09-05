@@ -67,6 +67,11 @@ list when a change lands (and prune it — history belongs in the archives).
   ground plane with a per-document in-memory spot, fixed in the bake
   camera frame across view slots; editor chrome only (never baked, never
   persisted).
+- Bake projection clip volume always contains the framed model — near/far
+  derived from the projected box corners (camera backing off deep boxes
+  along the view direction) instead of fixed planes, so large models bake
+  without near/far-clipped geometry; no format change, old sprites
+  re-bake via provenance.
 
 ## Planned
 

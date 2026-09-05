@@ -4,7 +4,7 @@
  * server. Not part of the production build.
  */
 import { bakePrimitive, PAD_PX, applySlotModelRotation, type BakeResult } from './bake.js';
-import { yawRotatedBoxSize } from '../shared/iso.js';
+import { slotAzimuthDeg, VIEW_SLOTS, yawRotatedBoxSize } from '../shared/iso.js';
 import { buildBundle, parseBake } from './bundle.js';
 import { decodeBundle } from '../app/bundleView.js';
 import {
@@ -897,6 +897,69 @@ async function main(): Promise<void> {
     ok(
       cubeProj.width === cube.width && cubeProj.height === cube.height,
       'projection matches the cube bake rect',
+    );
+  }
+
+  // 4c. Clip-volume framing: the projection's depth planes derive from the
+  // framed box, so no view slot clips geometry the lateral framing includes
+  // (a deep box here would vanish past the old fixed near/far slab).
+  {
+    log('test: clip-volume framing');
+    const size: Vec3 = [8, 4, 8];
+    const PPU = 32;
+    for (const slot of VIEW_SLOTS) {
+      const azimuthDeg = slotAzimuthDeg(slot);
+      const frame = frameIsoBox(size, PPU, PAD_PX, azimuthDeg);
+      const cam = frame.camera;
+      ok(
+        cam.near > 0 && cam.far > cam.near,
+        `${slot}: 0 < near (${cam.near.toFixed(4)}) < far (${cam.far.toFixed(4)})`,
+      );
+      let minInner = Infinity;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (let i = 0; i < 8; i++) {
+        const corner = new Vector3(
+          (i & 1) * size[0],
+          ((i >> 1) & 1) * size[1],
+          ((i >> 2) & 1) * size[2],
+        );
+        corner.applyMatrix4(cam.matrixWorldInverse);
+        minInner = Math.min(minInner, cam.far + corner.z, -cam.near - corner.z);
+        const px = corner.project(cam);
+        const x = (px.x * 0.5 + 0.5) * frame.width;
+        const y = (1 - (px.y * 0.5 + 0.5)) * frame.height;
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      }
+      ok(
+        minInner > 0,
+        `${slot}: all 8 corners strictly inside the clip slab (margin ${minInner.toFixed(4)})`,
+      );
+      ok(
+        approx(minX, PAD_PX, 0.51) &&
+          approx(minY, PAD_PX, 0.51) &&
+          approx(maxX, frame.width - PAD_PX, 0.51) &&
+          approx(maxY, frame.height - PAD_PX, 0.51),
+        `${slot}: lateral framing unchanged — corners sit PAD_PX inside the ${frame.width}x${frame.height} rect`,
+      );
+    }
+    // A box that fits the old parked camera keeps its distance exactly.
+    const small = frameIsoBox([2, 1, 3], PPU, PAD_PX);
+    const deep = frameIsoBox(size, PPU, PAD_PX);
+    const smallDist = small.camera.position.distanceTo(new Vector3(1, 0.5, 1.5));
+    ok(
+      approx(smallDist, 4, 1e-9),
+      `small box keeps the parked camera distance (got ${smallDist.toFixed(6)})`,
+    );
+    const deepDist = deep.camera.position.distanceTo(new Vector3(4, 2, 4));
+    ok(
+      deepDist > 4,
+      `deep box backs the camera off (distance ${deepDist.toFixed(4)})`,
     );
   }
 

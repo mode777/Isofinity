@@ -14,6 +14,14 @@ export const ISO_VIEW_DIR = new Vector3(VIEW_DIR[0], VIEW_DIR[1], VIEW_DIR[2]);
 
 const DEG2RAD = Math.PI / 180;
 const CAMERA_DISTANCE = 4;
+/** In-front gap kept between the camera and the nearest box corner when a
+ *  deep box forces the camera to back off (see `frameIsoBox`). */
+const CAMERA_HEADROOM = 1;
+/** Depth clip margin: 1% of the box's depth span, floored at a small
+ *  absolute epsilon so boundary geometry and flat boxes stay strictly
+ *  inside the frustum. */
+const CLIP_MARGIN = 0.01;
+const CLIP_EPSILON = 1e-4;
 
 export interface IsoFrame {
   camera: OrthographicCamera;
@@ -56,11 +64,22 @@ export function frameIsoBox(
   padPx: number,
   azimuthDeg: number = ISO_AZIMUTH_DEG,
 ): IsoFrame {
-  const camera = new OrthographicCamera(-1, 1, 1, -1, 1, CAMERA_DISTANCE * 2 + 1);
   const dir = isoDirection(azimuthDeg, ISO_ELEVATION_DEG);
   const center = new Vector3(size[0] / 2, size[1] / 2, size[2] / 2);
+  // Deep boxes force the camera back: geometry behind the camera plane is
+  // unreachable by any near plane. Distance along the view direction maps
+  // to no lateral change under orthographic projection, so only boxes past
+  // the parked distance move the camera at all.
+  const halfDepth =
+    (Math.abs(dir.x) * size[0] +
+      Math.abs(dir.y) * size[1] +
+      Math.abs(dir.z) * size[2]) /
+    2;
+  const distance = Math.max(CAMERA_DISTANCE, halfDepth + CAMERA_HEADROOM);
+
+  const camera = new OrthographicCamera(-1, 1, 1, -1, 1, CAMERA_DISTANCE * 2 + 1);
   camera.up.set(0, 1, 0);
-  camera.position.copy(center).addScaledVector(dir, CAMERA_DISTANCE);
+  camera.position.copy(center).addScaledVector(dir, distance);
   camera.lookAt(center);
   camera.updateMatrixWorld(true);
 
@@ -68,6 +87,8 @@ export function frameIsoBox(
   let maxX = -Infinity;
   let minY = Infinity;
   let maxY = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
   for (let i = 0; i < 8; i++) {
     const corner = new Vector3(
       (i & 1) * size[0],
@@ -79,6 +100,8 @@ export function frameIsoBox(
     maxX = Math.max(maxX, corner.x);
     minY = Math.min(minY, corner.y);
     maxY = Math.max(maxY, corner.y);
+    minZ = Math.min(minZ, corner.z);
+    maxZ = Math.max(maxZ, corner.z);
   }
 
   const pad = padPx / pxPerUnit;
@@ -86,6 +109,12 @@ export function frameIsoBox(
   camera.right = maxX + pad;
   camera.bottom = minY - pad;
   camera.top = maxY + pad;
+  // Depth clip planes derive from the same corner projection (camera space
+  // looks down -Z: -maxZ is the nearest corner distance, -minZ the
+  // farthest), so the clip volume always contains the whole box.
+  const margin = Math.max(CLIP_EPSILON, CLIP_MARGIN * (maxZ - minZ));
+  camera.near = Math.max(CLIP_EPSILON, -maxZ - margin);
+  camera.far = -minZ + margin;
   camera.updateProjectionMatrix();
 
   const width = Math.round((camera.right - camera.left) * pxPerUnit);
