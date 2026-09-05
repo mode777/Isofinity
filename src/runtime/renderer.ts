@@ -141,6 +141,7 @@ const MESH_VERT = `#version 300 es
 precision highp float;
 in vec3 aPos;
 in vec3 aNormal;
+in vec2 aUv;
 uniform mat3 uYaw;
 uniform vec3 uOrigin;  // placement feet position (world x, y, z)
 uniform vec3 uProj;    // world-image origin px (x, y), px per unit
@@ -154,6 +155,7 @@ void main() {
   vec3 wp = uYaw * aPos + uOrigin;
   vWorldPos = wp;
   vNormal = uYaw * aNormal;
+  vUv = aUv;
   vec2 px = vec2(uProj.x + dot(SCREEN_RIGHT, wp) * uProj.z,
                  uProj.y - dot(SCREEN_UP, wp) * uProj.z);
   px = px * uView.xy + uView.zw;
@@ -294,7 +296,9 @@ export class Renderer {
   private instVbo: WebGLBuffer;
   private meshProg: WebGLProgram;
   private meshVao: WebGLVertexArrayObject;
-  private meshPosNorVbo: WebGLBuffer | null = null;
+  private meshPosVbo: WebGLBuffer | null = null;
+  private meshNrmVbo: WebGLBuffer | null = null;
+  private meshUvVbo: WebGLBuffer | null = null;
   private meshIbo: WebGLBuffer | null = null;
   private meshAlbedoTex: WebGLTexture | null = null;
   private meshIndexCount = 0;
@@ -562,10 +566,12 @@ export class Renderer {
   setMesh(geometry: MeshGeometry | null, surface: MeshSurface | null): void {
     const gl = this.gl;
     gl.bindVertexArray(this.meshVao);
-    if (this.meshPosNorVbo) gl.deleteBuffer(this.meshPosNorVbo);
+    if (this.meshPosVbo) gl.deleteBuffer(this.meshPosVbo);
+    if (this.meshNrmVbo) gl.deleteBuffer(this.meshNrmVbo);
+    if (this.meshUvVbo) gl.deleteBuffer(this.meshUvVbo);
     if (this.meshIbo) gl.deleteBuffer(this.meshIbo);
     if (this.meshAlbedoTex) gl.deleteTexture(this.meshAlbedoTex);
-    this.meshPosNorVbo = this.meshIbo = null;
+    this.meshPosVbo = this.meshNrmVbo = this.meshUvVbo = this.meshIbo = null;
     this.meshAlbedoTex = null;
     this.meshIndexCount = 0;
     if (!geometry) {
@@ -573,18 +579,26 @@ export class Renderer {
       return;
     }
 
-    const posNor = new Float32Array(geometry.vertexCount * 6);
-    posNor.set(geometry.positions, 0);
-    posNor.set(geometry.normals, geometry.vertexCount * 3);
-    this.meshPosNorVbo = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.meshPosNorVbo);
-    gl.bufferData(gl.ARRAY_BUFFER, posNor, gl.DYNAMIC_DRAW);
+    this.meshPosVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.meshPosVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, geometry.positions, gl.DYNAMIC_DRAW);
     const aPos = gl.getAttribLocation(this.meshProg, 'aPos');
     gl.enableVertexAttribArray(aPos);
-    gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 24, 0);
+    gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 12, 0);
+
+    this.meshNrmVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.meshNrmVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, geometry.normals, gl.DYNAMIC_DRAW);
     const aNormal = gl.getAttribLocation(this.meshProg, 'aNormal');
     gl.enableVertexAttribArray(aNormal);
-    gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 24, 12);
+    gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 12, 0);
+
+    this.meshUvVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.meshUvVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, geometry.uvs, gl.STATIC_DRAW);
+    const aUv = gl.getAttribLocation(this.meshProg, 'aUv');
+    gl.enableVertexAttribArray(aUv);
+    gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 8, 0);
 
     this.meshIbo = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.meshIbo);
@@ -655,7 +669,9 @@ export class Renderer {
     gl.deleteVertexArray(this.highlightVao);
     gl.deleteBuffer(this.instVbo);
     gl.deleteVertexArray(this.spriteVao);
-    if (this.meshPosNorVbo) gl.deleteBuffer(this.meshPosNorVbo);
+    if (this.meshPosVbo) gl.deleteBuffer(this.meshPosVbo);
+    if (this.meshNrmVbo) gl.deleteBuffer(this.meshNrmVbo);
+    if (this.meshUvVbo) gl.deleteBuffer(this.meshUvVbo);
     if (this.meshIbo) gl.deleteBuffer(this.meshIbo);
     if (this.meshAlbedoTex) gl.deleteTexture(this.meshAlbedoTex);
     gl.deleteVertexArray(this.meshVao);
@@ -748,16 +764,10 @@ export class Renderer {
       for (const mesh of meshes) {
         gl.uniform3f(this.uMeshOrigin, mesh.origin[0], mesh.origin[1], mesh.origin[2]);
         gl.uniformMatrix3fv(this.uMeshYaw, false, mesh.yawMat);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.meshPosNorVbo);
-        // Size-only (orphaning) allocation: bufferData with an array would
-        // resize the store to positions alone and the normals overflow it.
-        gl.bufferData(
-          gl.ARRAY_BUFFER,
-          mesh.positions.byteLength + mesh.normals.byteLength,
-          gl.DYNAMIC_DRAW,
-        );
-        gl.bufferSubData(gl.ARRAY_BUFFER, 0, mesh.positions);
-        gl.bufferSubData(gl.ARRAY_BUFFER, mesh.positions.byteLength, mesh.normals);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.meshPosVbo);
+        gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.meshNrmVbo);
+        gl.bufferData(gl.ARRAY_BUFFER, mesh.normals, gl.DYNAMIC_DRAW);
         gl.drawElements(gl.TRIANGLES, this.meshIndexCount, gl.UNSIGNED_INT, 0);
       }
       gl.disable(gl.DEPTH_TEST);

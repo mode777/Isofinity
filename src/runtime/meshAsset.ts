@@ -22,6 +22,8 @@ export const MAX_JOINTS = 64;
 export interface MeshGeometry {
   positions: Float32Array;
   normals: Float32Array;
+  /** Texture coordinates (TEXCOORD_0; zeros when the asset has none). */
+  uvs: Float32Array;
   /** Joint indices as floats (integers 0..jointCount-1) — float attributes
    *  avoid the driver-specific integer-attribute pitfalls. */
   joints: Float32Array;
@@ -223,6 +225,7 @@ export function makeCubeMesh(size = 0.5): CharacterAsset {
     geometry: {
       positions: new Float32Array(positions),
       normals: new Float32Array(normals),
+      uvs: new Float32Array(vertexCount * 2),
       joints: new Float32Array(vertexCount * 4),
       weights: new Float32Array(vertexCount * 4).map((_, i) => (i % 4 === 0 ? 1 : 0)),
       indices: new Uint32Array(indices),
@@ -301,6 +304,15 @@ export async function parseCharacterAsset(bytes: ArrayBuffer): Promise<Character
     normals[i * 3] = v.x;
     normals[i * 3 + 1] = v.y;
     normals[i * 3 + 2] = v.z;
+  }
+
+  const uvAttr = geometry.getAttribute('uv');
+  const uvs = new Float32Array(vertexCount * 2);
+  for (let i = 0; i < vertexCount; i++) {
+    if (uvAttr) {
+      uvs[i * 2] = uvAttr.getX(i);
+      uvs[i * 2 + 1] = uvAttr.getY(i);
+    }
   }
 
   const joints = new Float32Array(vertexCount * 4);
@@ -382,7 +394,7 @@ export async function parseCharacterAsset(bytes: ArrayBuffer): Promise<Character
   };
 
   const asset0: CharacterAsset = {
-    geometry: { positions, normals, joints, weights, indices, vertexCount, jointCount },
+    geometry: { positions, normals, uvs, joints, weights, indices, vertexCount, jointCount },
     surface,
     source: scene,
     clips: gltf.animations,
