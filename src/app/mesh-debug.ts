@@ -66,6 +66,15 @@ async function main(): Promise<void> {
   player.update(0);
   const frozen = new Float32Array(player.palette);
 
+  // Byte-level comparison against the Node reference (ref-dump): if these
+  // differ from the Node values, the browser parse itself is the fault.
+  const f = (a: Float32Array, n: number): string => [...a.slice(0, n)].map((v) => v.toFixed(4)).join(', ');
+  log(`positions[0..8]: ${f(asset.geometry.positions, 9)}`);
+  log(`normals[0..8]:   ${f(asset.geometry.normals, 9)}`);
+  log(`joints[0..7]:    ${f(asset.geometry.joints, 8)}`);
+  log(`weights[0..7]:   ${f(asset.geometry.weights, 8)}`);
+  log(`indices[0..11]:  ${[...asset.geometry.indices.slice(0, 12)].join(', ')}`);
+
   const stages: Stage[] = [
     {
       label: '1. unskinned cube (identity palette, white)',
