@@ -131,7 +131,10 @@ world image (the bake's isometric projection, CPU-computed once) through
 a 2D view transform — mouse wheel zooms around the cursor, middle-drag
 pans (left paints, right erases), and corner `− / % / + / Fit` controls
 mirror the sprite viewport (shared `ViewTransform`/zoom constants in
-`src/app/bakeView.ts`). Picking inverts the same transform, so
+`src/app/bakeView.ts`). On touch screens, a three-finger drag pans by
+its centroid (one finger keeps tap-to-place/drag-paint, two fingers are
+a neutral pre-gesture; trackpad three-finger gestures are OS-consumed
+and unreachable). Picking inverts the same transform, so
 placements land at the same ground position at every zoom level. The
 transform defaults to fit (whole grid letterboxed) and is per-document
 in-memory editor state — it survives tab switches and is never written
@@ -285,7 +288,9 @@ cursor, tool buttons or eraser selects. Ground picking inverts the shared
 projection analytically (`screenToGround`) after inverting the viewport's
 zoom/pan transform, no hit-testing. The 12×12 checkerboard is a visual
 reference only. Viewport navigation: wheel zooms around the cursor,
-middle-drag pans; the left/right placement bindings never move.
+middle-drag pans; on touch screens three fingers pan (one finger
+paints/taps, two are neutral); the left/right placement bindings never
+move.
 
 ## Source layout
 

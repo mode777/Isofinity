@@ -31,6 +31,11 @@ not the object that will land there.
   click/drag placement behavior is unchanged. The ghost replaces the
   unit-cell highlight while a brush is active; the eraser keeps the cell
   highlight.
+- **Touch panning** — on touch screens, a three-finger drag pans the
+  viewport while a single finger keeps tap-to-place/drag-paint and two
+  fingers are a neutral pre-gesture. (Trackpad three-finger gestures are
+  consumed by the OS and never reach the browser, so they are out of
+  reach for web input.)
 - Zoom/pan and ghost are **in-memory per-document editor state** (per
   ADR 0006): they survive tab switches, are never serialized into world
   JSON, and are recreated at fit/defaults on reload.
@@ -70,5 +75,6 @@ not the object that will land there.
   zoom/pan and ghost are editor chrome and are never persisted.
 - **Non-goals:** no camera rotation or elevation change, no
   grid-snapping change (placement stays free-form cursor-centered), no
-  placement selection/move/delete tools, no touch/pinch gestures, no
+  placement selection/move/delete tools, no pinch-zoom, no trackpad
+  multi-finger gestures (OS-consumed, unreachable from web input), no
   changes to the bake pipeline, bundle format, or lighting.

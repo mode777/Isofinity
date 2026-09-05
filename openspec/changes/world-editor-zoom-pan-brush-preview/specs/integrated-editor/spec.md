@@ -10,6 +10,12 @@ and panning with the sprite editor's established viewport conventions:
 - Middle-mouse drag SHALL pan the viewport at constant zoom; the left
   button SHALL keep painting placements and the right button SHALL keep
   erasing.
+- On touch screens, a three-finger drag SHALL pan the viewport at
+  constant zoom without placing or erasing; a single finger SHALL keep
+  the pointer's place/paint behavior (tap places, drag paints); two
+  fingers SHALL be a neutral pre-gesture that neither paints nor pans.
+  Trackpad three-finger gestures are consumed by the operating system
+  and never reach the browser, so they are explicitly out of scope.
 - Corner zoom controls (zoom out, a percentage readout, zoom in, and a
   fit action) SHALL overlay the viewport. Zoom actions SHALL anchor at
   the panel center; fit SHALL restore the default view that shows the
@@ -39,6 +45,20 @@ opened or created.
   sprites
 - **THEN** the viewport pans with the drag and no placement is added or
   erased
+
+#### Scenario: Three-finger touch drag pans without placing
+
+- **WHEN** the user drags three fingers across the world viewport on a
+  touch screen
+- **THEN** the viewport pans with the fingers and no placement is added
+  or erased
+
+#### Scenario: Single-finger touch keeps the painting behavior
+
+- **WHEN** the user taps, or drags one finger across, the world viewport
+  on a touch screen
+- **THEN** a tap places the selected brush at the point and a drag
+  paints, exactly as a mouse click/drag does
 
 #### Scenario: Zoom controls mirror the sprite editor
 

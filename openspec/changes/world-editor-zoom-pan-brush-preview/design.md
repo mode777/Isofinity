@@ -74,6 +74,22 @@ is chosen because left paints and right erases; a ResizeObserver tracks
 the panel like `SpriteEditor.tsx` and only re-fits while the transform
 is null.
 
+Touch screens join the same bindings: `touch-action: none` is already on
+the canvas, so Pointer Events deliver every finger. Touch runs a small
+state machine beside the mouse path: **one finger** behaves like the
+mouse's left button — drag paints and drives the ghost, and a release
+without movement beyond a small slop places (tap-to-place); **two
+fingers** are a neutral pre-gesture (nothing paints, so positioning a
+third finger is safe); **three fingers** pan by their centroid via
+`panned` from the transform captured when the third finger lands,
+ending cleanly (transform kept, no snap-back) when the count drops
+below three. Placement is deliberately deferred to move/release instead
+of pointer-down so landing a pan gesture cannot drop accidental sprites
+— a trade against the mouse's click-to-place immediacy, pinned by the
+spec's touch outcomes rather than its phasing. Three fingers on a
+*trackpad* never reach the browser (OS-level gestures), so trackpad
+users keep middle-drag/wheel; pinch-zoom stays a non-goal.
+
 ### D3 — Ghost as an extra depth-tested instance of the sprite program (not an overlay canvas)
 
 When the active tool is a brush whose layer is loaded and the cursor is

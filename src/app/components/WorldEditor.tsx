@@ -274,6 +274,29 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     // Middle-drag pans (left paints, right erases); capture keeps the
     // drag alive outside the canvas.
     let pan: { x: number; y: number; zoom: number; panX: number; panY: number } | null = null;
+
+    // Touch state machine: 1 finger = left button (drag paints, release
+    // without movement taps), 2 fingers = neutral pre-gesture, 3 fingers
+    // = pan by centroid from the transform captured at gesture start.
+    const touchPts = new Map<
+      number,
+      { x: number; y: number; sx: number; sy: number; moved: boolean }
+    >();
+    let touchPan: { cx: number; cy: number; t: ViewTransform } | null = null;
+    const touchCentroid = (): [number, number] => {
+      let x = 0;
+      let y = 0;
+      for (const p of touchPts.values()) {
+        x += p.x;
+        y += p.y;
+      }
+      return [x / touchPts.size, y / touchPts.size];
+    };
+    const touchEnd = (e: PointerEvent): void => {
+      touchPts.delete(e.pointerId);
+      if (touchPts.size < 3) touchPan = null;
+    };
+
     const onMove = (e: PointerEvent): void => {
       if (pan) {
         setWorldViewTransform(
@@ -286,10 +309,49 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         );
         return;
       }
+      const tp = e.pointerType === 'touch' ? touchPts.get(e.pointerId) : undefined;
+      if (tp) {
+        tp.x = e.clientX;
+        tp.y = e.clientY;
+        if (!tp.moved && (Math.abs(tp.x - tp.sx) > 5 || Math.abs(tp.y - tp.sy) > 5)) {
+          tp.moved = true;
+        }
+        if (touchPts.size >= 3) {
+          if (touchPan) {
+            const [cx, cy] = touchCentroid();
+            setWorldViewTransform(doc.docId, panned(touchPan.t, cx - touchPan.cx, cy - touchPan.cy));
+          }
+          return;
+        }
+        if (touchPts.size === 1) {
+          hoverRef.current = pointerGround(e);
+          placeAt(doc.docId, hoverRef.current[0], hoverRef.current[1]);
+        }
+        return;
+      }
       hoverRef.current = pointerGround(e);
       if (e.buttons & 1) placeAt(doc.docId, hoverRef.current[0], hoverRef.current[1]);
     };
     const onDown = (e: PointerEvent): void => {
+      if (e.pointerType === 'touch') {
+        // No placement on down: a pan gesture must be able to land all
+        // three fingers without dropping sprites.
+        e.preventDefault();
+        touchPts.set(e.pointerId, {
+          x: e.clientX,
+          y: e.clientY,
+          sx: e.clientX,
+          sy: e.clientY,
+          moved: false,
+        });
+        canvas.setPointerCapture(e.pointerId);
+        if (touchPts.size === 3) {
+          const [cx, cy] = touchCentroid();
+          const t = liveRef.current.transform;
+          touchPan = t ? { cx, cy, t } : null;
+        }
+        return;
+      }
       if (e.button === 1) {
         e.preventDefault();
         const t = liveRef.current.transform;
@@ -304,12 +366,25 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       else if (e.button === 0) placeAt(doc.docId, gx, gz);
     };
     const onUp = (e: PointerEvent): void => {
+      if (e.pointerType === 'touch') {
+        const tp = touchPts.get(e.pointerId);
+        touchEnd(e);
+        // Tap-to-place: a lone finger released where it landed.
+        if (tp && !tp.moved && touchPts.size === 0) {
+          hoverRef.current = pointerGround(e);
+          placeAt(doc.docId, hoverRef.current[0], hoverRef.current[1]);
+        }
+        return;
+      }
       if (e.button === 1 && pan) {
         pan = null;
         if (canvas.hasPointerCapture(e.pointerId)) {
           canvas.releasePointerCapture(e.pointerId);
         }
       }
+    };
+    const onCancel = (e: PointerEvent): void => {
+      if (e.pointerType === 'touch') touchEnd(e);
     };
     const onLeave = (): void => {
       hoverRef.current = null;
@@ -335,6 +410,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     canvas.addEventListener('pointermove', onMove);
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('pointerup', onUp);
+    canvas.addEventListener('pointercancel', onCancel);
     canvas.addEventListener('pointerleave', onLeave);
     canvas.addEventListener('contextmenu', onContext);
     canvas.addEventListener('wheel', onWheel, { passive: false });
@@ -344,6 +420,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       canvas.removeEventListener('pointermove', onMove);
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointerup', onUp);
+      canvas.removeEventListener('pointercancel', onCancel);
       canvas.removeEventListener('pointerleave', onLeave);
       canvas.removeEventListener('contextmenu', onContext);
       canvas.removeEventListener('wheel', onWheel);
