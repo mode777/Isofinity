@@ -29,6 +29,29 @@ function log(msg: string, cls?: 'pass' | 'fail'): void {
   out.appendChild(line);
 }
 
+/** Drain and report all pending GL errors. */
+function glErrors(label: string, gl: WebGL2RenderingContext): void {
+  for (let i = 0; i < 8; i++) {
+    const err = gl.getError();
+    if (err === gl.NO_ERROR) break;
+    log(`  [GL] ${label}: 0x${err.toString(16)}`, 'fail');
+  }
+}
+
+function locations(label: string, renderer: Renderer): void {
+  const gl = renderer.context;
+  const prog = renderer.meshProgram;
+  const attr = (name: string): string => `${name}=${gl.getAttribLocation(prog, name)}`;
+  const uni = (name: string): string => {
+    const loc = gl.getUniformLocation(prog, name);
+    return `${name}=${loc === null ? 'NULL' : 'ok'}`;
+  };
+  log(
+    `  ${label}: attrs ${[attr('aPos'), attr('aNormal'), attr('aWeight'), attr('aJoint')].join(' ')} | ` +
+      `unis ${[uni('uPalette[0]'), uni('uOrigin'), uni('uYaw'), uni('uProj'), uni('uRes'), uni('uView')].join(' ')}`,
+  );
+}
+
 interface Stage {
   label: string;
   expectation: string;
@@ -156,21 +179,47 @@ async function main(): Promise<void> {
       0, 0, 0,
     ]));
     renderers.push({ renderer, stage, canvas });
+    locations(stage.label, renderer);
+    glErrors('init', renderer.context);
   }
 
   // Sprite-less frames: the sprite batch is skipped (count 0).
   let last = performance.now();
+  let frames = 0;
   const loop = (now: number): void => {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
     for (const { renderer, stage, canvas } of renderers) {
       stage.draw(renderer, canvas, stage.label.includes('animated') || stage.label.includes('textured') ? dt : null);
+      if (frames === 1) {
+        glErrors(stage.label, renderer.context);
+        reportFrame(stage.label, renderer);
+      }
     }
+    frames++;
     requestAnimationFrame(loop);
   };
   requestAnimationFrame(loop);
 
   log('All stages rendering. The first row that looks wrong localizes the fault.', 'pass');
+}
+
+/** Objective readback analysis: background coverage + distinct colors. */
+function reportFrame(label: string, renderer: Renderer): void {
+  const canvas = renderer.context.canvas as HTMLCanvasElement;
+  const px = new Uint8Array(canvas.width * canvas.height * 4);
+  renderer.readPixels(px);
+  const bg = px[0];
+  let content = 0;
+  const colors = new Set<number>();
+  for (let i = 0; i < canvas.width * canvas.height; i++) {
+    const key = (px[i * 4] << 16) | (px[i * 4 + 1] << 8) | px[i * 4 + 2];
+    if (Math.abs(px[i * 4] - bg) + Math.abs(px[i * 4 + 1] - bg) + Math.abs(px[i * 4 + 2] - bg) > 12) content++;
+    colors.add(key);
+  }
+  log(
+    `  ${label}: content ${(100 * content / (canvas.width * canvas.height)).toFixed(1)}%, distinct colors ${colors.size}`,
+  );
 }
 
 void main();

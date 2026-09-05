@@ -686,6 +686,16 @@ export class Renderer {
     gl.deleteProgram(this.spriteProg);
   }
 
+  /** The raw context (diagnostic harnesses only — do not draw through it). */
+  get context(): WebGL2RenderingContext {
+    return this.gl;
+  }
+
+  /** The mesh program (diagnostic harnesses only). */
+  get meshProgram(): WebGLProgram {
+    return this.meshProg;
+  }
+
   /** Readback of the default framebuffer (verification harnesses). */
   readPixels(out: Uint8Array): void {
     const canvas = this.gl.canvas as HTMLCanvasElement;
