@@ -1,7 +1,7 @@
 ## 1. Camera clip fit
 
 - [x] 1.1 In `src/bake/iso.ts` `frameIsoBox`, extend the existing 8-corner camera-space loop to also track min/max camera-space Z and set `near`/`far` from them per design D1 (margin + positive-epsilon guard for flat boxes) — verify `npm run build` passes and a box that fits the old slab still yields the same `left/right/top/bottom`, `width/height` and `originPx`
-- [ ] 1.2 Confirm no consumer edits are needed by grepping near/far usage (`bake.ts`, `pt.ts`, `realtime.ts`, `export.ts`, `src/runtime/`) — verify only projection-matrix consumers exist and `reconstructWorldPos` never reads them
+- [x] 1.2 Confirm no consumer edits are needed by grepping near/far usage (`bake.ts`, `pt.ts`, `realtime.ts`, `export.ts`, `src/runtime/`) — verify only projection-matrix consumers exist and `reconstructWorldPos` never reads them
 
 ## 2. Verification
 
