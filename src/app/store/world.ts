@@ -166,6 +166,9 @@ export function newWorldDoc(): string {
     viewTransform: null,
   };
   ed().addDoc(doc);
+  // A probe exists from the start (built-in default environment until a
+  // loaded bundle's provenance captures the env it was baked with).
+  void updateShProbe(doc.docId);
   return doc.docId;
 }
 
@@ -382,6 +385,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     doc.tool = doc.layers[0]?.id ?? '';
 
     ed().addDoc(doc);
+    void updateShProbe(doc.docId);
     const placed = data.sprites.length - skippedCount(data.sprites, skipped);
     ed().setStatus(
       `Loaded world "${doc.title}" — ${placed} placed` +
@@ -690,6 +694,7 @@ export async function selectBrush(docId: string, brush: Brush): Promise<void> {
         d.character = asset;
         d.tool = CHARACTER_BRUSH_ID;
       });
+      void updateShProbe(docId);
       ed().markDirty(docId);
       ed().setStatus(brushStatus(CHARACTER_BRUSH_ID));
     } catch (err) {
