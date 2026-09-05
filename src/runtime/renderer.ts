@@ -137,7 +137,7 @@ precision highp float;
 in vec3 aPos;
 in vec3 aNormal;
 in vec4 aWeight;
-in ivec4 aJoint;
+in vec4 aJoint;
 uniform mat4 uPalette[${MAX_MESH_JOINTS}];
 uniform mat3 uYaw;
 uniform vec3 uOrigin;  // placement feet position (world x, y, z)
@@ -149,10 +149,10 @@ out vec3 vWorldPos;
 out vec2 vUv;
 ${ISO_GLSL}
 void main() {
-  mat4 skin = aWeight.x * uPalette[aJoint.x]
-            + aWeight.y * uPalette[aJoint.y]
-            + aWeight.z * uPalette[aJoint.z]
-            + aWeight.w * uPalette[aJoint.w];
+  mat4 skin = aWeight.x * uPalette[int(aJoint.x + 0.5)]
+            + aWeight.y * uPalette[int(aJoint.y + 0.5)]
+            + aWeight.z * uPalette[int(aJoint.z + 0.5)]
+            + aWeight.w * uPalette[int(aJoint.w + 0.5)];
   vec3 skinned = (skin * vec4(aPos, 1.0)).xyz;
   vec3 wp = uYaw * skinned + uOrigin;
   vWorldPos = wp;
@@ -604,7 +604,7 @@ export class Renderer {
     gl.bufferData(gl.ARRAY_BUFFER, geometry.joints, gl.STATIC_DRAW);
     const aJoint = gl.getAttribLocation(this.meshProg, 'aJoint');
     gl.enableVertexAttribArray(aJoint);
-    gl.vertexAttribIPointer(aJoint, 4, gl.UNSIGNED_SHORT, 8, 0);
+    gl.vertexAttribPointer(aJoint, 4, gl.FLOAT, false, 16, 0);
 
     this.meshIbo = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.meshIbo);

@@ -22,7 +22,9 @@ export const MAX_JOINTS = 64;
 export interface MeshGeometry {
   positions: Float32Array;
   normals: Float32Array;
-  joints: Uint16Array;
+  /** Joint indices as floats (integers 0..jointCount-1) — float attributes
+   *  avoid the driver-specific integer-attribute pitfalls. */
+  joints: Float32Array;
   weights: Float32Array;
   indices: Uint32Array;
   vertexCount: number;
@@ -192,7 +194,7 @@ export async function parseCharacterAsset(bytes: ArrayBuffer): Promise<Character
     normals[i * 3 + 2] = v.z;
   }
 
-  const joints = new Uint16Array(vertexCount * 4);
+  const joints = new Float32Array(vertexCount * 4);
   const weights = new Float32Array(vertexCount * 4);
   for (let c = 0; c < 4; c++) {
     for (let i = 0; i < vertexCount; i++) {
