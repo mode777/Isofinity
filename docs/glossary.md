@@ -63,11 +63,12 @@ the pointer for the real semantics.
   Rendering resolves the placement's layer via `viewLayerId(asset, dir)`;
   picking and erase stay direction-independent.
 - **Placement** — one instance of a sprite layer at a continuous ground
-  position and height; free-form (not grid-snapped), height ≥ 0.
-- **Placement height** — a placement's world-unit offset above the ground
-  plane. The brush height is adjusted with shift + vertical mouse move or
-  set exactly in the toolbar's height field (per-document in-memory
-  editor state, never saved).
+  position and height; free-form (not grid-snapped), height may be
+  negative (sunk below the ground plane).
+- **Placement height** — a placement's signed world-unit offset from the
+  ground plane (negative = sunk below it). The brush height is adjusted
+  with shift + vertical mouse move or set exactly in the toolbar's
+  height field (per-document in-memory editor state, never saved).
 - **Surface snap** — toolbar toggle: placements take their height from
   the visible surface under the cursor, computed CPU-side from the
   in-memory g-buffers; overrides the shift+wheel height.

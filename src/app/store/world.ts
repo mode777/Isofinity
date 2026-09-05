@@ -429,17 +429,16 @@ export function placeAt(docId: string, gx: number, gz: number, y = 0): void {
 }
 
 /**
- * Set the brush's placement height (world units, clamped to the ground
- * plane). Editor state only: never marks the document dirty and never
- * reaches a saved world file.
+ * Set the brush's placement height (world units; may be negative, sinking
+ * below the ground plane). Non-finite input is ignored. Editor state only:
+ * never marks the document dirty and never reaches a saved world file.
  */
 export function setHeightLevel(docId: string, y: number): void {
   const doc = worldDoc(docId);
   if (!doc) return;
-  const clamped = Math.max(0, y);
-  if (clamped === doc.heightLevel) return;
+  if (!Number.isFinite(y) || y === doc.heightLevel) return;
   update(docId, (d) => {
-    d.heightLevel = clamped;
+    d.heightLevel = y;
   });
 }
 

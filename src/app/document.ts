@@ -182,9 +182,10 @@ export interface WorldDocument {
    */
   tool: string;
   /**
-   * Placement height of the current brush (world units, >= 0), adjusted
-   * with shift+wheel. Overridden by surface snap while that is on.
-   * In-memory editor state only — never written into world files.
+   * Placement height of the current brush (world units; may be negative,
+   * sinking below the ground plane), adjusted with shift+wheel. Overridden
+   * by surface snap while that is on. In-memory editor state only — never
+   * written into world files.
    */
   heightLevel: number;
   /**

@@ -323,10 +323,11 @@ Placements are **free-form** (continuous x/z on the ground plane,
 cursor-centered) — not grid-snapped — so overlapping objects exercise the
 per-pixel occlusion. Placements also carry a **height**: holding shift
 and moving the mouse vertically over the viewport raises/lowers the brush
-height in free-form steps (up = raise, clamped at the ground plane), and
-the toolbar's numeric height field sets it exactly (precise-input
-conventions: Enter/blur commits, clamp ≥ 0, invalid input reverts,
-Escape cancels). The toolbar's **surface snap** toggle overrides both —
+height in free-form steps (up = raise, negative heights sink below the
+ground plane), and the toolbar's numeric height field sets it exactly
+(precise-input conventions: Enter/blur commits, negative values apply
+verbatim, invalid input reverts, Escape cancels). The toolbar's
+**surface snap** toggle overrides both —
 the placement then takes its height from the visible surface under the
 cursor, computed CPU-side from the world document's in-memory g-buffers
 (max composite depth among the covering placements' texels, unprojected

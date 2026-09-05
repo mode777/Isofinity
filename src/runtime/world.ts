@@ -3,7 +3,10 @@ import { VIEW_DIR, type ViewSlot } from '../shared/iso.js';
 export interface Placement {
   x: number;
   z: number;
-  /** Height above the ground plane (world units, >= 0). */
+  /**
+   * Height offset from the ground plane (world units; negative sinks the
+   * placement below the plane).
+   */
   y: number;
   primId: string;
   /**

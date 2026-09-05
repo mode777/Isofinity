@@ -162,8 +162,9 @@ const GROUND = buildGround();
 /**
  * The toolbar's placement-height field, following the editor's
  * precise-numeric-input conventions (SliderRow's value field): commit on
- * Enter or focus loss, clamp at the ground plane, reject empty or
- * non-numeric input by reverting, Escape cancels editing.
+ * Enter or focus loss (negative values included — the height may sink
+ * below the ground plane), reject empty or non-numeric input by
+ * reverting, Escape cancels editing.
  */
 function HeightInput(props: { value: number; onCommit: (v: number) => void }): React.JSX.Element {
   const { value, onCommit } = props;
@@ -175,7 +176,7 @@ function HeightInput(props: { value: number; onCommit: (v: number) => void }): R
     if (text === '') return;
     const parsed = Number(text);
     if (!Number.isFinite(parsed)) return;
-    onCommit(Math.max(0, parsed));
+    onCommit(parsed);
   };
   return (
     <input
@@ -443,10 +444,10 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       for (const p of placed) emitShadow(p.x, p.y, p.z);
       if (ghost) emitShadow(ghost.x, ghost.y, ghost.z);
 
-      // Overlays: the height gizmo for a raised ghost, else the eraser's
-      // unit-cell hover highlight.
+      // Overlays: the height gizmo for an off-ground ghost (raised or
+      // sunk), else the eraser's unit-cell hover highlight.
       overlayBatch.reset();
-      if (ghost && ghost.y > GROUND_EPSILON) {
+      if (ghost && Math.abs(ghost.y) > GROUND_EPSILON) {
         emitGizmo(ghost.x, ghost.y, ghost.z);
       } else if (hover && !ghost && live.tool === 'eraser') {
         const [gx, gz] = hover.ground;
@@ -535,8 +536,9 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         return;
       }
       // Shift + vertical mouse move adjusts the placement height (up
-      // raises, down lowers): free-form, clamped at the ground, never
-      // panning. Hover tracking and drag-painting continue alongside.
+      // raises, down lowers, below the ground plane included): free-form,
+      // never panning. Hover tracking and drag-painting continue
+      // alongside.
       if (e.pointerType === 'mouse' && e.shiftKey) {
         const live = useEditor.getState().docs[doc.docId];
         if (live && live.kind === 'world') {

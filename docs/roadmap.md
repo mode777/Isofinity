@@ -62,7 +62,8 @@ list when a change lands (and prune it — history belongs in the archives).
   transform), three-finger touch panning, and a depth-tested brush ghost
   previewing the next placement under the cursor.
 - Placement height (`isoinfinity-world/2`, `/1` still loads) — shift +
-  vertical mouse move brush height (free-form, clamped at the ground)
+  vertical mouse move brush height (free-form, negative heights sink
+  below the ground)
   with a manual toolbar height field and a surface-snap toggle taking
   the height from the visible surface under the cursor (CPU-side
   g-buffer unprojection), the height riding the existing
