@@ -75,6 +75,89 @@ async function main(): Promise<void> {
   log(`weights[0..7]:   ${f(asset.geometry.weights, 8)}`);
   log(`indices[0..11]:  ${[...asset.geometry.indices.slice(0, 12)].join(', ')}`);
 
+  // GPU-side vertex capture: run the same fetch+projection math through a
+  // transform-feedback program and read the positions back. Any mismatch
+  // against the JS arrays convicts the buffer fetch, not the math.
+  const tfCanvas = document.createElement('canvas');
+  tfCanvas.width = 4;
+  tfCanvas.height = 4;
+  const gl = tfCanvas.getContext('webgl2')!;
+  const vs = `#version 300 es
+  precision highp float;
+  in vec3 aPos;
+  uniform mat3 uYaw;
+  uniform vec3 uOrigin;
+  out vec3 oPos;
+  void main() {
+    oPos = uYaw * aPos + uOrigin;
+    gl_Position = vec4(oPos, 1.0);
+  }`;
+  const fs = `#version 300 es
+  precision highp float;
+  out vec4 o;
+  void main() { o = vec4(0.0); }`;
+  const compile = (type: number, src: string): WebGLShader => {
+    const sh = gl.createShader(type)!;
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh) ?? 'compile');
+    return sh;
+  };
+  const prog = gl.createProgram()!;
+  gl.attachShader(prog, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fs));
+  gl.transformFeedbackVaryings(prog, ['oPos'], gl.SEPARATE_ATTRIBS);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) ?? 'link');
+
+  const capture = (positions: Float32Array, yaw: Float32Array, origin: readonly number[]): Float32Array => {
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+    const aPos = gl.getAttribLocation(prog, 'aPos');
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 12, 0);
+    gl.useProgram(prog);
+    gl.uniformMatrix3fv(gl.getUniformLocation(prog, 'uYaw'), false, yaw);
+    gl.uniform3f(gl.getUniformLocation(prog, 'uOrigin'), origin[0], origin[1], origin[2]);
+    const out = gl.createBuffer();
+    gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, out);
+    gl.bufferData(gl.TRANSFORM_FEEDBACK_BUFFER, positions.byteLength, gl.DYNAMIC_COPY);
+    gl.enable(gl.RASTERIZER_DISCARD);
+    gl.beginTransformFeedback(gl.POINTS);
+    gl.drawArrays(gl.POINTS, 0, positions.length / 3);
+    gl.endTransformFeedback();
+    gl.disable(gl.RASTERIZER_DISCARD);
+    gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, null);
+    const got = new Float32Array(positions.length);
+    gl.bindBuffer(gl.ARRAY_BUFFER, out);
+    gl.getBufferSubData(gl.ARRAY_BUFFER, 0, got);
+    return got;
+  };
+
+  const report = (label: string, positions: Float32Array, yaw: Float32Array, origin: readonly number[]): void => {
+    const got = capture(positions, yaw, origin);
+    const expect = new Float32Array(positions.length);
+    for (let i = 0; i < positions.length; i += 3) {
+      const x = positions[i], y = positions[i + 1], z = positions[i + 2];
+      // Column-major mat3 rows: row r = (m[r], m[3 + r], m[6 + r]).
+      expect[i] = yaw[0] * x + yaw[3] * y + yaw[6] * z + origin[0];
+      expect[i + 1] = yaw[1] * x + yaw[4] * y + yaw[7] * z + origin[1];
+      expect[i + 2] = yaw[2] * x + yaw[5] * y + yaw[8] * z + origin[2];
+    }
+    let maxDiff = 0;
+    for (let i = 0; i < got.length; i++) maxDiff = Math.max(maxDiff, Math.abs(got[i] - expect[i]));
+    const f3 = (arr: Float32Array): string => [arr[0], arr[1], arr[2]].map((v) => v.toFixed(4)).join(', ');
+    log(
+      `[TF ${label}] v0 gpu=(${f3(got)}) expect=(${f3(expect)}) | ` +
+        `x[${Math.min(...expect.filter((_, i) => i % 3 === 0)).toFixed(3)}, ${Math.max(...expect.filter((_, i) => i % 3 === 0)).toFixed(3)}] ` +
+        `gpuDiff=${maxDiff.toExponential(2)}`,
+      maxDiff < 1e-3 ? undefined : 'fail',
+    );
+  };
+  report('cube', cube.geometry.positions, meshYawMat(0.5), [0, 0, 0]);
+  report('cesium bind', asset.geometry.positions, meshYawMat(0), asset.worldOffset);
+
   const stages: Stage[] = [
     {
       label: '1. unskinned cube (identity palette, white)',
