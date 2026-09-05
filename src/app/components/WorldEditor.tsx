@@ -83,8 +83,7 @@ const SHADOW_SEGMENTS = 24;
  * Growable triangle-vertex batch for the flat program (x, y, r, g, b, a
  * per vertex). Reused across frames to avoid per-frame allocations.
  */
-class FlatBatchBuilder {
-  data = new Float32Array(2048 * 6);
+class FlatBatchBuilder {  data = new Float32Array(2048 * 6);
   verts = 0;
 
   reset(): void {
@@ -155,6 +154,47 @@ function buildGround(): Float32Array {
 }
 
 const GROUND = buildGround();
+
+/**
+ * The toolbar's placement-height field, following the editor's
+ * precise-numeric-input conventions (SliderRow's value field): commit on
+ * Enter or focus loss, clamp at the ground plane, reject empty or
+ * non-numeric input by reverting, Escape cancels editing.
+ */
+function HeightInput(props: { value: number; onCommit: (v: number) => void }): React.JSX.Element {
+  const { value, onCommit } = props;
+  const [editing, setEditing] = useState<string | null>(null);
+  const commit = (): void => {
+    if (editing === null) return;
+    const text = editing.trim().replace(',', '.');
+    setEditing(null);
+    if (text === '') return;
+    const parsed = Number(text);
+    if (!Number.isFinite(parsed)) return;
+    onCommit(Math.max(0, parsed));
+  };
+  return (
+    <input
+      className="value-input"
+      type="text"
+      inputMode="decimal"
+      aria-label="Placement height"
+      title="Placement height — type a value and press Enter (Escape cancels); shift+mouse-move also adjusts it"
+      value={editing ?? value.toFixed(2)}
+      onFocus={() => setEditing(String(value))}
+      onChange={(e) => setEditing(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commit();
+        } else if (e.key === 'Escape') {
+          setEditing(null);
+        }
+      }}
+    />
+  );
+}
 
 export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
   const { doc } = props;
@@ -476,6 +516,15 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         );
         return;
       }
+      // Shift + vertical mouse move adjusts the placement height (up
+      // raises, down lowers): free-form, clamped at the ground, never
+      // panning. Hover tracking and drag-painting continue alongside.
+      if (e.pointerType === 'mouse' && e.shiftKey) {
+        const live = useEditor.getState().docs[doc.docId];
+        if (live && live.kind === 'world') {
+          setHeightLevel(doc.docId, live.heightLevel - e.movementY * 0.01);
+        }
+      }
       const tp = e.pointerType === 'touch' ? touchPts.get(e.pointerId) : undefined;
       if (tp) {
         tp.x = e.clientX;
@@ -573,22 +622,9 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     // Trackpad-native convention: a plain wheel event (two-finger scroll)
     // pans by the scroll delta — the content follows the fingers — while
     // a ctrl-modified wheel (trackpad pinch, ctrl+scroll) zooms around
-    // the cursor and a shift-modified wheel adjusts the placement height
-    // (some browsers map shift+wheel to the horizontal axis, so both
-    // deltas are read). Native listener so preventDefault works.
+    // the cursor. Native listener so preventDefault works.
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
-      if (e.shiftKey && !e.ctrlKey) {
-        const panel = liveRef.current.panel;
-        let dy = e.deltaY !== 0 ? e.deltaY : e.deltaX;
-        if (e.deltaMode === 1) dy *= 16;
-        else if (e.deltaMode === 2 && panel) dy *= panel.h;
-        // Scroll up (negative delta) raises; ~0.25 world units per notch.
-        const live = useEditor.getState().docs[doc.docId];
-        if (!live || live.kind !== 'world') return;
-        setHeightLevel(doc.docId, live.heightLevel - dy * 0.0025);
-        return;
-      }
       const t = liveRef.current.transform;
       const panel = liveRef.current.panel;
       if (!t || !panel) return;
@@ -757,15 +793,15 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         </button>
         <button
           className={doc.surfaceSnap ? 'active' : ''}
-          title="Surface snap — placements take their height from the visible surface under the cursor (off: use the shift+wheel height)"
+          title="Surface snap — placements take their height from the visible surface under the cursor (off: use the height field / shift+mouse-move height)"
           onClick={() => setSurfaceSnap(doc.docId, !doc.surfaceSnap)}
         >
           Snap
         </button>
-        <span className="hint" title="Placement height (shift+wheel adjusts, clamped at the ground)">
-          h {doc.heightLevel.toFixed(2)}
-          {doc.surfaceSnap ? ' · snap' : ''}
-        </span>
+        <label className="hint">
+          h
+          <HeightInput value={doc.heightLevel} onCommit={(v) => setHeightLevel(doc.docId, v)} />
+        </label>
         <span className="hint">
           {activeTool === 'eraser' ? 'eraser' : activeTool === '' ? 'no brush' : activeTool}
         </span>
@@ -797,7 +833,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           : activeTool === ''
             ? 'pick a brush above — left-click/drag places it, right-click erases'
             : `tool: ${activeTool} — left-click/drag places, right-click erases`}
-        {' — shift+scroll sets the placement height, scroll pans, pinch zooms, middle-drag pans'}
+        {' — shift+move sets the placement height, scroll pans, pinch zooms, middle-drag pans'}
       </p>
     </div>
   );

@@ -13,9 +13,9 @@
 
 ## 3. Height input and surface snap
 
-- [x] 3.1 Wheel handler: add the shift branch adjusting `heightLevel` (read `deltaY || deltaX` for browser axis swaps, normalize `deltaMode`, clamp ≥ 0) without panning or zooming; plain wheel and ctrl+wheel unchanged. Verify in the browser: shift-scroll raises/lowers the ghost height, viewport stays put, scroll and pinch behave as before.
-- [x] 3.2 Surface snap: when `surfaceSnap` is on, compute the cursor's surface height CPU-side from the in-memory g-buffers (max `g.a + offset` over covering placements' non-empty texels; `worldPos = u·SCREEN_RIGHT + v·SCREEN_UP + d·VIEW_DIR`), overriding `heightLevel`; empty ground/nothing → 0. Verify in the browser: hovering a raised placement's top puts the ghost on it; hovering the grid keeps it grounded.
-- [x] 3.3 Toolbar surface-snap toggle and height readout: add the toggle to the world toolbar (per-document state), show the current effective height (status bar or toolbar readout — pick during implementation). Verify in the browser: toggling snap switches the height source, and the readout tracks shift-wheel changes.
+- [x] 3.1 Height control: hold-shift + vertical mouse move over the viewport adjusts `heightLevel` via `movementY` (up raises, down lowers, ~0.01 units/px, clamp ≥ 0) without panning or zooming; hover tracking and drag-painting continue during adjustment; plain wheel, ctrl+wheel and shift+wheel keep the pan/zoom conventions (no shift carve-out in the wheel handler). Verify in the browser: shift+move raises/lowers the ghost, viewport stays put, scroll and pinch behave as before.
+- [ ] 3.2 Surface snap: when `surfaceSnap` is on, compute the cursor's surface height CPU-side from the in-memory g-buffers (max `g.a + offset` over covering placements' non-empty texels; `worldPos = u·SCREEN_RIGHT + v·SCREEN_UP + d·VIEW_DIR`), overriding `heightLevel`; empty ground/nothing → 0. Verify in the browser: hovering a raised placement's top puts the ghost on it; hovering the grid keeps it grounded.
+- [x] 3.3 Toolbar height field and snap toggle: add a numeric height input following the `SliderRow` value-field conventions (commit Enter/blur, clamp ≥ 0, reject empty/non-numeric, Escape cancels) plus the surface-snap toggle, both per-document state. Verify in the browser: typing 1.5 + Enter raises the ghost exactly; `-2` clamps to 0; junk input reverts; toggling snap switches the height source.
 
 ## 4. Persistence `/2`
 
@@ -26,4 +26,4 @@
 
 - [x] 5.1 Update `scratch-verify.html` if any bake-adjacent harness output changes (expected: none — bake untouched) and run `npm run build` plus `npm run verify:bundles`; fix anything they surface.
 - [x] 5.2 Update docs: `docs/runtime.md` (world rendering draw order, height input/snap, shadow/gizmo chrome), `docs/glossary.md` (placement height, surface snap, contact shadow), `docs/roadmap.md` (landed). Verify the docs read consistent with the spec deltas.
-- [ ] 5.3 Full browser pass against the spec scenarios: stacking/interpenetration occlusion, shift-wheel clamping, snap override, per-document height/snap persistence across tab switches, `/1` and `/2` load, save round trip, gizmo/shadow chrome never dirtying or persisting. Confirm each spec scenario in the three deltas has observable behavior matching the build.
+- [ ] 5.3 Full browser pass against the spec scenarios: stacking/interpenetration occlusion, shift-move height clamping, manual height input, snap override, per-document height/snap persistence across tab switches, `/1` and `/2` load, save round trip, gizmo/shadow chrome never dirtying or persisting. Confirm each spec scenario in the three deltas has observable behavior matching the build.

@@ -58,7 +58,8 @@ the pointer for the real semantics.
 - **Placement** — one instance of a sprite layer at a continuous ground
   position and height; free-form (not grid-snapped), height ≥ 0.
 - **Placement height** — a placement's world-unit offset above the ground
-  plane. The brush height is set with shift+wheel (per-document in-memory
+  plane. The brush height is adjusted with shift + vertical mouse move or
+  set exactly in the toolbar's height field (per-document in-memory
   editor state, never saved).
 - **Surface snap** — toolbar toggle: placements take their height from
   the visible surface under the cursor, computed CPU-side from the

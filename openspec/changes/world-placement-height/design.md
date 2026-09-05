@@ -70,18 +70,24 @@ alpha-blended AA edge pixels; the per-pixel depth test does the rest.
 which `SpriteLayer` doesn't carry). Deferred — the same approximation
 class exists today for non-cube assets.
 
-### D3: Shift+wheel for height, reading both wheel axes
+### D3: Shift+mouse-move for height, plus a manual toolbar field
 
-Some browsers translate shift+wheel into horizontal scroll (`deltaX`).
-The wheel handler gains a shift branch that adjusts height from
-`deltaY || deltaX`, with the existing `deltaMode` normalization; plain
-wheel keeps panning, ctrl+wheel keeps zooming. Free-form per the user's
-decision: apply the scaled delta directly (default step ~0.25 units per
-wheel notch, tunable), clamped at 0.
+Holding shift turns vertical mouse movement over the viewport into height
+adjustment: `movementY` per pointer-move event (up = raise, down =
+lower), free-form, clamped at 0 by `setHeightLevel` (~0.01 world units
+per pixel, tunable). This mirrors the human-reference drag convention
+(modifier shapes the pointer's meaning) and works identically while
+drag-painting. Shift-modified wheel is NOT special: it pans like any
+wheel event (browsers that swap the shift+wheel axis to `deltaX` simply
+pan horizontally). Alongside it, the world toolbar offers a numeric
+height field mirroring the editor's established precise-numeric-input
+pattern (`SliderRow`'s value field: commit on Enter/blur, clamp ≥ 0,
+reject empty/non-numeric, Escape cancels) for exact heights.
 
-*Alternative*: dedicated keys (PgUp/PgDn) or a toolbar stepper — more
-discoverable but off-hand; the wheel is already the viewport's modifier
-surface. Keyboard control can be added later without spec changes.
+*Alternative*: dedicated keys (PgUp/PgDn) or wheel-based adjustment —
+wheel was tried first and rejected by design review: shift+move is
+continuous and needs no axis-swap workaround. Keyboard control can be
+added later without spec changes.
 
 ### D4: Surface snap computed CPU-side from the in-memory g-buffers
 
@@ -171,6 +177,6 @@ deploy sequencing beyond a normal push.
 
 ## Open Questions
 
-- Exact wheel step size and where the numeric height readout lives
-  (status bar vs toolbar) — feel decisions, settle during implementation;
-  the specs pin behavior, not the step constant.
+- Exact shift-move sensitivity (default ~0.01 world units per mouse px)
+  — a feel decision, settle during implementation; the specs pin
+  behavior, not the constant.

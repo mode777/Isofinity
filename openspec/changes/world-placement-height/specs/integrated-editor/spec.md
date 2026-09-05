@@ -5,7 +5,8 @@
 ### Requirement: World editor toolbar
 
 A world editor SHALL render a toolbar above its content offering Save, a
-pencil placement tool, an eraser toggle, and a surface-snap toggle. Save
+pencil placement tool, an eraser toggle, a surface-snap toggle, and a
+numeric placement-height field. Save
 SHALL prompt for a file name, defaulting to the world's saved name or the
 next free `world-N`, and SHALL write the world to the workspace's `worlds/`
 folder under the chosen name when a workspace is connected; cancelling
@@ -18,8 +19,9 @@ with the pencil places the chosen brush at the pointed cell; the eraser
 toggle (and the right mouse button) removes placements. The surface-snap
 toggle SHALL control whether placements take their height from the visible
 surface under the cursor (on) or from the user-adjusted placement height
-(off), as specified by the placement-height requirement; its state SHALL
-be per-document in-memory editor state. The toolbar SHALL replace the
+(off), as specified by the placement-height requirement; the height field
+edits that adjusted height as specified there; both SHALL be per-document
+in-memory editor state. The toolbar SHALL replace the
 previous per-layer tool strip.
 
 #### Scenario: World toolbar offers save, pencil, and brush dropdown
@@ -29,11 +31,12 @@ previous per-layer tool strip.
   dropdown whose groups list the built-in primitives and the workspace's
   saved sprites
 
-#### Scenario: Surface-snap toggle is available
+#### Scenario: Surface-snap toggle and height field are available
 
 - **WHEN** the user activates a world editor tab
 - **THEN** the toolbar shows a surface-snap toggle that can be switched on
-  and off, and its state persists across tab switches within the session
+  and off and a numeric height field showing the current placement height,
+  and both persist across tab switches within the session
 
 #### Scenario: Saving prompts with a sensible default
 
@@ -60,8 +63,6 @@ and panning with the sprite editor's established viewport conventions:
 
 - An unmodified wheel event SHALL pan the viewport at constant zoom by the
   scroll delta (the trackpad's two-finger scroll, or a mouse wheel); a
-  shift-modified wheel event SHALL NOT pan the viewport — it adjusts the
-  placement height as specified by the placement-height requirement; a
   pinch gesture (ctrl-modified wheel) SHALL zoom around the cursor
   position, within the shared zoom bounds; zooming SHALL NOT move the
   world point under the cursor.
@@ -103,12 +104,6 @@ opened or created.
   the world viewport
 - **THEN** the viewport pans with the scroll delta and no placement is
   added or erased
-
-#### Scenario: Shift-modified scroll does not pan
-
-- **WHEN** the user shift-scrolls over the world viewport
-- **THEN** the viewport neither pans nor zooms; the placement height
-  changes instead (see the placement-height requirement)
 
 #### Scenario: Middle-drag pans without placing or erasing
 
@@ -183,8 +178,8 @@ back to the unit-cell hover highlight (eraser) or no highlight.
 
 #### Scenario: Ghost reflects the effective height
 
-- **WHEN** the user raises the placement height with shift+wheel, or
-  hovers over a raised surface with surface snap on
+- **WHEN** the user raises the placement height by moving the mouse with
+  shift held, or hovers over a raised surface with surface snap on
 - **THEN** the ghost renders at that height above the cursor's ground
   position, exactly where the next placement would land
 
@@ -220,11 +215,24 @@ back to the unit-cell hover highlight (eraser) or no highlight.
 
 ### Requirement: Placement height control
 
-The world editor SHALL give the current brush a placement height that
-the user adjusts with a shift-modified wheel event over the viewport:
-scrolling up SHALL raise the height and scrolling down SHALL lower it,
-in free-form (continuous) steps, clamped so the height never goes below
-the ground plane. The placement height SHALL be per-document in-memory
+The world editor SHALL give the current brush a placement height that the
+user adjusts in two ways:
+
+- **Shift + mouse move**: while shift is held, vertical mouse movement
+  over the viewport SHALL adjust the placement height — moving the mouse
+  up raises it, moving down lowers it — in free-form (continuous) steps,
+  clamped so the height never goes below the ground plane. The viewport
+  SHALL NOT pan or zoom while the height is adjusted this way, and
+  ordinary hover tracking SHALL continue.
+- **Manual height input**: the world toolbar SHALL offer a numeric
+  placement-height field following the editor's precise-numeric-input
+  conventions: committing (Enter or focus loss) SHALL apply the entered
+  value, committed values SHALL be clamped to ≥ 0, input that is empty or
+  not a valid number SHALL be rejected with the document unchanged and
+  the field reverting to the current height, and Escape SHALL cancel
+  editing and restore the current value.
+
+The placement height SHALL be per-document in-memory
 editor state, defaulting to ground level for a newly opened or created
 world, preserved across tab switches, and never serialized into world
 files. When the surface-snap toggle is on, the height for placements and
@@ -232,25 +240,52 @@ the ghost SHALL instead come from the visible surface under the cursor:
 the editor SHALL determine, from the world document's in-memory sprite
 layers, the nearest-to-camera covered surface at the cursor pixel and
 use that surface's height; over empty ground or nothing at all the
-height SHALL be ground level. Surface snap SHALL override the adjusted
-placement height, and the shift-wheel adjustment SHALL be inert while
-surface snap is on. The effective height SHALL apply to every placement
-the brush makes (clicks and drags alike) and to the ghost preview.
-Raising or lowering the height SHALL NOT by itself mark the document
-dirty; a placement made at a non-zero height SHALL mark it dirty.
+height SHALL be ground level. Surface snap SHALL override both the
+shift-move adjustment and the manual input (the stored height is kept
+and applies again when snap goes off). The effective height SHALL apply
+to every placement the brush makes (clicks and drags alike) and to the
+ghost preview. Adjusting or entering a height SHALL NOT by itself mark
+the document dirty; a placement made at a non-zero height SHALL mark it
+dirty.
 
-#### Scenario: Shift-wheel raises the brush height
+#### Scenario: Shift-move raises the brush height
 
-- **WHEN** the user shift-scrolls up over the world viewport with a brush
-  active
+- **WHEN** the user holds shift and moves the mouse upward over the world
+  viewport with a brush active
 - **THEN** the effective placement height increases and the ghost (and
   its height gizmo) rises accordingly, without the viewport panning
 
-#### Scenario: Height never goes below the ground
+#### Scenario: Shift-move never goes below the ground
 
-- **WHEN** the user shift-scrolls down past ground level
+- **WHEN** the user holds shift and moves the mouse downward past ground
+  level
 - **THEN** the placement height clamps at ground level and the ghost sits
   on the ground
+
+#### Scenario: Manual height input applies an exact value
+
+- **WHEN** the user types `1.5` into the toolbar height field and presses
+  Enter
+- **THEN** the placement height becomes exactly `1.5` and the ghost shows
+  it
+
+#### Scenario: Manual height input clamps negatives
+
+- **WHEN** the user types `-2` into the height field and commits
+- **THEN** the applied height is `0` (ground level)
+
+#### Scenario: Manual height input rejects invalid values
+
+- **WHEN** the user clears the height field or types non-numeric text and
+  commits
+- **THEN** the document is unchanged and the field reverts to the current
+  height
+
+#### Scenario: Escape cancels height editing
+
+- **WHEN** the user changes the height field's text and presses Escape
+- **THEN** the document is unchanged and the field shows the current
+  height again
 
 #### Scenario: Surface snap places onto a raised surface
 
@@ -267,8 +302,8 @@ dirty; a placement made at a non-zero height SHALL mark it dirty.
 
 #### Scenario: Surface snap overrides the adjusted height
 
-- **WHEN** the user has raised the placement height with shift+wheel and
-  then switches surface snap on
+- **WHEN** the user has raised the placement height and then switches
+  surface snap on
 - **THEN** placements and the ghost use the surface height under the
   cursor, not the previously adjusted height
 

@@ -307,10 +307,12 @@ carry per-vertex RGBA (`[x, y, r, g, b, a]`, 6 floats per vertex):
 
 Placements are **free-form** (continuous x/z on the ground plane,
 cursor-centered) — not grid-snapped — so overlapping objects exercise the
-per-pixel occlusion. Placements also carry a **height**: shift+wheel
-raises/lowers the brush height in free-form steps (clamped at the ground
-plane; some browsers map shift+wheel to the horizontal axis, so both
-deltas are read), and the toolbar's **surface snap** toggle overrides it —
+per-pixel occlusion. Placements also carry a **height**: holding shift
+and moving the mouse vertically over the viewport raises/lowers the brush
+height in free-form steps (up = raise, clamped at the ground plane), and
+the toolbar's numeric height field sets it exactly (precise-input
+conventions: Enter/blur commits, clamp ≥ 0, invalid input reverts,
+Escape cancels). The toolbar's **surface snap** toggle overrides both —
 the placement then takes its height from the visible surface under the
 cursor, computed CPU-side from the world document's in-memory g-buffers
 (max composite depth among the covering placements' texels, unprojected
@@ -322,10 +324,9 @@ tool buttons or eraser selects. Ground picking inverts the shared
 projection analytically (`screenToGround`) after inverting the viewport's
 zoom/pan transform, no hit-testing. The 12×12 checkerboard is a visual
 reference only. Viewport navigation: two-finger scroll pans, pinch
-(ctrl+wheel) zooms around the cursor, middle-drag pans, shift+scroll sets
-the placement height; on touch screens three fingers pan (one finger
-paints/taps, two are neutral); the left/right placement bindings never
-move.
+(ctrl+wheel) zooms around the cursor, middle-drag pans; on touch screens
+three fingers pan (one finger paints/taps, two are neutral); the
+left/right placement bindings never move.
 
 ## Source layout
 

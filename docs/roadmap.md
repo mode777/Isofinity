@@ -53,10 +53,11 @@ list when a change lands (and prune it — history belongs in the archives).
   conventions, per-document in-memory state, picking invariant under the
   transform), three-finger touch panning, and a depth-tested brush ghost
   previewing the next placement under the cursor.
-- Placement height (`isoinfinity-world/2`, `/1` still loads) — shift+wheel
-  brush height (free-form, clamped at the ground) with a surface-snap
-  toggle taking the height from the visible surface under the cursor
-  (CPU-side g-buffer unprojection), the height riding the existing
+- Placement height (`isoinfinity-world/2`, `/1` still loads) — shift +
+  vertical mouse move brush height (free-form, clamped at the ground)
+  with a manual toolbar height field and a surface-snap toggle taking
+  the height from the visible surface under the cursor (CPU-side
+  g-buffer unprojection), the height riding the existing
   per-instance depth offset so stacking/interpenetration stay
   pixel-exact with zero renderer-shader and zero bake changes, a
   plumb-line gizmo for raised ghosts, contact-shadow ellipses under
