@@ -82,6 +82,17 @@ list when a change lands (and prune it — history belongs in the archives).
   without near/far-clipped geometry; no format change, old sprites
   re-bake via provenance.
 
+## In progress
+
+- Dynamic meshes in the compositor (ADR 0007) — skinned, animated
+  character (built-in CesiumMan brush) among baked sprites: opaque mesh
+  batch sharing the world depth map, three.js as CPU-side libraries
+  (parse + AnimationMixer pose engine, zero GL calls), SH-irradiance
+  ambient probe from bundle provenance through the bake's ACES chain,
+  in-memory-only placements. Mesh serialization, locomotion, terrain /
+  dynamic ground (the same batch, unskinned) and multi-character
+  instancing are the follow-on design surface.
+
 ## Planned
 
 - Real shadow mapping — placement heights made per-pixel world positions

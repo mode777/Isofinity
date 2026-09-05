@@ -72,6 +72,29 @@ the pointer for the real semantics.
 - **Surface snap** — toolbar toggle: placements take their height from
   the visible surface under the cursor, computed CPU-side from the
   in-memory g-buffers; overrides the shift+wheel height.
+- **Mesh placement** — one instance of the built-in skinned character at
+  a continuous ground position, height and yaw. Editor-session state:
+  never serialized into world files (ADR 0006) — saving/loading a world
+  drops characters silently. Erase resolves the topmost placement across
+  sprite and mesh kinds (shared depth key).
+- **Joint palette** — per-character, per-frame array of
+  `bone.matrixWorld · boneInverse` matrices (column-major `mat4[]`,
+  ≤ 64 joints): the CPU pose engine's output, the mesh vertex shader's
+  skinning input (`src/runtime/meshAsset.ts`).
+- **Bind pose / bind-space geometry** — the skinned mesh's vertex data
+  pre-multiplied by its `bindMatrix`, so per-frame palettes land directly
+  in world space. The **world offset** (part of the asset) re-anchors the
+  first *rendered* pose's feet at y = 0 and centers x/z — applied by the
+  draw origin, post-skinning.
+- **SH probe** — 9 RGB spherical-harmonics diffuse-irradiance
+  coefficients projected from the sprites' bake environment (resolved
+  from bundle provenance, else the built-in default; `src/runtime/
+  shProbe.ts`), evaluated per pixel in the mesh shader as a quadratic
+  polynomial of the normal — the dynamic mesh's ambient term.
+- **Character brush** — the world toolbar's built-in animated character
+  (Khronos CesiumMan, committed with attribution): place/erase/height
+  like a sprite brush; the ghost shows the bind pose; playback is in
+  place (no locomotion).
 - **Contact shadow** — editor chrome: a soft ground ellipse under every
   raised placement (and raised ghost), larger and fainter with height;
   never saved, never dirtying.

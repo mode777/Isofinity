@@ -8,13 +8,15 @@ import {
   type ViewSlot,
 } from '../../shared/iso.js';
 import { RUNTIME_PPU, layersToSet, viewLayerId } from '../../runtime/assets.js';
-import { Renderer, type FlatBatch } from '../../runtime/renderer.js';
+import { meshYawMat, Renderer, type FlatBatch, type MeshDraw } from '../../runtime/renderer.js';
+import { CharacterPlayer, bindPosePalette } from '../../runtime/meshAsset.js';
 import { depthOf } from '../../runtime/world.js';
 import { PRIMITIVE_KINDS } from '../document.js';
 import type { ViewTransform, WorldDocument } from '../document.js';
 import { fitTransform, panned, ZOOM_STEP, zoomAround } from '../bakeView.js';
 import { lightParams } from '../light.js';
 import {
+  CHARACTER_BRUSH_ID,
   brushDirections,
   cycleBrushDir,
   eraseAt,
@@ -268,6 +270,15 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     const shadowBatch = new FlatBatchBuilder();
     const overlayBatch = new FlatBatchBuilder();
 
+    // Character engine state (in-memory only, like every engine object):
+    // one animation player per placed character, keyed by placement id;
+    // the parsed asset uploaded to the renderer exactly once.
+    const players = new Map<number, { player: CharacterPlayer; yawMat: Float32Array }>();
+    let uploadedCharacter: unknown = null;
+    let ghostPalette: Float32Array | null = null;
+    let ghostPaletteJoints = 0;
+    let lastFrameTime = performance.now();
+
     // Draws a soft contact-shadow ellipse on the ground under a raised
     // object: larger and fainter as the height grows, none at ground
     // level. A ground-plane circle projects to the correct isometric
@@ -373,6 +384,25 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       const t = live.viewTransform ?? fitTransform(CANVAS_W, CANVAS_H, panel.w, panel.h);
       renderer.setLight(lightParams(live.light));
 
+      // Character asset: (re)upload when the document's parsed character
+      // changes — one upload per asset, shared by every placement draw.
+      if (live.character !== uploadedCharacter) {
+        uploadedCharacter = live.character;
+        renderer.setMesh(live.character?.geometry ?? null, live.character?.surface ?? null);
+        renderer.setMeshFrame(ORIGIN_X, ORIGIN_Y, PPU);
+      }
+      // Environment-derived ambient + its display parameters: meshes shade
+      // with the same probe the sprites' bake environment implies.
+      renderer.setShProbe(live.shProbe);
+      const envParams = live.envParams;
+      renderer.setEnvDisplay(envParams?.exposure ?? 1, envParams?.saturation ?? 1);
+
+      // Animation playback: advance every live character by the frame
+      // delta (clamped so a background tab doesn't teleport the walk).
+      const now = performance.now();
+      const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
+      lastFrameTime = now;
+
       const placed = live.world.list();
       const hover = hoverRef.current;
       // The ghost preview: when a brush with a loaded layer is active and
@@ -438,11 +468,63 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       }
       if (ghost && !ghostDone) emit(ghost.layer, ghost.x, ghost.y, ghost.z);
 
-      // Contact shadows: under every raised placement and a raised ghost,
-      // drawn between the ground and the sprites.
+      // Character placements: sync players with the live placement set,
+      // advance animation, and emit one opaque draw per character.
+      const meshPlaced = live.world.listMeshes();
+      if (live.character) {
+        const alive = new Set(meshPlaced.map((mp) => mp.id));
+        for (const [id, entry] of players) {
+          if (!alive.has(id)) {
+            entry.player.release();
+            players.delete(id);
+          }
+        }
+        for (const mp of meshPlaced) {
+          if (!players.has(mp.id)) {
+            players.set(mp.id, { player: new CharacterPlayer(live.character), yawMat: new Float32Array(9) });
+          }
+          players.get(mp.id)!.player.update(dt);
+        }
+      }
+      const meshDraws: MeshDraw[] = [];
+      const off = live.character?.worldOffset ?? [0, 0, 0];
+      for (const mp of meshPlaced) {
+        const entry = players.get(mp.id);
+        if (!entry) continue;
+        meshDraws.push({
+          palette: entry.player.palette,
+          origin: [mp.x + off[0], mp.y + off[1], mp.z + off[2]],
+          yawMat: meshYawMat(mp.yaw, entry.yawMat),
+        });
+      }
+      // The character ghost: the bind-pose character at the exact spot the
+      // next click would place (depth-tested like a real placement,
+      // preview-only).
+      let charGhost: { x: number; y: number; z: number } | null = null;
+      if (hover && live.tool === CHARACTER_BRUSH_ID && live.character) {
+        const x = hover.ground[0] - 0.5;
+        const z = hover.ground[1] - 0.5;
+        const y = effectiveHeight(live, hover.px[0], hover.px[1]);
+        charGhost = { x, y, z };
+        if (ghostPaletteJoints !== live.character.geometry.jointCount || !ghostPalette) {
+          ghostPalette = bindPosePalette(live.character.geometry.jointCount);
+          ghostPaletteJoints = live.character.geometry.jointCount;
+        }
+        meshDraws.push({
+          palette: ghostPalette,
+          origin: [x + off[0], y + off[1], z + off[2]],
+          yawMat: meshYawMat(0, new Float32Array(9)),
+        });
+      }
+
+      // Contact shadows: under every raised placement (sprites and
+      // characters) and a raised ghost, drawn between the ground and the
+      // meshes/sprites.
       shadowBatch.reset();
       for (const p of placed) emitShadow(p.x, p.y, p.z);
+      for (const mp of meshPlaced) emitShadow(mp.x, mp.y, mp.z);
       if (ghost) emitShadow(ghost.x, ghost.y, ghost.z);
+      if (charGhost && charGhost.y > GROUND_EPSILON) emitShadow(charGhost.x, charGhost.y, charGhost.z);
 
       // Overlays: the height gizmo for an off-ground ghost (raised or
       // sunk), else the eraser's unit-cell hover highlight.
@@ -464,6 +546,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         shadowBatch.batch(),
         overlayBatch.batch(),
         { zoom: t.zoom * dpr, panX: t.panX * dpr, panY: t.panY * dpr },
+        meshDraws,
       );
     };
 
@@ -690,6 +773,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       canvas.removeEventListener('pointerleave', onLeave);
       canvas.removeEventListener('contextmenu', onContext);
       canvas.removeEventListener('wheel', onWheel);
+      for (const [, entry] of players) entry.player.release();
       renderer.dispose();
     };
     // spriteSet identity changes only when the document's layers change,
@@ -736,6 +820,12 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       kind: 'primitive' as const,
       brush: { kind: 'primitive' as const, id: p },
     }));
+    const character = {
+      value: `c:${CHARACTER_BRUSH_ID}`,
+      label: CHARACTER_BRUSH_ID,
+      kind: 'character' as const,
+      brush: { kind: 'character' as const },
+    };
     const spriteEntries = (connected ? sprites : []).map((fileName) => {
       const id = fileName.replace(/\.(sprite|zip)$/i, '');
       return {
@@ -745,7 +835,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         brush: { kind: 'sprite' as const, id, fileName },
       };
     });
-    return [...primitives, ...spriteEntries];
+    return [...primitives, character, ...spriteEntries];
   }, [connected, sprites]);
   const selectedEntry = brushEntries.find((e) => e.label === activeTool);
 
@@ -825,6 +915,15 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           <optgroup label="Primitives">
             {brushEntries
               .filter((b) => b.kind === 'primitive')
+              .map((b) => (
+                <option key={b.value} value={b.value}>
+                  {b.label}
+                </option>
+              ))}
+          </optgroup>
+          <optgroup label="Character">
+            {brushEntries
+              .filter((b) => b.kind === 'character')
               .map((b) => (
                 <option key={b.value} value={b.value}>
                   {b.label}

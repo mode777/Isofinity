@@ -3,6 +3,7 @@ import type { BakeResult } from '../bake/bake.js';
 import type { GltfSource } from '../bake/gltf.js';
 import type { PtEnvironment, PtImage, PtSettings } from '../bake/pt.js';
 import type { SpriteLayer } from '../runtime/assets.js';
+import type { CharacterAsset } from '../runtime/meshAsset.js';
 import type { World } from '../runtime/world.js';
 import type { ViewSlot } from '../shared/iso.js';
 
@@ -166,6 +167,14 @@ export interface BakeDocument {
   humanRefPos?: [number, number] | null;
 }
 
+/** Display parameters of the environment the SH probe was built from. */
+export interface EnvDisplayParams {
+  rotationDeg: number;
+  intensity: number;
+  exposure: number;
+  saturation: number;
+}
+
 export interface WorldDocument {
   kind: 'world';
   docId: string;
@@ -176,6 +185,25 @@ export interface WorldDocument {
   layers: SpriteLayer[];
   light: LightState;
   sun: SunState;
+  /**
+   * The parsed skinned character behind the built-in character brush.
+   * Engine objects on the document (like a bake document's `gltf`); never
+   * serialized. Null until the brush is picked.
+   */
+  character: CharacterAsset | null;
+  /**
+   * The environment the sprites' render passes were baked with, taken
+   * from the first loaded bundle's provenance; null = none captured (the
+   * probe falls back to the built-in default). In-memory only.
+   */
+  env: EnvSource | null;
+  /** Display parameters accompanying `env` (provenance values). */
+  envParams: EnvDisplayParams | null;
+  /**
+   * Diffuse SH irradiance probe (27 floats) derived from `env`; null
+   * until computed. In-memory only.
+   */
+  shProbe: Float32Array | null;
   /**
    * Active placement tool: '' = pencil with no brush chosen, a brush id
    * (sprite layer id or primitive id), or 'eraser'.

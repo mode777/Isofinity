@@ -160,6 +160,15 @@ neighbors; it is preview-only (never placed, never marks the document
 dirty) and yields the hover feedback to the eraser's unit-cell
 highlight.
 
+The toolbar's **character** brush places the built-in animated character
+(Khronos CesiumMan, committed with attribution) as a *mesh placement*:
+place/erase/height behave exactly like a sprite brush (the ghost shows
+the bind pose at the cursor, a contact shadow follows raised
+placements), and erase resolves the topmost placement across kinds.
+Characters animate in place, one draw call each; placements are
+editor-session state — never written into world files (ADR 0006) — so a
+saved/reloaded world simply has none.
+
 A multi-view sprite brush can face any direction it baked: a direction
 dropdown next to the brush select lists the brush's available view slots
 (N/E/S/W order; enabled only when the brush is a multi-view sprite) and
@@ -278,13 +287,35 @@ fragment shader:
   converted to linear per channel — brightness comes from the picked
   color, there is no separate ambient scalar).
 - The ground shades with `N = (0,1,0)` so it responds to the same light.
+- **Dynamic meshes** shade by the same formula the sprites do, rebuilt
+  from live data: `sRGB(ACES(albedo × E_env(N)) × factor)` — an SH
+  diffuse-irradiance probe (`E_env`) projected from the sprites' bake
+  environment (taken from bundle provenance, else the built-in default)
+  stands in for the baked texel, then the same key+ambient factor, the
+  same ACES fit and display-saturation. Same double-shading trade (ADR
+  0003), same identity behavior under the **Dynamic light** switch.
+
+## Dynamic meshes
+
+Skinned, animated characters (ADR 0007): three.js is used as CPU-side
+libraries only — GLTFLoader parses the committed CesiumMan asset,
+AnimationMixer samples the clip, and the pose engine
+(`src/runtime/meshAsset.ts`) writes a per-character joint palette
+(`bone.matrixWorld · boneInverse`, ≤ 64 joints) each frame. The raw-GL
+mesh batch (`src/runtime/renderer.ts`) palette-skins in the vertex
+shader and shades in the fragment shader (above); geometry is
+bind-transformed at load and re-anchored by a per-asset world offset
+(first rendered pose's feet at y = 0, centered over x/z, applied by the
+draw origin). Ambient probe: `src/runtime/shProbe.ts`.
 
 ## Renderer
 
 Raw WebGL2, no scene graph, no matrices. Because the camera is fixed and
 orthographic, all projection happens once on the CPU
 (`src/shared/iso.ts` — same constants as the bake); the GPU side is a
-pure 2D compositor with four draw batches per frame. A single `uView`
+pure 2D compositor with five draw batches per frame (dynamic meshes are
+ADR 0007; the invariants refine to "no camera matrices — object
+transforms are per-instance data"). A single `uView`
 scale+offset uniform (backing-store pixels) applies the editor
 viewport's zoom/pan to every batch at draw time — the world data itself
 stays in world-image pixels. The flat batches (ground, shadows, overlay)
@@ -298,7 +329,17 @@ carry per-vertex RGBA (`[x, y, r, g, b, a]`, 6 floats per vertex):
    ground cell, CPU-projected ground-plane circle, larger and fainter as
    the height grows. Blended, no depth interaction — all sprites
    composite over it. Editor chrome only.
-3. **Sprites** — one instanced quad per placed object (per-instance quad
+3. **Meshes** (skinned characters) — one draw call per placed character:
+   the vertex shader blends four joint influences against a per-character
+   joint palette (uploaded per frame by the CPU pose engine) and projects
+   the result with the same iso constants and depth map the sprite path
+   uses (`gl_FragDepth = 0.5 − dot(worldPos, viewDir)/128`), so mesh and
+   sprite texels at the same world point write the same window depth.
+   Opaque, depth-writing, blend off — drawn before the sprites, whose
+   LEQUAL test then resolves every character/sprite interpenetration
+   pixel-accurately. With no character placed the batch is skipped and
+   the frame is unchanged.
+4. **Sprites** — one instanced quad per placed object (per-instance quad
    size + sprite texel size, 8 floats per instance), painter-sorted by
    the 3D depth key `dot(cell-center, viewDir)` (far → near) for blend
    correctness, alpha-blended using the render pass's (antialiased)
@@ -312,7 +353,7 @@ carry per-vertex RGBA (`[x, y, r, g, b, a]`, 6 floats per vertex):
    pixel-accurately, regardless of draw order — stacking and sinking
    included, at any height. The linear map keeps the whole reachable
    placement range inside [0,1] with ample 24-bit precision.
-4. **Overlay** — hovered footprint (eraser) and the height gizmo
+5. **Overlay** — hovered footprint (eraser) and the height gizmo
    (landing diamond at a raised ghost + plumb line down to the ground
    cell), as a per-frame vertex batch. No depth interaction. Editor
    chrome only.
@@ -357,6 +398,9 @@ left/right placement bindings never move.
   provenance), procedural environment, layer-set padding/normalization
 - `src/runtime/renderer.ts` — WebGL2 batches, per-pixel occlusion + shading,
   `dispose()` for tab teardown
+- `src/runtime/meshAsset.ts` — skinned character assets + CPU pose engine (mixer → joint palettes)
+- `src/runtime/shProbe.ts` — environment → SH diffuse-irradiance probe (CPU + GLSL basis twins)
+- `src/runtime/mesh-verify.ts` — Node-runnable mesh checks (`npm run verify:mesh`)
 - `src/runtime/world.ts` — placement state, depth sort, footprint erase
 - `src/app/document.ts` — document/tab types and defaults
 - `src/app/store/` — Zustand stores: editor (tabs + documents + status),

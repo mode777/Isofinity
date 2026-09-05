@@ -13,6 +13,13 @@ import {
   type SpriteLayer,
 } from '../../runtime/assets.js';
 import { World } from '../../runtime/world.js';
+import { parseCharacterAsset } from '../../runtime/meshAsset.js';
+import {
+  equirectFromExr,
+  equirectFromProcedural,
+  projectRadianceSh,
+} from '../../runtime/shProbe.js';
+import characterAssetUrl from '../assets/CesiumMan.glb?url';
 import type {
   BakeDocument,
   EditorDocument,
@@ -22,7 +29,12 @@ import type {
   ViewTransform,
   WorldDocument,
 } from '../document.js';
-import { DEFAULT_LIGHT, DEFAULT_SUN, PRIMITIVE_KINDS } from '../document.js';
+import {
+  DEFAULT_LIGHT,
+  DEFAULT_SUN,
+  PRIMITIVE_KINDS,
+  type EnvDisplayParams,
+} from '../document.js';
 import { nextDocId, useEditor, type EditorState } from './editor.js';
 import { bakePrimitiveLayer, anyBakeBusy, resultToLayer } from './bake.js';
 import { SPRITE_EXTS, useProject } from './project.js';
@@ -39,6 +51,97 @@ const worldDoc = (docId: string): WorldDocument | null => {
 const update = (docId: string, mutate: (doc: WorldDocument) => void): void =>
   ed().update<WorldDocument>(docId, mutate);
 
+// --- environment probe ------------------------------------------------------
+
+const DEFAULT_ENV_PARAMS: EnvDisplayParams = {
+  rotationDeg: 0,
+  intensity: 1,
+  exposure: 1,
+  saturation: 1,
+};
+
+/**
+ * Record the environment a sprite bundle was baked with (provenance),
+ * first one wins, and schedule the SH probe rebuild. In-memory only.
+ */
+function captureEnv(
+  docId: string,
+  doc: WorldDocument,
+  provenance: { environment: { procedural: true } | { hdri: string; rotationDeg: number; intensity: number; exposure: number; saturation: number } } | null,
+): void {
+  if (doc.env || !provenance?.environment) return;
+  const env = provenance.environment;
+  if ('procedural' in env) {
+    update(docId, (d) => {
+      if (d.env) return;
+      d.env = { kind: 'procedural' };
+      d.envParams = { ...DEFAULT_ENV_PARAMS };
+    });
+  } else {
+    update(docId, (d) => {
+      if (d.env) return;
+      d.env = { kind: 'hdri', fileName: env.hdri };
+      d.envParams = {
+        rotationDeg: env.rotationDeg,
+        intensity: env.intensity,
+        exposure: env.exposure,
+        saturation: env.saturation,
+      };
+    });
+  }
+  void updateShProbe(docId);
+}
+
+// Open documents' in-flight probe rebuilds don't nest; the latest wins.
+const probeGeneration = new Map<string, number>();
+
+/**
+ * Recompute the world's SH irradiance probe from its captured
+ * environment. HDRI files resolve against the workspace's hdri/ folder;
+ * anything unresolved falls back to the built-in default environment
+ * (never an error — a probe is always available).
+ */
+export async function updateShProbe(docId: string): Promise<void> {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  const gen = (probeGeneration.get(docId) ?? 0) + 1;
+  probeGeneration.set(docId, gen);
+  const env = doc.env;
+  const params = doc.envParams ?? DEFAULT_ENV_PARAMS;
+  try {
+    let equirect;
+    if (env?.kind === 'hdri') {
+      const file = await readWorkspaceFile('hdri', env.fileName);
+      equirect = equirectFromExr(await file.arrayBuffer());
+    } else {
+      equirect = equirectFromProcedural();
+    }
+    if (probeGeneration.get(docId) !== gen) return;
+    const coeffs = projectRadianceSh(equirect, {
+      rotationDeg: params.rotationDeg,
+      intensity: params.intensity,
+    });
+    update(docId, (d) => {
+      d.shProbe = coeffs;
+    });
+  } catch (err) {
+    // Fall back to the built-in default environment.
+    const coeffs = projectRadianceSh(equirectFromProcedural(), {
+      rotationDeg: DEFAULT_ENV_PARAMS.rotationDeg,
+      intensity: DEFAULT_ENV_PARAMS.intensity,
+    });
+    if (probeGeneration.get(docId) !== gen) return;
+    update(docId, (d) => {
+      d.shProbe = coeffs;
+    });
+    if (env?.kind === 'hdri') {
+      ed().setStatus(
+        `Ambient probe: HDRI "${env.fileName}" failed to load (${err instanceof Error ? err.message : String(err)}) — using the default environment`,
+      );
+    }
+  }
+}
+
 // --- document construction ----------------------------------------------
 
 export function newWorldDoc(): string {
@@ -52,6 +155,10 @@ export function newWorldDoc(): string {
     layers: [],
     light: { ...DEFAULT_LIGHT },
     sun: { ...DEFAULT_SUN },
+    character: null,
+    env: null,
+    envParams: null,
+    shProbe: null,
     tool: '',
     heightLevel: 0,
     surfaceSnap: false,
@@ -191,9 +298,10 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     const file = await readWorkspaceFile('worlds', fileName);
     const data = parseWorldFile(await file.text(), fileName);
     // Everything validated — only now build the document.
+    const docId = nextDocId('world');
     const doc: WorldDocument = {
       kind: 'world',
-      docId: nextDocId('world'),
+      docId,
       ref: { key, title: fileName },
       dirty: false,
       title: data.name ?? fileName.replace(/\.json$/i, ''),
@@ -201,6 +309,10 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       layers: [],
       light: data.light,
       sun: data.sun,
+      character: null,
+      env: null,
+      envParams: null,
+      shProbe: null,
       tool: '',
       heightLevel: 0,
       surfaceSnap: false,
@@ -241,6 +353,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       try {
         const bundleFile = await readWorkspaceFile('sprites', bundleName);
         const views = await loadBundleViews(await bundleFile.arrayBuffer());
+        captureEnv(docId, doc, views.provenance);
         // Pin the layer ids to the placement's asset id: a bundle's
         // manifest id can differ from the file name it was saved as.
         loaded.set(entry.asset, [
@@ -413,7 +526,16 @@ export function placeAt(docId: string, gx: number, gz: number, y = 0): void {
   const doc = worldDoc(docId);
   if (!doc) return;
   if (doc.tool === 'eraser') {
-    if (doc.world.removeAt(gx, gz)) ed().markDirty(docId);
+    if (doc.world.removeTopAt(gx, gz)) ed().markDirty(docId);
+    return;
+  }
+  if (doc.tool === CHARACTER_BRUSH_ID) {
+    if (!doc.character) {
+      ed().setStatus('brush "character" is not loaded — pick a brush from the toolbar');
+      return;
+    }
+    doc.world.placeMesh(CHARACTER_BRUSH_ID, gx - 0.5, gz - 0.5, y);
+    ed().markDirty(docId);
     return;
   }
   // The brush faces the chosen direction; if that view's layer is gone
@@ -493,7 +615,7 @@ export function cycleBrushDir(docId: string): void {
 export function eraseAt(docId: string, gx: number, gz: number): void {
   const doc = worldDoc(docId);
   if (!doc) return;
-  if (doc.world.removeAt(gx, gz)) ed().markDirty(docId);
+  if (doc.world.removeTopAt(gx, gz)) ed().markDirty(docId);
 }
 
 export function setLight(docId: string, patch: Partial<LightState>): void {
@@ -524,9 +646,13 @@ export function setSun(docId: string, patch: Partial<SunState>): void {
 
 // --- brushes --------------------------------------------------------------
 
-/** A placement brush: a built-in primitive or a saved workspace sprite. */
+/** The built-in animated character's brush id and tool name. */
+export const CHARACTER_BRUSH_ID = 'character';
+
+/** A placement brush: a built-in primitive, the built-in character, or a saved workspace sprite. */
 export type Brush =
   | { kind: 'primitive'; id: PrimitiveKind }
+  | { kind: 'character' }
   | { kind: 'sprite'; id: string; fileName?: string };
 
 /** Documents with a brush acquisition in flight (one per world). */
@@ -545,6 +671,37 @@ const brushStatus = (id: string): string =>
 export async function selectBrush(docId: string, brush: Brush): Promise<void> {
   const doc = worldDoc(docId);
   if (!doc) return;
+  if (brush.kind === 'character') {
+    if (doc.character) {
+      setTool(docId, CHARACTER_BRUSH_ID);
+      ed().setStatus(brushStatus(CHARACTER_BRUSH_ID));
+      return;
+    }
+    if (brushBusy.has(docId)) {
+      ed().setStatus('Still loading the previous brush — one moment');
+      return;
+    }
+    brushBusy.add(docId);
+    try {
+      ed().setStatus('Loading the character…');
+      const file = await fetch(characterAssetUrl);
+      const asset = await parseCharacterAsset(await file.arrayBuffer());
+      update(docId, (d) => {
+        d.character = asset;
+        d.tool = CHARACTER_BRUSH_ID;
+      });
+      ed().markDirty(docId);
+      ed().setStatus(brushStatus(CHARACTER_BRUSH_ID));
+    } catch (err) {
+      ed().setStatus(
+        `Character failed to load: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      console.error(err);
+    } finally {
+      brushBusy.delete(docId);
+    }
+    return;
+  }
   if (doc.layers.some((l) => l.id === brush.id)) {
     setTool(docId, brush.id);
     ed().setStatus(brushStatus(brush.id));

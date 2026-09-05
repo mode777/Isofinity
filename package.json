@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "verify:bundles": "esbuild src/bake/views-verify.ts --bundle --platform=node --format=esm --outfile=/tmp/views-verify.mjs --log-level=warning && node /tmp/views-verify.mjs"
+    "verify:bundles": "esbuild src/bake/views-verify.ts --bundle --platform=node --format=esm --outfile=/tmp/views-verify.mjs --log-level=warning && node /tmp/views-verify.mjs",
+    "verify:mesh": "esbuild src/runtime/mesh-verify.ts --bundle --platform=node --format=esm --outfile=/tmp/mesh-verify.mjs --loader:.glb=dataurl --log-level=warning && node /tmp/mesh-verify.mjs"
   },
   "devDependencies": {
     "@fission-ai/openspec": "^1.11.0",

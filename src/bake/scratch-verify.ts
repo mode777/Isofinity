@@ -4,8 +4,12 @@
  * server. Not part of the production build.
  */
 import { bakePrimitive, PAD_PX, applySlotModelRotation, type BakeResult } from './bake.js';
-import { slotAzimuthDeg, VIEW_SLOTS, yawRotatedBoxSize } from '../shared/iso.js';
+import { groundToScreen, SCREEN_UP, slotAzimuthDeg, VIEW_DIR, VIEW_SLOTS, yawRotatedBoxSize } from '../shared/iso.js';
 import { buildBundle, parseBake } from './bundle.js';
+import { Renderer as WorldRenderer, meshYawMat, type MeshDraw } from '../runtime/renderer.js';
+import { bakeFloatToHalf, layersToSet, RUNTIME_PPU, type SpriteLayer } from '../runtime/assets.js';
+import { CharacterPlayer, parseCharacterAsset } from '../runtime/meshAsset.js';
+import cesiumManUrl from '../app/assets/CesiumMan.glb?url';
 import { decodeBundle } from '../app/bundleView.js';
 import {
   strToU8,
@@ -628,6 +632,106 @@ function sum(v: [number, number, number, number]): number {
 
 // ---------- tests ----------
 
+/**
+ * Mesh-in-scene spike: the runtime compositor with a baked-cube sprite and
+ * a skinned, animated CesiumMan interpenetrating it — the golden hash for
+ * the pre/post-change regression diff of the dynamic-mesh path. Fixed
+ * camera, light, placements and a fixed animation time keep it
+ * deterministic.
+ */
+async function runMeshSpike(): Promise<void> {
+  log('test: mesh-in-scene golden hash (runtime compositor)');
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const asset = await parseCharacterAsset(await (await fetch(cesiumManUrl)).arrayBuffer());
+
+  // One baked-cube sprite with a neutral "render pass" (the compositor
+  // only shades it; the g-buffer carries the real bake data).
+  const cube = bakePrimitive(getCube());
+  const w = cube.width;
+  const h = cube.height;
+  const layer: SpriteLayer = {
+    id: 'cube',
+    pxPerUnit: cube.pxPerUnit,
+    width: w,
+    height: h,
+    originPx: cube.originPx,
+    gbuffer: bakeFloatToHalf(cube.gbuffer, w, h),
+    render: new Uint8Array(w * h * 4).fill(0).map((_, i) => (i % 4 === 3 ? 255 : 200)),
+  };
+  const set = layersToSet([layer]);
+  const renderer = new WorldRenderer(canvas, set.renderLayers, set.gbufferLayers, set.maxW, set.maxH);
+
+  // Fixed world-image frame (arbitrary but deterministic).
+  const PPU = RUNTIME_PPU;
+  const ORIGIN_X = 300;
+  const ORIGIN_Y = 500;
+  renderer.setMeshFrame(ORIGIN_X, ORIGIN_Y, PPU);
+  renderer.setLight({ dir: [0.5, 0.7071, 0.5], key: [1.2, 1.1, 0.9], ambient: [0.3, 0.3, 0.35] });
+
+  const toPx = (x: number, z: number, y: number): [number, number] => {
+    const [u, v] = groundToScreen(x, z);
+    return [ORIGIN_X + u * PPU, ORIGIN_Y - (v + y * SCREEN_UP[1]) * PPU];
+  };
+
+  const spriteScale = PPU / cube.pxPerUnit;
+  const [cx, cy] = toPx(2, 2, 0);
+  const instances = new Float32Array(8);
+  instances[0] = cx - cube.originPx[0] * spriteScale;
+  instances[1] = cy - cube.originPx[1] * spriteScale;
+  instances[2] = 0;
+  instances[3] = VIEW_DIR[0] * 2 + VIEW_DIR[1] * 0 + VIEW_DIR[2] * 2;
+  instances[4] = w * spriteScale;
+  instances[5] = h * spriteScale;
+  instances[6] = w;
+  instances[7] = h;
+
+  // The character stands inside the cube's cell at a fixed animation time.
+  const player = new CharacterPlayer(asset);
+  player.update(1.5);
+  const off = asset.worldOffset;
+  const meshDraws: MeshDraw[] = [
+    {
+      palette: player.palette,
+      origin: [2.1 + off[0], 0 + off[1], 2.2 + off[2]],
+      yawMat: meshYawMat(0.4),
+    },
+  ];
+
+  const px = new Uint8Array(canvas.width * canvas.height * 4);
+  const renderFrame = (): void => {
+    renderer.render(instances, 1, null, null, { zoom: 1, panX: 0, panY: 0 }, meshDraws);
+    renderer.readPixels(px);
+  };
+  renderFrame();
+  const hash1 = await sha256(px);
+
+  // Determinism: an immediate re-render must produce the identical frame.
+  renderFrame();
+  const hash2 = await sha256(px);
+  ok(hash1 === hash2, `render is deterministic (${hash1.slice(0, 16)}…)`);
+  ok(hash1 !== await sha256(new Uint8Array(px.length)), 'frame has content');
+
+  // The mesh participates: dropping its palette (bind pose) must change
+  // the frame; so must depth-only moves (the offset places the body
+  // relative to the cube).
+  player.update(0.9);
+  meshDraws[0] = { ...meshDraws[0], palette: player.palette };
+  renderFrame();
+  const hash3 = await sha256(px);
+  ok(hash3 !== hash1, `animation time changes the frame (${hash3.slice(0, 16)}…)`);
+
+  meshDraws[0] = { ...meshDraws[0], origin: [meshDraws[0].origin[0], meshDraws[0].origin[1] + 0.9, meshDraws[0].origin[2]] };
+  renderFrame();
+  const hash4 = await sha256(px);
+  ok(hash4 !== hash3, `raising the character changes the frame (${hash4.slice(0, 16)}…)`);
+
+  log(`  mesh-in-scene golden hash: sha256 ${hash1}`);
+  log(`  (t+0.9s: ${hash3.slice(0, 16)}… / raised: ${hash4.slice(0, 16)}…)`);
+  renderer.dispose();
+}
+
 async function main(): Promise<void> {
   const { glb, gltfSet } = await buildQuadModel([
     { x0: 0, material: 0, name: 'texred' },
@@ -986,6 +1090,9 @@ async function main(): Promise<void> {
 
   // 6b. Path-tracer alignment at a non-default slot camera (e).
   await runSlotAlignmentSpike();
+
+  // 7. Dynamic-mesh spike: skinned character among sprites.
+  await runMeshSpike();
 
   log(`\n${passed} passed, ${failed} failed`, failed === 0 ? 'pass' : 'fail');
 }

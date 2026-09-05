@@ -46,6 +46,11 @@ it as the reference architecture; design against it.
   (`src/bake/views-verify.ts`: manifest shape, parse round trips,
   old-format tolerance, rejection cases). Run after touching
   `src/bake/bundle.ts` or `src/bake/export.ts`.
+- `npm run verify:mesh` — Node-runnable dynamic-mesh checks
+  (`src/runtime/mesh-verify.ts`: CesiumMan GLB structure, skinned-asset
+  extraction, pose-engine palettes, SH probe vs a numerical integral).
+  Run after touching `src/runtime/meshAsset.ts` or
+  `src/runtime/shProbe.ts`.
 - Browser harness: `npm run dev` → `/scratch-verify.html` — bake/GL
   checks and primitive bundle hashes for regression diffs. Needs a
   browser: update it when bake behavior changes, but leave the actual
@@ -59,6 +64,9 @@ it as the reference architecture; design against it.
 
 - Always commit and push after implementing an OpenSpec change with
   `/opsx-apply` (include the change's `openspec/changes/<name>/` artifacts).
+- Whenever a commit is pushed after `/opsx-apply`, also report the resulting
+  build version of the push: `v<commit count>+<short hash>` (e.g.
+  `git rev-list --count HEAD` + `git rev-parse --short HEAD`).
 
 ## Versioning
 
@@ -126,6 +134,10 @@ file + a row in its index). Full design/process records stay in
 - Raw WebGL2 compositor (`src/runtime/renderer.ts`) with per-pixel sprite
   occlusion, deferred-style directional lighting (key + ambient, shades
   the baked render image by the g-buffer normals — multiplicatively, see
-  `docs/decisions/0003`), and a global dynamic-light switch.
+  `docs/decisions/0003`), a global dynamic-light switch, and a dynamic
+  mesh batch (skinned character among sprites; three.js as CPU-side
+  libraries, SH-irradiance ambient — see `docs/decisions/0007`). Mesh
+  placements are in-memory editor state; serialization, locomotion and
+  terrain are open follow-ons.
 - No released API: expect breaking changes while the architecture is under
   design.
