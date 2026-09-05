@@ -14,9 +14,10 @@ not the object that will land there.
 - **Viewport zoom/pan** — the world editor canvas fills its panel and can
   be zoomed and panned, following the sprite editor's established
   conventions (`ViewTransform`, shared zoom bounds/step, corner `− / % / +`
-  controls plus a fit action): mouse wheel zooms around the cursor,
-  middle-mouse drag pans (left stays "paint", right stays "erase"),
-  and the default view fits the whole grid to the panel.
+  controls plus a fit action): two-finger scroll (or a mouse wheel) pans,
+  pinch (ctrl+wheel) zooms around the cursor, middle-mouse drag pans
+  (left stays "paint", right stays "erase"), and the default view fits
+  the whole grid to the panel.
 - The canvas backing store becomes panel-sized (device-pixel-aware) and
   every batch (ground, sprites, overlays) draws through a 2D view
   transform of the fixed projected image. The fixed isometric camera and

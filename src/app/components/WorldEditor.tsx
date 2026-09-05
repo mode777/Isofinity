@@ -391,20 +391,38 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     };
     const onContext = (e: Event): void => e.preventDefault();
 
-    // Wheel zooms around the cursor; zoomAround keeps that world point
-    // under it. Native listener so preventDefault works.
+    // Trackpad-native convention: a plain wheel event (two-finger scroll)
+    // pans by the scroll delta — the content follows the fingers — while
+    // a ctrl-modified wheel (trackpad pinch, ctrl+scroll) zooms around
+    // the cursor. Native listener so preventDefault works.
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
       const t = liveRef.current.transform;
-      if (!t) return;
-      const rect = canvas.getBoundingClientRect();
-      const next = zoomAround(
-        t,
-        e.clientX - rect.left,
-        e.clientY - rect.top,
-        Math.exp(-e.deltaY * 0.0012),
-      );
-      setWorldViewTransform(doc.docId, next);
+      const panel = liveRef.current.panel;
+      if (!t || !panel) return;
+      if (e.ctrlKey) {
+        const rect = canvas.getBoundingClientRect();
+        setWorldViewTransform(
+          doc.docId,
+          zoomAround(
+            t,
+            e.clientX - rect.left,
+            e.clientY - rect.top,
+            Math.exp(-e.deltaY * 0.0012),
+          ),
+        );
+        return;
+      }
+      let dx = e.deltaX;
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) {
+        dx *= 16;
+        dy *= 16;
+      } else if (e.deltaMode === 2) {
+        dx *= panel.w;
+        dy *= panel.h;
+      }
+      setWorldViewTransform(doc.docId, panned(t, -dx, -dy));
     };
 
     canvas.addEventListener('pointermove', onMove);
@@ -576,7 +594,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           : activeTool === ''
             ? 'pick a brush above — left-click/drag places it, right-click erases'
             : `tool: ${activeTool} — left-click/drag places, right-click erases`}
-        {' — wheel zooms, middle-drag pans'}
+        {' — scroll pans, pinch zooms, middle-drag pans'}
       </p>
     </div>
   );

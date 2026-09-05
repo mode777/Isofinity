@@ -128,8 +128,9 @@ the workspace `worlds/` folder as described in Worlds.
 
 The world viewport is one zoomable panel: it shows the fixed projected
 world image (the bake's isometric projection, CPU-computed once) through
-a 2D view transform — mouse wheel zooms around the cursor, middle-drag
-pans (left paints, right erases), and corner `− / % / + / Fit` controls
+a 2D view transform — two-finger scroll (or a mouse wheel) pans, pinch
+(ctrl+wheel) zooms around the cursor, middle-drag pans (left paints,
+right erases), and corner `− / % / + / Fit` controls
 mirror the sprite viewport (shared `ViewTransform`/zoom constants in
 `src/app/bakeView.ts`). On touch screens, a three-finger drag pans by
 its centroid (one finger keeps tap-to-place/drag-paint, two fingers are
@@ -287,10 +288,10 @@ erases the nearest placement whose unit-cube footprint contains the
 cursor, tool buttons or eraser selects. Ground picking inverts the shared
 projection analytically (`screenToGround`) after inverting the viewport's
 zoom/pan transform, no hit-testing. The 12×12 checkerboard is a visual
-reference only. Viewport navigation: wheel zooms around the cursor,
-middle-drag pans; on touch screens three fingers pan (one finger
-paints/taps, two are neutral); the left/right placement bindings never
-move.
+reference only. Viewport navigation: two-finger scroll pans, pinch
+(ctrl+wheel) zooms around the cursor, middle-drag pans; on touch screens
+three fingers pan (one finger paints/taps, two are neutral); the
+left/right placement bindings never move.
 
 ## Source layout
 

@@ -16,6 +16,7 @@
 - [x] 3.3 Wire input: non-passive `wheel` zoom around the cursor (`zoomAround`, top-left origin), middle-button drag pan with `setPointerCapture` + `preventDefault` (no place/erase during pan), left/right buttons unchanged — verify the pointer-anchored zoom and pan scenarios from the spec by hand in the browser
 - [x] 3.4 Add corner zoom controls (`−`, percentage readout, `+`, fit) styled like the sprite viewport's, wired to `setWorldViewTransform` with center anchoring — verify the controls mirror the sprite editor's behavior and the state survives a tab switch but is not written into saved world JSON
 - [x] 3.5 Touch panning: three-finger drag pans by centroid from the transform captured when the third finger lands; single finger keeps tap-place (release without movement) / drag-paint; two fingers neutral (no paint, no pan); `pointercancel` cleans up — verify `npm run build` and hand the touch scenarios to the user
+- [x] 3.6 Rework wheel input to the trackpad-native convention: plain wheel (two-finger scroll) pans by the scroll delta (deltaMode-normalized, content follows the fingers), ctrl+wheel (trackpad pinch / ctrl+scroll) zooms around the cursor; update spec/design/proposal/docs accordingly — verify `npm run build` and hand the trackpad scenarios to the user
 
 ## 4. Brush ghost preview
 

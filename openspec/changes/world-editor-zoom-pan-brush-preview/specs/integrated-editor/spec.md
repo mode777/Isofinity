@@ -5,8 +5,11 @@
 The world editor viewport SHALL fill the editor area and support zooming
 and panning with the sprite editor's established viewport conventions:
 
-- Mouse wheel SHALL zoom around the cursor position, within the shared
-  zoom bounds; zooming SHALL NOT move the world point under the cursor.
+- A wheel event SHALL pan the viewport at constant zoom by the scroll
+  delta (the trackpad's two-finger scroll, or a mouse wheel); a pinch
+  gesture (ctrl-modified wheel) SHALL zoom around the cursor position,
+  within the shared zoom bounds; zooming SHALL NOT move the world point
+  under the cursor.
 - Middle-mouse drag SHALL pan the viewport at constant zoom; the left
   button SHALL keep painting placements and the right button SHALL keep
   erasing.
@@ -32,12 +35,19 @@ editor state: preserved across tab switches and view recreations,
 never serialized into world files, defaulting to fit when a world is
 opened or created.
 
-#### Scenario: Wheel zoom keeps the cursor anchored
+#### Scenario: Pinch zoom keeps the cursor anchored
 
-- **WHEN** the user rolls the mouse wheel over the world viewport while
-  pointing at a placed sprite
-- **THEN** the viewport zooms in around the cursor and the world point
+- **WHEN** the user pinches (trackpad pinch / ctrl+wheel) over the world
+  viewport while pointing at a placed sprite
+- **THEN** the viewport zooms around the cursor and the world point
   under the cursor stays under it
+
+#### Scenario: Two-finger scroll pans the viewport
+
+- **WHEN** the user two-finger scrolls (or rolls the mouse wheel) over
+  the world viewport
+- **THEN** the viewport pans with the scroll delta and no placement is
+  added or erased
 
 #### Scenario: Middle-drag pans without placing or erasing
 

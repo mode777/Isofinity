@@ -66,9 +66,13 @@ Pointer→ground inverts the transform: panel px → subtract pan, divide by
 zoom → world-image px → existing `screenToGround`. This keeps placement
 position invariant under zoom (a spec scenario).
 
-Input bindings: `wheel` (non-passive, `preventDefault`) zooms around the
+Input bindings: `wheel` (non-passive, `preventDefault`) follows the
+trackpad-native convention: a **plain wheel event** (two-finger scroll,
+or a mouse wheel) pans by the scroll delta — the content follows the
+fingers, with deltaMode normalized (line ×16, page × panel size); a
+**ctrl-modified wheel** (trackpad pinch, ctrl+scroll) zooms around the
 cursor via `zoomAround` with the top-left pan origin (same as the bake
-2D views); middle-button drag pans, using `setPointerCapture` and
+2D views). Middle-button drag pans, using `setPointerCapture` and
 `preventDefault` on middle-down (suppresses browser autoscroll) — middle
 is chosen because left paints and right erases; a ResizeObserver tracks
 the panel like `SpriteEditor.tsx` and only re-fits while the transform
@@ -86,9 +90,11 @@ ending cleanly (transform kept, no snap-back) when the count drops
 below three. Placement is deliberately deferred to move/release instead
 of pointer-down so landing a pan gesture cannot drop accidental sprites
 — a trade against the mouse's click-to-place immediacy, pinned by the
-spec's touch outcomes rather than its phasing. Three fingers on a
-*trackpad* never reach the browser (OS-level gestures), so trackpad
-users keep middle-drag/wheel; pinch-zoom stays a non-goal.
+spec's touch outcomes rather than its phasing. Note that three fingers
+on a *trackpad* are a different input entirely: macOS consumes them
+(Spaces/Mission Control swipes, the three-finger drag accessibility
+feature) and delivers no event, so trackpad panning rides two-finger
+scroll and trackpad zooming rides pinch (ctrl+wheel) instead.
 
 ### D3 — Ghost as an extra depth-tested instance of the sprite program (not an overlay canvas)
 
