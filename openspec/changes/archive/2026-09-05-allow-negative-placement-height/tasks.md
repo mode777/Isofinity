@@ -15,4 +15,4 @@
 
 - [x] 4.1 `npm run build` (tsc + production build) passes with no new diagnostics.
 - [x] 4.2 `npm run verify:bundles` still passes (no bundle/bake code touched; guards regressions).
-- [ ] 4.3 Browser check (user-run, `npm run dev`): shift+move lowers the ghost below the ground with gizmo; typing `-2` commits `-2`; placing at `-1` renders sunk with no shadow ellipse, saves, reloads at `-1`; shift+move down then up recovers smoothly; `npm run preview` on an old `/1` world file still loads at ground level.
+- [x] 4.3 Browser check (user-run, `npm run dev`): shift+move lowers the ghost below the ground with gizmo; typing `-2` commits `-2`; placing at `-1` renders sunk with no shadow ellipse, saves, reloads at `-1`; shift+move down then up recovers smoothly; `npm run preview` on an old `/1` world file still loads at ground level.
