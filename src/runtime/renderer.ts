@@ -394,7 +394,7 @@ export class Renderer {
     gl.bindVertexArray(this.groundVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.groundVbo);
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
-    this.groundVerts = data.length / 5;
+    this.groundVerts = data.length / 6;
     gl.bindVertexArray(null);
   }
 
