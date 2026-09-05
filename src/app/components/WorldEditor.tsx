@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { DataUtils } from 'three';
 import {
   SCREEN_UP,
   VIEW_DIR,
@@ -6,7 +7,7 @@ import {
   screenToGround,
 } from '../../shared/iso.js';
 import { RUNTIME_PPU, layersToSet } from '../../runtime/assets.js';
-import { Renderer } from '../../runtime/renderer.js';
+import { Renderer, type FlatBatch } from '../../runtime/renderer.js';
 import { depthOf } from '../../runtime/world.js';
 import { PRIMITIVE_KINDS } from '../document.js';
 import type { ViewTransform, WorldDocument } from '../document.js';
@@ -17,6 +18,8 @@ import {
   placeAt,
   saveWorld,
   selectBrush,
+  setHeightLevel,
+  setSurfaceSnap,
   setTool,
   setWorldViewTransform,
   suggestWorldName,
@@ -28,6 +31,10 @@ import { EditorToolbar } from './EditorToolbar.js';
 
 const MARGIN = 8;
 const GRID_N = 12;
+
+// Projected headroom above the grid (world units of stacking) so the fit
+// view reveals raised sprites; taller stacks pan into view.
+const HEADROOM_UNITS = 4;
 
 const GRID_COLORS: [number, number, number] = [0.145, 0.153, 0.173];
 const GRID_COLORS_ALT: [number, number, number] = [0.169, 0.178, 0.2];
@@ -50,7 +57,7 @@ const minV = Math.min(
     ([x, z]) => groundToScreen(x, z)[1],
   ),
 );
-const maxV = SCREEN_UP[1];
+const maxV = HEADROOM_UNITS * SCREEN_UP[1];
 
 // The fixed "world image": every placement, the ground and the overlays
 // are projected into this pixel space once (the bake's isometric camera,
@@ -60,13 +67,69 @@ const CANVAS_H = Math.ceil((maxV - minV) * PPU) + MARGIN * 2;
 const ORIGIN_X = -minU * PPU + MARGIN;
 const ORIGIN_Y = maxV * PPU + MARGIN;
 
-function toPx(x: number, z: number): [number, number] {
+function toPx(x: number, z: number, y = 0): [number, number] {
   const [u, v] = groundToScreen(x, z);
-  return [ORIGIN_X + u * PPU, ORIGIN_Y - v * PPU];
+  // World +Y projects exactly onto screen-up; height is a pure vertical
+  // pixel shift of the same projected image.
+  return [ORIGIN_X + u * PPU, ORIGIN_Y - (v + y * SCREEN_UP[1]) * PPU];
+}
+
+/** Heights at or below this count as ground level (no gizmo/shadow). */
+const GROUND_EPSILON = 0.005;
+/** Shadow ellipse segments (a ground-plane circle, projected). */
+const SHADOW_SEGMENTS = 24;
+
+/**
+ * Growable triangle-vertex batch for the flat program (x, y, r, g, b, a
+ * per vertex). Reused across frames to avoid per-frame allocations.
+ */
+class FlatBatchBuilder {
+  data = new Float32Array(2048 * 6);
+  verts = 0;
+
+  reset(): void {
+    this.verts = 0;
+  }
+
+  vert(x: number, y: number, c: [number, number, number], a: number): void {
+    if ((this.verts + 1) * 6 > this.data.length) {
+      const next = new Float32Array(this.data.length * 2);
+      next.set(this.data);
+      this.data = next;
+    }
+    const o = this.verts * 6;
+    this.data[o] = x;
+    this.data[o + 1] = y;
+    this.data[o + 2] = c[0];
+    this.data[o + 3] = c[1];
+    this.data[o + 4] = c[2];
+    this.data[o + 5] = a;
+    this.verts++;
+  }
+
+  quad(
+    ax: number, ay: number,
+    bx: number, by: number,
+    cx: number, cy: number,
+    dx: number, dy: number,
+    c: [number, number, number],
+    a: number,
+  ): void {
+    this.vert(ax, ay, c, a);
+    this.vert(bx, by, c, a);
+    this.vert(cx, cy, c, a);
+    this.vert(ax, ay, c, a);
+    this.vert(cx, cy, c, a);
+    this.vert(dx, dy, c, a);
+  }
+
+  batch(): FlatBatch | null {
+    return this.verts > 0 ? { data: this.data, verts: this.verts } : null;
+  }
 }
 
 function buildGround(): Float32Array {
-  const ground = new Float32Array(GRID_N * GRID_N * 6 * 5);
+  const ground = new Float32Array(GRID_N * GRID_N * 6 * 6);
   let o = 0;
   const push = (x: number, z: number, c: [number, number, number]) => {
     const [px, py] = toPx(x, z);
@@ -75,6 +138,7 @@ function buildGround(): Float32Array {
     ground[o++] = c[0];
     ground[o++] = c[1];
     ground[o++] = c[2];
+    ground[o++] = 1;
   };
   for (let i = 0; i < GRID_N; i++) {
     for (let j = 0; j < GRID_N; j++) {
@@ -96,7 +160,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
   const { doc } = props;
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const hoverRef = useRef<[number, number] | null>(null);
+  // Cursor in world-image pixels plus its ground projection; the pixel
+  // coordinates drive the surface-snap unprojection.
+  const hoverRef = useRef<{ px: [number, number]; ground: [number, number] } | null>(
+    null,
+  );
   const [panel, setPanel] = useState<{ w: number; h: number } | null>(null);
 
   // Latest resolved transform for the native listeners and the rAF loop
@@ -152,7 +220,94 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     renderer.setGround(GROUND);
 
     let instances = new Float32Array(256 * 8);
-    const highlightData = new Float32Array(6 * 5);
+    const shadowBatch = new FlatBatchBuilder();
+    const overlayBatch = new FlatBatchBuilder();
+
+    // Draws a soft contact-shadow ellipse on the ground under a raised
+    // object: larger and fainter as the height grows, none at ground
+    // level. A ground-plane circle projects to the correct isometric
+    // ellipse through toPx.
+    const emitShadow = (x: number, y: number, z: number): void => {
+      if (y <= GROUND_EPSILON) return;
+      const alpha = 0.34 / (1 + 0.45 * y);
+      const r = Math.min(0.55, 0.34 + 0.05 * y);
+      const cx = x + 0.5;
+      const cz = z + 0.5;
+      const [ccx, ccy] = toPx(cx, cz);
+      const BLACK: [number, number, number] = [0, 0, 0];
+      let prev: [number, number] | null = null;
+      for (let i = 0; i <= SHADOW_SEGMENTS; i++) {
+        const t = (i / SHADOW_SEGMENTS) * Math.PI * 2;
+        const [px, py] = toPx(cx + r * Math.cos(t), cz + r * Math.sin(t));
+        if (prev !== null) {
+          shadowBatch.vert(ccx, ccy, BLACK, alpha);
+          shadowBatch.vert(prev[0], prev[1], BLACK, alpha);
+          shadowBatch.vert(px, py, BLACK, alpha);
+        }
+        prev = [px, py];
+      }
+    };
+
+    // The height gizmo for a raised ghost: landing diamond at the raised
+    // footprint, plumb line down to the ground cell, and a small marker
+    // on the ground cell itself.
+    const emitGizmo = (x: number, y: number, z: number): void => {
+      const [ax, ay] = toPx(x, z, y);
+      const [bx, by] = toPx(x + 1, z, y);
+      const [cx, cy] = toPx(x + 1, z + 1, y);
+      const [dx, dy] = toPx(x, z + 1, y);
+      overlayBatch.quad(ax, ay, bx, by, cx, cy, dx, dy, HIGHLIGHT_COLOR, 0.3);
+      const [gcx, gcy] = toPx(x + 0.5, z + 0.5);
+      const [tcx, tcy] = toPx(x + 0.5, z + 0.5, y);
+      const w = 1;
+      overlayBatch.quad(gcx - w, gcy, gcx + w, gcy, tcx + w, tcy, tcx - w, tcy, HIGHLIGHT_COLOR, 0.85);
+      const m = 6;
+      overlayBatch.quad(gcx, gcy - m, gcx + m, gcy, gcx, gcy + m, gcx - m, gcy, HIGHLIGHT_COLOR, 0.5);
+    };
+
+    /**
+     * The effective placement height at the cursor: the brush height
+     * level, or — when surface snap is on — the height of the visible
+     * surface under the cursor, unprojected CPU-side from the world
+     * document's in-memory g-buffers (max composite depth among the
+     * covering placements, then `y = v·SCREEN_UP[1] + d·VIEW_DIR[1]`).
+     * Empty ground or nothing covered = ground level.
+     */
+    const effectiveHeight = (live: WorldDocument, wx: number, wy: number): number => {
+      if (!live.surfaceSnap) return live.heightLevel;
+      // Surface point = u·SCREEN_RIGHT + v·SCREEN_UP + d·VIEW_DIR; its y
+      // component only involves v and d (SCREEN_RIGHT[1] is 0).
+      const v = -(wy - ORIGIN_Y) / PPU;
+      let best = -Infinity;
+      for (const p of live.world.list()) {
+        const li = live.layers.findIndex((l) => l.id === p.primId);
+        if (li < 0) continue;
+        const layer = live.layers[li];
+        const scale = PPU / spriteSet.ppus[li];
+        const [ox, oy] = spriteSet.origins[li];
+        const [w, h] = spriteSet.sizes[li];
+        const [bx, by] = (() => {
+          const [cx, cy] = toPx(p.x, p.z, p.y);
+          return [cx - ox * scale, cy - oy * scale];
+        })();
+        const tx = Math.floor((wx - bx) / scale);
+        const ty = Math.floor((wy - by) / scale);
+        if (tx < 0 || ty < 0 || tx >= w || ty >= h) continue;
+        const o = (ty * w + tx) * 4;
+        const nx = DataUtils.fromHalfFloat(layer.gbuffer[o]);
+        const ny = DataUtils.fromHalfFloat(layer.gbuffer[o + 1]);
+        const nz = DataUtils.fromHalfFloat(layer.gbuffer[o + 2]);
+        if (nx * nx + ny * ny + nz * nz === 0) continue;
+        const d =
+          DataUtils.fromHalfFloat(layer.gbuffer[o + 3]) +
+          VIEW_DIR[0] * p.x +
+          VIEW_DIR[1] * p.y +
+          VIEW_DIR[2] * p.z;
+        if (d > best) best = d;
+      }
+      if (!Number.isFinite(best)) return 0;
+      return Math.max(0, v * SCREEN_UP[1] + best * VIEW_DIR[1]);
+    };
 
     const renderFrame = (): void => {
       // Read the live document every frame; the rAF loop never stale-locks.
@@ -173,19 +328,20 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       const hover = hoverRef.current;
       // The ghost preview: when a brush with a loaded layer is active and
       // the cursor is over the canvas, preview the placement (cursor-
-      // centered, exactly what placeAt will do) as a depth-tested sprite.
+      // centered at the effective height, exactly what placeAt will do)
+      // as a depth-tested sprite.
       const brushIndex =
         live.tool && live.tool !== 'eraser'
           ? live.layers.findIndex((l) => l.id === live.tool)
           : -1;
       const ghost =
         hover && brushIndex >= 0
-          ? {
-              layer: brushIndex,
-              x: hover[0] - 0.5,
-              z: hover[1] - 0.5,
-              key: depthOf(hover[0] - 0.5, hover[1] - 0.5),
-            }
+          ? (() => {
+              const x = hover.ground[0] - 0.5;
+              const z = hover.ground[1] - 0.5;
+              const y = effectiveHeight(live, hover.px[0], hover.px[1]);
+              return { layer: brushIndex, x, y, z, key: depthOf(x, y, z) };
+            })()
           : null;
 
       const total = placed.length + (ghost ? 1 : 0);
@@ -193,15 +349,16 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         instances = new Float32Array(total * 8);
       }
       let count = 0;
-      const emit = (layerIndex: number, x: number, z: number): void => {
+      const emit = (layerIndex: number, x: number, y: number, z: number): void => {
         const scale = PPU / spriteSet.ppus[layerIndex];
         const [ox, oy] = spriteSet.origins[layerIndex];
         const [w, h] = spriteSet.sizes[layerIndex];
-        const [cx, cy] = toPx(x, z);
+        const [cx, cy] = toPx(x, z, y);
         instances[count * 8] = cx - ox * scale;
         instances[count * 8 + 1] = cy - oy * scale;
         instances[count * 8 + 2] = layerIndex;
-        instances[count * 8 + 3] = VIEW_DIR[0] * x + VIEW_DIR[2] * z;
+        instances[count * 8 + 3] =
+          VIEW_DIR[0] * x + VIEW_DIR[1] * y + VIEW_DIR[2] * z;
         instances[count * 8 + 4] = w * scale;
         instances[count * 8 + 5] = h * scale;
         instances[count * 8 + 6] = w;
@@ -213,42 +370,40 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       let ghostDone = false;
       for (const p of placed) {
         if (ghost && !ghostDone && p.key >= ghost.key) {
-          emit(ghost.layer, ghost.x, ghost.z);
+          emit(ghost.layer, ghost.x, ghost.y, ghost.z);
           ghostDone = true;
         }
         const layerIndex = live.layers.findIndex((l) => l.id === p.primId);
         if (layerIndex < 0) continue;
-        emit(layerIndex, p.x, p.z);
+        emit(layerIndex, p.x, p.y, p.z);
       }
-      if (ghost && !ghostDone) emit(ghost.layer, ghost.x, ghost.z);
+      if (ghost && !ghostDone) emit(ghost.layer, ghost.x, ghost.y, ghost.z);
 
-      // Hover feedback: the unit-cell highlight only for the eraser —
-      // a brush hover shows the ghost instead, no tool shows nothing.
-      let highlight: Float32Array | null = null;
-      if (hover && !ghost && live.tool === 'eraser') {
-        const [gx, gz] = hover;
-        highlight = highlightData;
-        let o = 0;
-        const push = (x: number, z: number) => {
-          const [px, py] = toPx(x, z);
-          highlight![o++] = px;
-          highlight![o++] = py;
-          highlight![o++] = HIGHLIGHT_COLOR[0];
-          highlight![o++] = HIGHLIGHT_COLOR[1];
-          highlight![o++] = HIGHLIGHT_COLOR[2];
-        };
-        push(gx - 0.5, gz - 0.5);
-        push(gx + 0.5, gz - 0.5);
-        push(gx + 0.5, gz + 0.5);
-        push(gx - 0.5, gz - 0.5);
-        push(gx + 0.5, gz + 0.5);
-        push(gx - 0.5, gz + 0.5);
+      // Contact shadows: under every raised placement and a raised ghost,
+      // drawn between the ground and the sprites.
+      shadowBatch.reset();
+      for (const p of placed) emitShadow(p.x, p.y, p.z);
+      if (ghost) emitShadow(ghost.x, ghost.y, ghost.z);
+
+      // Overlays: the height gizmo for a raised ghost, else the eraser's
+      // unit-cell hover highlight.
+      overlayBatch.reset();
+      if (ghost && ghost.y > GROUND_EPSILON) {
+        emitGizmo(ghost.x, ghost.y, ghost.z);
+      } else if (hover && !ghost && live.tool === 'eraser') {
+        const [gx, gz] = hover.ground;
+        const [ax, ay] = toPx(gx - 0.5, gz - 0.5);
+        const [bx, by] = toPx(gx + 0.5, gz - 0.5);
+        const [cx, cy] = toPx(gx + 0.5, gz + 0.5);
+        const [dx, dy] = toPx(gx - 0.5, gz + 0.5);
+        overlayBatch.quad(ax, ay, bx, by, cx, cy, dx, dy, HIGHLIGHT_COLOR, 0.35);
       }
 
       renderer.render(
         instances,
         count,
-        highlight,
+        shadowBatch.batch(),
+        overlayBatch.batch(),
         { zoom: t.zoom * dpr, panX: t.panX * dpr, panY: t.panY * dpr },
       );
     };
@@ -261,14 +416,26 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     raf = requestAnimationFrame(loop);
 
     // Panel px → world-image px → ground. Inverts the same transform the
-    // frame is drawn with, so picking is zoom/pan invariant.
-    const pointerGround = (e: PointerEvent): [number, number] => {
+    // frame is drawn with, so picking is zoom/pan invariant. The
+    // world-image pixel is kept for the surface-snap unprojection.
+    const pointerPoint = (
+      e: PointerEvent,
+    ): { px: [number, number]; ground: [number, number] } | null => {
       const t = liveRef.current.transform;
-      if (!t) return [0, 0];
+      if (!t) return null;
       const rect = canvas.getBoundingClientRect();
       const wx = (e.clientX - rect.left - t.panX) / t.zoom;
       const wy = (e.clientY - rect.top - t.panY) / t.zoom;
-      return screenToGround((wx - ORIGIN_X) / PPU, -(wy - ORIGIN_Y) / PPU);
+      const [gx, gz] = screenToGround((wx - ORIGIN_X) / PPU, -(wy - ORIGIN_Y) / PPU);
+      return { px: [wx, wy], ground: [gx, gz] };
+    };
+
+    // Reads the live document and computes the height the next placement
+    // at the cursor would land at (brush level, or the snapped surface).
+    const hoverPlacementHeight = (px: [number, number]): number => {
+      const live = useEditor.getState().docs[doc.docId];
+      if (!live || live.kind !== 'world') return 0;
+      return effectiveHeight(live, px[0], px[1]);
     };
 
     // Middle-drag pans (left paints, right erases); capture keeps the
@@ -324,13 +491,19 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           return;
         }
         if (touchPts.size === 1) {
-          hoverRef.current = pointerGround(e);
-          placeAt(doc.docId, hoverRef.current[0], hoverRef.current[1]);
+          const pt = pointerPoint(e);
+          if (!pt) return;
+          hoverRef.current = pt;
+          placeAt(doc.docId, pt.ground[0], pt.ground[1], hoverPlacementHeight(pt.px));
         }
         return;
       }
-      hoverRef.current = pointerGround(e);
-      if (e.buttons & 1) placeAt(doc.docId, hoverRef.current[0], hoverRef.current[1]);
+      const pt = pointerPoint(e);
+      if (!pt) return;
+      hoverRef.current = pt;
+      if (e.buttons & 1) {
+        placeAt(doc.docId, pt.ground[0], pt.ground[1], hoverPlacementHeight(pt.px));
+      }
     };
     const onDown = (e: PointerEvent): void => {
       if (e.pointerType === 'touch') {
@@ -361,9 +534,13 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         }
         return;
       }
-      const [gx, gz] = pointerGround(e);
-      if (e.button === 2) eraseAt(doc.docId, gx, gz);
-      else if (e.button === 0) placeAt(doc.docId, gx, gz);
+      const pt = pointerPoint(e);
+      if (!pt) return;
+      if (e.button === 2) {
+        eraseAt(doc.docId, pt.ground[0], pt.ground[1]);
+      } else if (e.button === 0) {
+        placeAt(doc.docId, pt.ground[0], pt.ground[1], hoverPlacementHeight(pt.px));
+      }
     };
     const onUp = (e: PointerEvent): void => {
       if (e.pointerType === 'touch') {
@@ -371,8 +548,10 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         touchEnd(e);
         // Tap-to-place: a lone finger released where it landed.
         if (tp && !tp.moved && touchPts.size === 0) {
-          hoverRef.current = pointerGround(e);
-          placeAt(doc.docId, hoverRef.current[0], hoverRef.current[1]);
+          const pt = pointerPoint(e);
+          if (!pt) return;
+          hoverRef.current = pt;
+          placeAt(doc.docId, pt.ground[0], pt.ground[1], hoverPlacementHeight(pt.px));
         }
         return;
       }
@@ -394,9 +573,22 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     // Trackpad-native convention: a plain wheel event (two-finger scroll)
     // pans by the scroll delta — the content follows the fingers — while
     // a ctrl-modified wheel (trackpad pinch, ctrl+scroll) zooms around
-    // the cursor. Native listener so preventDefault works.
+    // the cursor and a shift-modified wheel adjusts the placement height
+    // (some browsers map shift+wheel to the horizontal axis, so both
+    // deltas are read). Native listener so preventDefault works.
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
+      if (e.shiftKey && !e.ctrlKey) {
+        const panel = liveRef.current.panel;
+        let dy = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+        if (e.deltaMode === 1) dy *= 16;
+        else if (e.deltaMode === 2 && panel) dy *= panel.h;
+        // Scroll up (negative delta) raises; ~0.25 world units per notch.
+        const live = useEditor.getState().docs[doc.docId];
+        if (!live || live.kind !== 'world') return;
+        setHeightLevel(doc.docId, live.heightLevel - dy * 0.0025);
+        return;
+      }
       const t = liveRef.current.transform;
       const panel = liveRef.current.panel;
       if (!t || !panel) return;
@@ -563,6 +755,17 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         >
           Eraser
         </button>
+        <button
+          className={doc.surfaceSnap ? 'active' : ''}
+          title="Surface snap — placements take their height from the visible surface under the cursor (off: use the shift+wheel height)"
+          onClick={() => setSurfaceSnap(doc.docId, !doc.surfaceSnap)}
+        >
+          Snap
+        </button>
+        <span className="hint" title="Placement height (shift+wheel adjusts, clamped at the ground)">
+          h {doc.heightLevel.toFixed(2)}
+          {doc.surfaceSnap ? ' · snap' : ''}
+        </span>
         <span className="hint">
           {activeTool === 'eraser' ? 'eraser' : activeTool === '' ? 'no brush' : activeTool}
         </span>
@@ -594,7 +797,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           : activeTool === ''
             ? 'pick a brush above — left-click/drag places it, right-click erases'
             : `tool: ${activeTool} — left-click/drag places, right-click erases`}
-        {' — scroll pans, pinch zooms, middle-drag pans'}
+        {' — shift+scroll sets the placement height, scroll pans, pinch zooms, middle-drag pans'}
       </p>
     </div>
   );

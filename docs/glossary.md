@@ -50,22 +50,36 @@ the pointer for the real semantics.
 
 ## World
 
-- **World** — placements + light state, saved as `isoinfinity-world/1`
-  JSON in `worlds/`.
+- **World** — placements + light state, saved as `isoinfinity-world/2`
+  JSON in `worlds/` (`/1` still loads; missing heights = ground level).
 - **Sprite layer** — a world's loaded sprite asset: padded passes in two
   texture arrays (render RGBA8 + g-buffer RGBA16F) plus per-layer size/
   origin (`src/runtime/assets.ts`).
 - **Placement** — one instance of a sprite layer at a continuous ground
-  position; free-form (not grid-snapped).
+  position and height; free-form (not grid-snapped), height ≥ 0.
+- **Placement height** — a placement's world-unit offset above the ground
+  plane. The brush height is set with shift+wheel (per-document in-memory
+  editor state, never saved).
+- **Surface snap** — toolbar toggle: placements take their height from
+  the visible surface under the cursor, computed CPU-side from the
+  in-memory g-buffers; overrides the shift+wheel height.
+- **Contact shadow** — editor chrome: a soft ground ellipse under every
+  raised placement (and raised ghost), larger and fainter with height;
+  never saved, never dirtying.
+- **Height gizmo** — editor chrome: landing diamond at a raised ghost's
+  footprint plus a plumb line down to the ground cell; hidden at ground
+  level.
 
 ## Runtime
 
-- **Compositor** — `src/runtime/renderer.ts`: three draw batches (ground,
-  instanced sprite quads, highlight); fixed orthographic camera, no scene
-  graph, projection on CPU (`src/shared/iso.ts`).
+- **Compositor** — `src/runtime/renderer.ts`: four draw batches (ground,
+  contact shadows, instanced sprite quads, overlay); fixed orthographic
+  camera, no scene graph, projection on CPU (`src/shared/iso.ts`).
 - **Per-pixel occlusion** — each sprite fragment writes `gl_FragDepth`
-  from baked g-buffer depth + the placement's `dot(origin, viewDir)`;
-  LEQUAL depth resolves interpenetrations regardless of draw order.
+  from baked g-buffer depth + the placement's full
+  `dot(origin + height, viewDir)`; LEQUAL depth resolves
+  interpenetrations — stacking included, at any height — regardless of
+  draw order.
 - **Key/ambient light** — POE-style dynamic lighting multiplying the
   prerendered texel in linear space (ADR 0003). **Dynamic light** switch
   off = factor identity (pure prerender).

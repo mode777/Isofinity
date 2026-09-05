@@ -20,7 +20,9 @@ import { nextDocId, useEditor, type EditorState } from './editor.js';
 import { bakePrimitiveLayer, anyBakeBusy, resultToLayer } from './bake.js';
 import { SPRITE_EXTS, useProject } from './project.js';
 
-const WORLD_FORMAT = 'isoinfinity-world/1';
+const WORLD_FORMAT = 'isoinfinity-world/2';
+/** Older formats the parser still accepts; heights default to ground. */
+const LEGACY_WORLD_FORMATS = ['isoinfinity-world/1'];
 
 const ed = (): EditorState => useEditor.getState();
 const worldDoc = (docId: string): WorldDocument | null => {
@@ -44,6 +46,8 @@ export function newWorldDoc(): string {
     light: { ...DEFAULT_LIGHT },
     sun: { ...DEFAULT_SUN },
     tool: '',
+    heightLevel: 0,
+    surfaceSnap: false,
     viewTransform: null,
   };
   ed().addDoc(doc);
@@ -55,7 +59,7 @@ interface WorldFile {
   format: string;
   name?: string;
   savedAt?: string;
-  sprites: { asset: string; x: number; z: number }[];
+  sprites: { asset: string; x: number; z: number; y: number }[];
   light: LightState;
   sun: SunState;
 }
@@ -73,8 +77,9 @@ function parseWorldFile(text: string, fileName: string): WorldFile {
     throw fail(`not valid JSON — ${err instanceof Error ? err.message : String(err)}`);
   }
   const obj = data as Record<string, unknown>;
-  if (obj.format !== WORLD_FORMAT) {
-    throw fail(`unsupported format ${String(obj.format)} — expected ${WORLD_FORMAT}`);
+  const format = typeof obj.format === 'string' ? obj.format : String(obj.format);
+  if (format !== WORLD_FORMAT && !LEGACY_WORLD_FORMATS.includes(format)) {
+    throw fail(`unsupported format ${format} — expected ${WORLD_FORMAT}`);
   }
   const spritesRaw = obj.sprites;
   if (!Array.isArray(spritesRaw)) throw fail('missing "sprites" array');
@@ -84,7 +89,10 @@ function parseWorldFile(text: string, fileName: string): WorldFile {
     if (typeof s.asset !== 'string' || !isFiniteNumber(s.x) || !isFiniteNumber(s.z)) {
       throw fail('malformed sprite placement (needs asset/x/z)');
     }
-    sprites.push({ asset: s.asset, x: s.x, z: s.z });
+    if (s.y !== undefined && !isFiniteNumber(s.y)) {
+      throw fail('malformed sprite placement — height must be a finite number');
+    }
+    sprites.push({ asset: s.asset, x: s.x, z: s.z, y: s.y === undefined ? 0 : s.y });
   }
   const l = obj.light as Record<string, unknown> | undefined;
   if (
@@ -175,6 +183,8 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       light: data.light,
       sun: data.sun,
       tool: '',
+      heightLevel: 0,
+      surfaceSnap: false,
       viewTransform: null,
     };
 
@@ -218,7 +228,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     }
     doc.layers = [...loaded.values()];
     for (const s of data.sprites) {
-      if (loaded.has(s.asset)) doc.world.place(s.x, s.z, s.asset);
+      if (loaded.has(s.asset)) doc.world.place(s.x, s.z, s.asset, s.y);
     }
     doc.tool = doc.layers[0]?.id ?? '';
 
@@ -292,7 +302,7 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
       format: WORLD_FORMAT,
       name,
       savedAt: new Date().toISOString(),
-      sprites: placements.map((p) => ({ asset: p.primId, x: p.x, z: p.z })),
+      sprites: placements.map((p) => ({ asset: p.primId, x: p.x, z: p.z, y: p.y })),
       light: doc.light,
       sun: doc.sun,
     };
@@ -346,7 +356,12 @@ export function setWorldViewTransform(
   });
 }
 
-export function placeAt(docId: string, gx: number, gz: number): void {
+/**
+ * Place the current brush at the pointed cell and height. The height is
+ * the editor's effective placement height (brush level, or the surface
+ * snap result) computed by the caller; ground level by default.
+ */
+export function placeAt(docId: string, gx: number, gz: number, y = 0): void {
   const doc = worldDoc(docId);
   if (!doc) return;
   if (doc.tool === 'eraser') {
@@ -357,8 +372,32 @@ export function placeAt(docId: string, gx: number, gz: number): void {
     ed().setStatus(`brush "${doc.tool}" is not loaded — pick a brush from the toolbar`);
     return;
   }
-  doc.world.place(gx - 0.5, gz - 0.5, doc.tool);
+  doc.world.place(gx - 0.5, gz - 0.5, doc.tool, y);
   ed().markDirty(docId);
+}
+
+/**
+ * Set the brush's placement height (world units, clamped to the ground
+ * plane). Editor state only: never marks the document dirty and never
+ * reaches a saved world file.
+ */
+export function setHeightLevel(docId: string, y: number): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  const clamped = Math.max(0, y);
+  if (clamped === doc.heightLevel) return;
+  update(docId, (d) => {
+    d.heightLevel = clamped;
+  });
+}
+
+/** Toggle surface snap (per-document editor state, not saved). */
+export function setSurfaceSnap(docId: string, on: boolean): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  update(docId, (d) => {
+    d.surfaceSnap = on;
+  });
 }
 
 export function eraseAt(docId: string, gx: number, gz: number): void {

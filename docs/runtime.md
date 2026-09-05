@@ -184,17 +184,19 @@ workspace control explains its absence and dialogs/downloads keep working.
 ### Worlds
 
 **Save world** writes `worlds/<name>.json` (name defaults to the first
-free `world-<n>`): the format marker `isoinfinity-world/1`, every placement
-(asset id + continuous ground position) and the full light state — manual
-azimuth/elevation, intensity, key and ambient colors, dynamic-light switch,
-plus the sun-position values. Saving an existing name overwrites it.
-Loading a world validates the file completely first (format marker,
-placements, light/sun fields) so a corrupt file fails with a named error
-and opens nothing; a valid file then restores the sun values, recomputes
-the sun, re-applies the saved manual angles (so hand-tweaked directions
-round-trip), loads every referenced sprite bundle from `sprites/`, and
-places the sprites whose asset ids loaded — placements referencing missing
-bundles are skipped and named in the status line.
+free `world-<n>`): the format marker `isoinfinity-world/2`, every placement
+(asset id + continuous ground position + height, always written) and the
+full light state — manual azimuth/elevation, intensity, key and ambient
+colors, dynamic-light switch, plus the sun-position values. Saving an
+existing name overwrites it. Loading a world validates the file completely
+first (format marker `isoinfinity-world/2` or the older `/1`, placements
+with optional finite height, light/sun fields) so a corrupt file fails with
+a named error and opens nothing; `/1` placements and `/2` placements
+without a height restore at ground level. A valid file then restores the
+sun values, recomputes the sun, re-applies the saved manual angles (so
+hand-tweaked directions round-trip), loads every referenced sprite bundle
+from `sprites/`, and places the sprites whose asset ids loaded — placements
+referencing missing bundles are skipped and named in the status line.
 
 ### Loading sprite bundles
 
@@ -268,40 +270,62 @@ fragment shader:
 Raw WebGL2, no scene graph, no matrices. Because the camera is fixed and
 orthographic, all projection happens once on the CPU
 (`src/shared/iso.ts` — same constants as the bake); the GPU side is a
-pure 2D compositor with three draw batches per frame. A single `uView`
+pure 2D compositor with four draw batches per frame. A single `uView`
 scale+offset uniform (backing-store pixels) applies the editor
 viewport's zoom/pan to every batch at draw time — the world data itself
-stays in world-image pixels:
+stays in world-image pixels. The flat batches (ground, shadows, overlay)
+carry per-vertex RGBA (`[x, y, r, g, b, a]`, 6 floats per vertex):
 
 1. **Ground** — the grid's cell top faces (y=0) as a static vertex-color
-   triangle batch, CPU-projected at startup. No depth interaction.
-2. **Sprites** — one instanced quad per placed object (per-instance quad
+   triangle batch, CPU-projected at startup. No depth interaction (it
+   writes no depth, so sprites always composite over it).
+2. **Contact shadows** — for every placement (and ghost) standing above
+   the ground: a soft black ellipse on the ground at the placement's
+   ground cell, CPU-projected ground-plane circle, larger and fainter as
+   the height grows. Blended, no depth interaction — all sprites
+   composite over it. Editor chrome only.
+3. **Sprites** — one instanced quad per placed object (per-instance quad
    size + sprite texel size, 8 floats per instance), painter-sorted by
-   `dot(origin, viewDir)` (far → near) for blend correctness,
-   alpha-blended using the render pass's (antialiased) alpha, with
-   **per-pixel occlusion**: each fragment samples the baked g-buffer once
-   (normals in rgb for shading and emptiness-based coverage, depth in
-   alpha), adds the per-object constant `dot(origin, viewDir)` and writes
-   `gl_FragDepth` (`windowZ = 0.5 - d / 128`, see `DEPTH_LINEAR_RANGE` in
-   the renderer); a LEQUAL depth buffer then resolves interpenetrations
-   pixel-accurately, regardless of draw order. The linear map keeps the
-   whole reachable placement range inside [0,1] with ample 24-bit
-   precision.
-3. **Highlight** — hovered footprint overlay quad, no depth interaction.
+   the 3D depth key `dot(cell-center, viewDir)` (far → near) for blend
+   correctness, alpha-blended using the render pass's (antialiased)
+   alpha, with **per-pixel occlusion**: each fragment samples the baked
+   g-buffer once (normals in rgb for shading and emptiness-based
+   coverage, depth in alpha), adds the per-object constant
+   `dot(origin + height, viewDir)` — the placement's full `(x, y, z)`
+   offset, height included — and writes `gl_FragDepth`
+   (`windowZ = 0.5 - d / 128`, see `DEPTH_LINEAR_RANGE` in the
+   renderer); a LEQUAL depth buffer then resolves interpenetrations
+   pixel-accurately, regardless of draw order — stacking and sinking
+   included, at any height. The linear map keeps the whole reachable
+   placement range inside [0,1] with ample 24-bit precision.
+4. **Overlay** — hovered footprint (eraser) and the height gizmo
+   (landing diamond at a raised ghost + plumb line down to the ground
+   cell), as a per-frame vertex batch. No depth interaction. Editor
+   chrome only.
 
 ## Input
 
 Placements are **free-form** (continuous x/z on the ground plane,
 cursor-centered) — not grid-snapped — so overlapping objects exercise the
-per-pixel occlusion. Left-click/drag places the selected tool, right-click
-erases the nearest placement whose unit-cube footprint contains the
-cursor, tool buttons or eraser selects. Ground picking inverts the shared
+per-pixel occlusion. Placements also carry a **height**: shift+wheel
+raises/lowers the brush height in free-form steps (clamped at the ground
+plane; some browsers map shift+wheel to the horizontal axis, so both
+deltas are read), and the toolbar's **surface snap** toggle overrides it —
+the placement then takes its height from the visible surface under the
+cursor, computed CPU-side from the world document's in-memory g-buffers
+(max composite depth among the covering placements' texels, unprojected
+via the orthonormal frame). Height level and snap are per-document
+in-memory editor state, never saved. Left-click/drag places the selected
+tool, right-click erases the nearest placement whose unit-cube footprint
+contains the cursor — resolving to the **topmost** (greatest depth key) —
+tool buttons or eraser selects. Ground picking inverts the shared
 projection analytically (`screenToGround`) after inverting the viewport's
 zoom/pan transform, no hit-testing. The 12×12 checkerboard is a visual
 reference only. Viewport navigation: two-finger scroll pans, pinch
-(ctrl+wheel) zooms around the cursor, middle-drag pans; on touch screens
-three fingers pan (one finger paints/taps, two are neutral); the
-left/right placement bindings never move.
+(ctrl+wheel) zooms around the cursor, middle-drag pans, shift+scroll sets
+the placement height; on touch screens three fingers pan (one finger
+paints/taps, two are neutral); the left/right placement bindings never
+move.
 
 ## Source layout
 

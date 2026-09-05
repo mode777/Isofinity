@@ -53,6 +53,14 @@ list when a change lands (and prune it — history belongs in the archives).
   conventions, per-document in-memory state, picking invariant under the
   transform), three-finger touch panning, and a depth-tested brush ghost
   previewing the next placement under the cursor.
+- Placement height (`isoinfinity-world/2`, `/1` still loads) — shift+wheel
+  brush height (free-form, clamped at the ground) with a surface-snap
+  toggle taking the height from the visible surface under the cursor
+  (CPU-side g-buffer unprojection), the height riding the existing
+  per-instance depth offset so stacking/interpenetration stay
+  pixel-exact with zero renderer-shader and zero bake changes, a
+  plumb-line gizmo for raised ghosts, contact-shadow ellipses under
+  raised placements, and topmost-first erase in a stack.
 - Human-scale reference in the sprite editor's Realtime 3D view — the
   bundled base mesh normalized to 1.8 m, toggleable, draggable along the
   ground plane with a per-document in-memory spot, fixed in the bake
@@ -63,6 +71,11 @@ list when a change lands (and prune it — history belongs in the archives).
 
 - World placement of non-N views (placement orientation + runtime view
   selection — the `/6` view table is editor-consumable only today).
+- Real shadow mapping — placement heights made per-pixel world positions
+  reconstructable from the composited depth, which a light-space occluder
+  pass can consume; until then raised objects anchor visually only via
+  the fake contact-shadow ellipses. Optional x/z snapping alongside
+  surface snap for one-click aligned stacking.
 - Supersampling (render at N× and box-downsample), multi-cube composite
   assets, geometry-level clipping (CSG) instead of shader discard,
   KTX2/UASTC packaging for delivery (the merged g-buffer is already in the

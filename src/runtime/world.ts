@@ -3,19 +3,27 @@ import { VIEW_DIR } from '../shared/iso.js';
 export interface Placement {
   x: number;
   z: number;
+  /** Height above the ground plane (world units, >= 0). */
+  y: number;
   primId: string;
   key: number;
 }
 
-export function depthOf(x: number, z: number): number {
-  return VIEW_DIR[0] * (x + 0.5) + VIEW_DIR[2] * (z + 0.5);
+/**
+ * Painter sort key: the cell-center depth against the global reference
+ * plane, including the height term. Far → near drawing order keeps the
+ * alpha-blended antialiased edges correct; the per-pixel depth test does
+ * the rest regardless of order.
+ */
+export function depthOf(x: number, y: number, z: number): number {
+  return VIEW_DIR[0] * (x + 0.5) + VIEW_DIR[1] * y + VIEW_DIR[2] * (z + 0.5);
 }
 
 export class World {
   private items: Placement[] = [];
 
-  place(x: number, z: number, primId: string): void {
-    this.items.push({ x, z, primId, key: depthOf(x, z) });
+  place(x: number, z: number, primId: string, y = 0): void {
+    this.items.push({ x, z, y, primId, key: depthOf(x, y, z) });
   }
 
   removeAt(x: number, z: number): Placement | null {

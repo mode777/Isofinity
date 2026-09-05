@@ -17,10 +17,10 @@ vec3 shade(vec3 albedoSrgb, vec3 N) {
 
 const FLAT_VERT = `#version 300 es
 in vec2 aPos;
-in vec3 aColor;
+in vec4 aColor;   // rgb + per-vertex alpha
 uniform vec2 uRes;
 uniform vec4 uView;  // view transform: scale.xy, offset.xy (backing-store px)
-out vec3 vColor;
+out vec4 vColor;
 void main() {
   vec2 px = aPos * uView.xy + uView.zw;
   gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
@@ -30,12 +30,11 @@ void main() {
 
 const FLAT_FRAG = `#version 300 es
 precision highp float;
-in vec3 vColor;
-uniform float uAlpha;
+in vec4 vColor;
 out vec4 outColor;
 ${SHADE_CHUNK}
 void main() {
-  outColor = vec4(shade(vColor, vec3(0.0, 1.0, 0.0)), uAlpha);
+  outColor = vec4(shade(vColor.rgb, vec3(0.0, 1.0, 0.0)), vColor.a);
 }
 `;
 
@@ -120,6 +119,16 @@ export interface RenderView {
 
 const IDENTITY_VIEW: RenderView = { zoom: 1, panX: 0, panY: 0 };
 
+/**
+ * One flat-shaded draw batch (the ground grid, contact shadows, or the
+ * hover/gizmo overlay): triangle vertices as `[x, y, r, g, b, a]` in
+ * world-image pixels.
+ */
+export interface FlatBatch {
+  data: Float32Array;
+  verts: number;
+}
+
 export interface LightParams {
   dir: [number, number, number];
   key: [number, number, number];
@@ -134,12 +143,13 @@ export class Renderer {
   private gbufferTex: WebGLTexture | null = null;
   private groundVao: WebGLVertexArrayObject;
   private groundVbo: WebGLBuffer;
+  private shadowVao: WebGLVertexArrayObject;
+  private shadowVbo: WebGLBuffer;
   private highlightVao: WebGLVertexArrayObject;
   private highlightVbo: WebGLBuffer;
   private spriteVao: WebGLVertexArrayObject;
   private instVbo: WebGLBuffer;
   private uFlatRes: WebGLUniformLocation;
-  private uFlatAlpha: WebGLUniformLocation;
   private uFlatView: WebGLUniformLocation;
   private uFlatLight: Uniforms3;
   private uSpriteRes: WebGLUniformLocation;
@@ -174,7 +184,6 @@ export class Renderer {
     this.flatProg = link(gl, FLAT_VERT, FLAT_FRAG);
     this.spriteProg = link(gl, SPRITE_VERT, SPRITE_FRAG);
     this.uFlatRes = gl.getUniformLocation(this.flatProg, 'uRes')!;
-    this.uFlatAlpha = gl.getUniformLocation(this.flatProg, 'uAlpha')!;
     this.uFlatView = gl.getUniformLocation(this.flatProg, 'uView')!;
     this.uFlatLight = {
       dir: gl.getUniformLocation(this.flatProg, 'uLightDir')!,
@@ -204,18 +213,27 @@ export class Renderer {
     const aFlatPos = gl.getAttribLocation(this.flatProg, 'aPos');
     const aFlatColor = gl.getAttribLocation(this.flatProg, 'aColor');
     gl.enableVertexAttribArray(aFlatPos);
-    gl.vertexAttribPointer(aFlatPos, 2, gl.FLOAT, false, 20, 0);
+    gl.vertexAttribPointer(aFlatPos, 2, gl.FLOAT, false, 24, 0);
     gl.enableVertexAttribArray(aFlatColor);
-    gl.vertexAttribPointer(aFlatColor, 3, gl.FLOAT, false, 20, 8);
+    gl.vertexAttribPointer(aFlatColor, 4, gl.FLOAT, false, 24, 8);
+
+    this.shadowVao = gl.createVertexArray()!;
+    this.shadowVbo = gl.createBuffer()!;
+    gl.bindVertexArray(this.shadowVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.shadowVbo);
+    gl.enableVertexAttribArray(aFlatPos);
+    gl.vertexAttribPointer(aFlatPos, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(aFlatColor);
+    gl.vertexAttribPointer(aFlatColor, 4, gl.FLOAT, false, 24, 8);
 
     this.highlightVao = gl.createVertexArray()!;
     this.highlightVbo = gl.createBuffer()!;
     gl.bindVertexArray(this.highlightVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.highlightVbo);
     gl.enableVertexAttribArray(aFlatPos);
-    gl.vertexAttribPointer(aFlatPos, 2, gl.FLOAT, false, 20, 0);
+    gl.vertexAttribPointer(aFlatPos, 2, gl.FLOAT, false, 24, 0);
     gl.enableVertexAttribArray(aFlatColor);
-    gl.vertexAttribPointer(aFlatColor, 3, gl.FLOAT, false, 20, 8);
+    gl.vertexAttribPointer(aFlatColor, 4, gl.FLOAT, false, 24, 8);
 
     this.spriteVao = gl.createVertexArray()!;
     this.instVbo = gl.createBuffer()!;
@@ -361,6 +379,8 @@ export class Renderer {
     if (this.gbufferTex) gl.deleteTexture(this.gbufferTex);
     gl.deleteBuffer(this.groundVbo);
     gl.deleteVertexArray(this.groundVao);
+    gl.deleteBuffer(this.shadowVbo);
+    gl.deleteVertexArray(this.shadowVao);
     gl.deleteBuffer(this.highlightVbo);
     gl.deleteVertexArray(this.highlightVao);
     gl.deleteBuffer(this.instVbo);
@@ -381,7 +401,8 @@ export class Renderer {
   render(
     instances: Float32Array,
     count: number,
-    highlight: Float32Array | null,
+    shadows: FlatBatch | null,
+    overlay: FlatBatch | null,
     view: RenderView = IDENTITY_VIEW,
   ): void {
     const gl = this.gl;
@@ -396,15 +417,27 @@ export class Renderer {
     gl.uniform2f(this.uSpriteRes, canvas.width, canvas.height);
     gl.uniform4f(this.uSpriteView, view.zoom, view.zoom, view.panX, view.panY);
 
+    // 1. Ground: opaque, no depth interaction (writes none, tests none —
+    //    sprites always composite over it).
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
     gl.useProgram(this.flatProg);
     gl.uniform2f(this.uFlatRes, canvas.width, canvas.height);
-    gl.uniform1f(this.uFlatAlpha, 1);
     uploadLight(gl, this.uFlatLight, this.light);
     gl.bindVertexArray(this.groundVao);
     gl.drawArrays(gl.TRIANGLES, 0, this.groundVerts);
 
+    // 2. Contact shadows: blended, still no depth interaction — they lie
+    //    flat on the ground and every sprite composites over them.
+    if (shadows && shadows.verts > 0) {
+      gl.enable(gl.BLEND);
+      gl.bindVertexArray(this.shadowVao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.shadowVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, shadows.data, gl.DYNAMIC_DRAW);
+      gl.drawArrays(gl.TRIANGLES, 0, shadows.verts);
+    }
+
+    // 3. Sprites: blended, per-pixel depth-tested against each other.
     if (count > 0) {
       gl.enable(gl.BLEND);
       gl.enable(gl.DEPTH_TEST);
@@ -422,13 +455,15 @@ export class Renderer {
       gl.disable(gl.DEPTH_TEST);
     }
 
-    if (highlight) {
+    // 4. Overlay (hover highlight, height gizmo): blended editor chrome.
+    if (overlay && overlay.verts > 0) {
       gl.useProgram(this.flatProg);
-      gl.uniform1f(this.uFlatAlpha, 0.35);
+      gl.uniform2f(this.uFlatRes, canvas.width, canvas.height);
+      gl.enable(gl.BLEND);
       gl.bindVertexArray(this.highlightVao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.highlightVbo);
-      gl.bufferData(gl.ARRAY_BUFFER, highlight, gl.DYNAMIC_DRAW);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      gl.bufferData(gl.ARRAY_BUFFER, overlay.data, gl.DYNAMIC_DRAW);
+      gl.drawArrays(gl.TRIANGLES, 0, overlay.verts);
     }
 
     gl.bindVertexArray(null);
