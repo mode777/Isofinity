@@ -9,7 +9,7 @@ import {
 } from '../../shared/iso.js';
 import { RUNTIME_PPU, layersToSet, viewLayerId } from '../../runtime/assets.js';
 import { meshYawMat, Renderer, type FlatBatch, type MeshDraw } from '../../runtime/renderer.js';
-import { CharacterPlayer, bindPosePalette } from '../../runtime/meshAsset.js';
+import { CharacterPlayer } from '../../runtime/meshAsset.js';
 import { depthOf } from '../../runtime/world.js';
 import { PRIMITIVE_KINDS } from '../document.js';
 import type { ViewTransform, WorldDocument } from '../document.js';
@@ -275,8 +275,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     // the parsed asset uploaded to the renderer exactly once.
     const players = new Map<number, { player: CharacterPlayer; yawMat: Float32Array }>();
     let uploadedCharacter: unknown = null;
-    let ghostPalette: Float32Array | null = null;
-    let ghostPaletteJoints = 0;
+    const ghostYawMat = meshYawMat(0);
     let lastFrameTime = performance.now();
 
     // Draws a soft contact-shadow ellipse on the ground under a raised
@@ -490,9 +489,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       const off = live.character?.worldOffset ?? [0, 0, 0];
       for (const mp of meshPlaced) {
         const entry = players.get(mp.id);
-        if (!entry) continue;
+        if (!entry || !live.character) continue;
+        entry.player.skinInto(entry.player.skinnedPositions(), entry.player.skinnedNormals());
         meshDraws.push({
-          palette: entry.player.palette,
+          positions: entry.player.skinnedPositions(),
+          normals: entry.player.skinnedNormals(),
           origin: [mp.x + off[0], mp.y + off[1], mp.z + off[2]],
           yawMat: meshYawMat(mp.yaw, entry.yawMat),
         });
@@ -506,14 +507,13 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         const z = hover.ground[1] - 0.5;
         const y = effectiveHeight(live, hover.px[0], hover.px[1]);
         charGhost = { x, y, z };
-        if (ghostPaletteJoints !== live.character.geometry.jointCount || !ghostPalette) {
-          ghostPalette = bindPosePalette(live.character.geometry.jointCount);
-          ghostPaletteJoints = live.character.geometry.jointCount;
-        }
+        // The ghost is the bind pose: the asset's own arrays already are
+        // identity-skinned (positions/normals are bind-space data).
         meshDraws.push({
-          palette: ghostPalette,
+          positions: live.character.geometry.positions,
+          normals: live.character.geometry.normals,
           origin: [x + off[0], y + off[1], z + off[2]],
-          yawMat: meshYawMat(0, new Float32Array(9)),
+          yawMat: meshYawMat(0, ghostYawMat),
         });
       }
 

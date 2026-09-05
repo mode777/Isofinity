@@ -132,13 +132,15 @@ void main() {
 // same projection/depth/light pipeline the sprite path uses. The screen
 // projection inlines the shared iso constants (ISO_GLSL) so CPU-projected
 // sprites and GPU-projected meshes can never drift apart.
+// Vertices arrive pre-skinned in world space (the CPU pose engine skins
+// them — see CharacterPlayer.skinInto); the vertex stage is a pure
+// passthrough through the shared iso projection. The GPU-side palette
+// blend was dropped: dynamic uniform-array indexing corrupted the mesh on
+// the test driver while the identical CPU math verified clean.
 const MESH_VERT = `#version 300 es
 precision highp float;
 in vec3 aPos;
 in vec3 aNormal;
-in vec4 aWeight;
-in vec4 aJoint;
-uniform mat4 uPalette[${MAX_MESH_JOINTS}];
 uniform mat3 uYaw;
 uniform vec3 uOrigin;  // placement feet position (world x, y, z)
 uniform vec3 uProj;    // world-image origin px (x, y), px per unit
@@ -149,14 +151,9 @@ out vec3 vWorldPos;
 out vec2 vUv;
 ${ISO_GLSL}
 void main() {
-  mat4 skin = aWeight.x * uPalette[int(aJoint.x + 0.5)]
-            + aWeight.y * uPalette[int(aJoint.y + 0.5)]
-            + aWeight.z * uPalette[int(aJoint.z + 0.5)]
-            + aWeight.w * uPalette[int(aJoint.w + 0.5)];
-  vec3 skinned = (skin * vec4(aPos, 1.0)).xyz;
-  vec3 wp = uYaw * skinned + uOrigin;
+  vec3 wp = uYaw * aPos + uOrigin;
   vWorldPos = wp;
-  vNormal = uYaw * (mat3(skin) * aNormal);
+  vNormal = uYaw * aNormal;
   vec2 px = vec2(uProj.x + dot(SCREEN_RIGHT, wp) * uProj.z,
                  uProj.y - dot(SCREEN_UP, wp) * uProj.z);
   px = px * uView.xy + uView.zw;
@@ -250,12 +247,15 @@ export interface LightParams {
 }
 
 /**
- * One skinned-character draw: a joint palette plus the placement's world
- * transform. Opaque, drawn between the shadow and sprite batches.
+ * One skinned-character draw: CPU-skinned vertex buffers plus the
+ * placement's world transform. Opaque, drawn between the shadow and
+ * sprite batches.
  */
 export interface MeshDraw {
-  /** Column-major `mat4[jointCount]` (`CharacterPlayer.palette`). */
-  palette: Float32Array;
+  /** Pre-skinned world-space positions (bind-space * palette). */
+  positions: Float32Array;
+  /** Pre-skinned world-space normals (same transform). */
+  normals: Float32Array;
   /** Feet position in world units. */
   origin: [number, number, number];
   /** Column-major rotation about +Y (`meshYawMat`). */
@@ -295,15 +295,12 @@ export class Renderer {
   private meshProg: WebGLProgram;
   private meshVao: WebGLVertexArrayObject;
   private meshPosNorVbo: WebGLBuffer | null = null;
-  private meshWeightVbo: WebGLBuffer | null = null;
-  private meshJointVbo: WebGLBuffer | null = null;
   private meshIbo: WebGLBuffer | null = null;
   private meshAlbedoTex: WebGLTexture | null = null;
   private meshIndexCount = 0;
   private uMeshRes: WebGLUniformLocation;
   private uMeshView: WebGLUniformLocation;
   private uMeshLight: Uniforms3;
-  private uMeshPalette: WebGLUniformLocation;
   private uMeshYaw: WebGLUniformLocation;
   private uMeshOrigin: WebGLUniformLocation;
   private uMeshProj: WebGLUniformLocation;
@@ -434,7 +431,6 @@ export class Renderer {
       key: gl.getUniformLocation(this.meshProg, 'uKeyLight')!,
       ambient: gl.getUniformLocation(this.meshProg, 'uAmbient')!,
     };
-    this.uMeshPalette = gl.getUniformLocation(this.meshProg, 'uPalette[0]')!;
     this.uMeshYaw = gl.getUniformLocation(this.meshProg, 'uYaw')!;
     this.uMeshOrigin = gl.getUniformLocation(this.meshProg, 'uOrigin')!;
     this.uMeshProj = gl.getUniformLocation(this.meshProg, 'uProj')!;
@@ -567,11 +563,9 @@ export class Renderer {
     const gl = this.gl;
     gl.bindVertexArray(this.meshVao);
     if (this.meshPosNorVbo) gl.deleteBuffer(this.meshPosNorVbo);
-    if (this.meshWeightVbo) gl.deleteBuffer(this.meshWeightVbo);
-    if (this.meshJointVbo) gl.deleteBuffer(this.meshJointVbo);
     if (this.meshIbo) gl.deleteBuffer(this.meshIbo);
     if (this.meshAlbedoTex) gl.deleteTexture(this.meshAlbedoTex);
-    this.meshPosNorVbo = this.meshWeightVbo = this.meshJointVbo = this.meshIbo = null;
+    this.meshPosNorVbo = this.meshIbo = null;
     this.meshAlbedoTex = null;
     this.meshIndexCount = 0;
     if (!geometry) {
@@ -584,27 +578,13 @@ export class Renderer {
     posNor.set(geometry.normals, geometry.vertexCount * 3);
     this.meshPosNorVbo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.meshPosNorVbo);
-    gl.bufferData(gl.ARRAY_BUFFER, posNor, gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, posNor, gl.DYNAMIC_DRAW);
     const aPos = gl.getAttribLocation(this.meshProg, 'aPos');
     gl.enableVertexAttribArray(aPos);
     gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 24, 0);
     const aNormal = gl.getAttribLocation(this.meshProg, 'aNormal');
     gl.enableVertexAttribArray(aNormal);
     gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 24, 12);
-
-    this.meshWeightVbo = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.meshWeightVbo);
-    gl.bufferData(gl.ARRAY_BUFFER, geometry.weights, gl.STATIC_DRAW);
-    const aWeight = gl.getAttribLocation(this.meshProg, 'aWeight');
-    gl.enableVertexAttribArray(aWeight);
-    gl.vertexAttribPointer(aWeight, 4, gl.FLOAT, false, 16, 0);
-
-    this.meshJointVbo = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.meshJointVbo);
-    gl.bufferData(gl.ARRAY_BUFFER, geometry.joints, gl.STATIC_DRAW);
-    const aJoint = gl.getAttribLocation(this.meshProg, 'aJoint');
-    gl.enableVertexAttribArray(aJoint);
-    gl.vertexAttribPointer(aJoint, 4, gl.FLOAT, false, 16, 0);
 
     this.meshIbo = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.meshIbo);
@@ -676,8 +656,6 @@ export class Renderer {
     gl.deleteBuffer(this.instVbo);
     gl.deleteVertexArray(this.spriteVao);
     if (this.meshPosNorVbo) gl.deleteBuffer(this.meshPosNorVbo);
-    if (this.meshWeightVbo) gl.deleteBuffer(this.meshWeightVbo);
-    if (this.meshJointVbo) gl.deleteBuffer(this.meshJointVbo);
     if (this.meshIbo) gl.deleteBuffer(this.meshIbo);
     if (this.meshAlbedoTex) gl.deleteTexture(this.meshAlbedoTex);
     gl.deleteVertexArray(this.meshVao);
@@ -770,7 +748,9 @@ export class Renderer {
       for (const mesh of meshes) {
         gl.uniform3f(this.uMeshOrigin, mesh.origin[0], mesh.origin[1], mesh.origin[2]);
         gl.uniformMatrix3fv(this.uMeshYaw, false, mesh.yawMat);
-        gl.uniformMatrix4fv(this.uMeshPalette, false, mesh.palette);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.meshPosNorVbo);
+        gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.DYNAMIC_DRAW);
+        gl.bufferSubData(gl.ARRAY_BUFFER, mesh.positions.byteLength, mesh.normals);
         gl.drawElements(gl.TRIANGLES, this.meshIndexCount, gl.UNSIGNED_INT, 0);
       }
       gl.disable(gl.DEPTH_TEST);

@@ -7,7 +7,6 @@
  */
 import {
   CharacterPlayer,
-  bindPosePalette,
   makeCubeMesh,
   parseCharacterAsset,
 } from '../runtime/meshAsset.js';
@@ -64,7 +63,8 @@ async function main(): Promise<void> {
 
   const player = new CharacterPlayer(asset);
   player.update(0);
-  const frozen = new Float32Array(player.palette);
+  const frozenPos = new Float32Array(asset.geometry.vertexCount * 3);
+  const frozenNrm = new Float32Array(asset.geometry.vertexCount * 3);
 
   // Byte-level comparison against the Node reference (ref-dump): if these
   // differ from the Node values, the browser parse itself is the fault.
@@ -84,7 +84,8 @@ async function main(): Promise<void> {
         const off = cube.worldOffset;
         renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
-            palette: bindPosePalette(1),
+            positions: cube.geometry.positions,
+            normals: cube.geometry.normals,
             origin: [off[0], off[1], off[2]],
             yawMat: meshYawMat(0.5),
           },
@@ -100,7 +101,8 @@ async function main(): Promise<void> {
         const off = asset.worldOffset;
         renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
-            palette: bindPosePalette(asset.geometry.jointCount),
+            positions: asset.geometry.positions,
+            normals: asset.geometry.normals,
             origin: [off[0], off[1], off[2]],
             yawMat: meshYawMat(0),
           },
@@ -113,9 +115,11 @@ async function main(): Promise<void> {
       draw: (renderer) => {
         renderer.setMesh(asset.geometry, { image: null, factor: [0.85, 0.85, 0.85] });
         const off = asset.worldOffset;
+        player.skinInto(frozenPos, frozenNrm);
         renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
-            palette: frozen,
+            positions: frozenPos,
+            normals: frozenNrm,
             origin: [off[0], off[1], off[2]],
             yawMat: meshYawMat(0),
           },
@@ -129,9 +133,11 @@ async function main(): Promise<void> {
         renderer.setMesh(asset.geometry, { image: null, factor: [0.85, 0.85, 0.85] });
         const off = asset.worldOffset;
         if (dt !== null) player.update(dt);
+        player.skinInto(player.skinnedPositions(), player.skinnedNormals());
         renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
-            palette: player.palette,
+            positions: player.skinnedPositions(),
+            normals: player.skinnedNormals(),
             origin: [off[0], off[1], off[2]],
             yawMat: meshYawMat(0),
           },
@@ -145,9 +151,11 @@ async function main(): Promise<void> {
         renderer.setMesh(asset.geometry, asset.surface);
         const off = asset.worldOffset;
         if (dt !== null) player.update(dt);
+        player.skinInto(player.skinnedPositions(), player.skinnedNormals());
         renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
-            palette: player.palette,
+            positions: player.skinnedPositions(),
+            normals: player.skinnedNormals(),
             origin: [off[0], off[1], off[2]],
             yawMat: meshYawMat(0),
           },

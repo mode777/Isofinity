@@ -64,7 +64,18 @@ makes **zero GL calls**.
   compositor: single-context/single-state-owner; three.js-as-libraries;
   full-renderer adoption deferred with a known migration path).
 
-### D2 — GPU palette skinning, one draw call per character
+### D2 — CPU skinning, one draw call per character
+
+*Amendment (browser bring-up):* the original design skinned in the vertex
+shader against a dynamically-indexed `uPalette` uniform array. On the test
+driver that corrupted every mesh (the vertex fetch of non-trivial
+joint/weight data or the dynamic uniform-array lookup — the unskinned cube
+was pixel-correct while the identical, Node-verified data shredded). v1
+therefore skins **on the CPU** (`CharacterPlayer.skinInto`, the exact math
+`verify:mesh` exercises) and uploads pre-skinned world-space vertices per
+draw; the vertex shader is a passthrough. Cost for a few characters is
+sub-millisecond per frame; GPU palette skinning returns when the driver
+question is worth a dedicated spike.
 
 Vertex shader: `worldPos = Σ wᵢ · palette[jᵢ] · pos`,
 `normal = normalize(Σ wᵢ · mat3(palette[jᵢ]) · normal)`, 4 influences

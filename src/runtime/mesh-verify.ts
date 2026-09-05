@@ -99,35 +99,27 @@ async function assetChecks(): Promise<void> {
     'bind-pose palette is identity');
   ok(identity.length === g.jointCount * 16, 'bind-pose palette sized');
 
-  // End-to-end: CPU-skin the bind-pose geometry with a live palette —
-  // the composed chain (extraction · palette · world offset) is what the
-  // vertex shader + draw origin do. The character must stand roughly on
-  // y = 0, centered over x/z.
+  // End-to-end: run the SHIPPED CPU skinning (CharacterPlayer.skinInto —
+  // what the runtime draws from) and measure the world-offset result. The
+  // character must stand roughly on y = 0, centered over x/z.
+  const skinnedPos = player.skinnedPositions();
+  const skinnedNrm = player.skinnedNormals();
   const skinBbox = (): Box3 => {
     const b = new Box3(
       new Vector3(Infinity, Infinity, Infinity),
       new Vector3(-Infinity, -Infinity, -Infinity),
     );
-    const p = new Vector3();
     for (let i = 0; i < g.vertexCount; i++) {
-      p.set(0, 0, 0);
-      for (let c = 0; c < 4; c++) {
-        const w = g.weights[i * 4 + c];
-        if (w === 0) continue;
-        const j = g.joints[i * 4 + c] * 16;
-        const m = player.palette;
-        p.x += w * (m[j] * g.positions[i * 3] + m[j + 4] * g.positions[i * 3 + 1] + m[j + 8] * g.positions[i * 3 + 2] + m[j + 12]);
-        p.y += w * (m[j + 1] * g.positions[i * 3] + m[j + 5] * g.positions[i * 3 + 1] + m[j + 9] * g.positions[i * 3 + 2] + m[j + 13]);
-        p.z += w * (m[j + 2] * g.positions[i * 3] + m[j + 6] * g.positions[i * 3 + 1] + m[j + 10] * g.positions[i * 3 + 2] + m[j + 14]);
-      }
-      p.x += asset.worldOffset[0];
-      p.y += asset.worldOffset[1];
-      p.z += asset.worldOffset[2];
-      b.expandByPoint(p);
+      b.expandByPoint(new Vector3(
+        skinnedPos[i * 3] + asset.worldOffset[0],
+        skinnedPos[i * 3 + 1] + asset.worldOffset[1],
+        skinnedPos[i * 3 + 2] + asset.worldOffset[2],
+      ));
     }
     return b;
   };
   player.update(0);
+  player.skinInto(skinnedPos, skinnedNrm);
   const skinned = skinBbox();
   console.log(`    [probe] worldOffset=${asset.worldOffset.map((v) => v.toFixed(3)).join(',')}`);
   console.log(`    [probe] player t=0 bbox min=${skinned.min.toArray().map((v) => v.toFixed(3)).join(',')} max=${skinned.max.toArray().map((v) => v.toFixed(3)).join(',')}`);
@@ -137,10 +129,13 @@ async function assetChecks(): Promise<void> {
   ok(skinned.max.y - skinned.min.y > 1 && skinned.max.y - skinned.min.y < 2.5,
     `rendered height plausible (${(skinned.max.y - skinned.min.y).toFixed(3)})`);
   player.update(0.25);
+  player.skinInto(skinnedPos, skinnedNrm);
   const s25 = skinBbox();
   player.update(0.25);
+  player.skinInto(skinnedPos, skinnedNrm);
   const s50 = skinBbox();
   player.update(0.25);
+  player.skinInto(skinnedPos, skinnedNrm);
   const s75 = skinBbox();
   const fmt = (b: Box3): string => `min.y=${b.min.y.toFixed(3)} max.y=${b.max.y.toFixed(3)}`;
   console.log(`    [probe] walk cycle: t25 ${fmt(s25)} | t50 ${fmt(s50)} | t75 ${fmt(s75)}`);
@@ -150,6 +145,7 @@ async function assetChecks(): Promise<void> {
   // Playback state: the animated palette differs from the bind pose and
   // keeps changing across sampled frames.
   player.update(0);
+  player.skinInto(skinnedPos, skinnedNrm);
   const first = new Float32Array(player.palette);
   let differsFromIdentity = false;
   for (let i = 0; i < first.length; i++) {
@@ -160,6 +156,7 @@ async function assetChecks(): Promise<void> {
   }
   ok(differsFromIdentity, 'animated pose differs from the bind pose');
   player.update(0.5);
+  player.skinInto(skinnedPos, skinnedNrm);
   let differsOverTime = false;
   for (let i = 0; i < player.palette.length; i++) {
     if (Math.abs(player.palette[i] - first[i]) > 1e-4) {

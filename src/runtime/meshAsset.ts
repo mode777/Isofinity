@@ -82,6 +82,7 @@ export class CharacterPlayer {
 
   constructor(asset: CharacterAsset) {
     this.jointCount = asset.geometry.jointCount;
+    this.geometry = asset.geometry;
     this.palette = new Float32Array(this.jointCount * 16);
     this.root = skeletonClone(asset.source);
     let skinned: SkinnedMesh | null = null;
@@ -109,6 +110,63 @@ export class CharacterPlayer {
       this.palette.set(this.tmp.elements, j * 16);
     }
   }
+
+  /**
+   * CPU-skin the asset's bind-space geometry with the current palette
+   * into `positions`/`normals` (each vertexCount * 3). Same math as the
+   * vertex shader's palette blend — the dynamic-mesh path skins on the
+   * CPU (v1) so the GPU draws pre-skinned world-space vertices through a
+   * passthrough shader; `Node verify:mesh` exercises this exact method.
+   */
+  skinInto(positions: Float32Array, normals: Float32Array): void {
+    const g = this.geometry;
+    const m = this.palette;
+    for (let i = 0; i < g.vertexCount; i++) {
+      const px = g.positions[i * 3];
+      const py = g.positions[i * 3 + 1];
+      const pz = g.positions[i * 3 + 2];
+      const nx = g.normals[i * 3];
+      const ny = g.normals[i * 3 + 1];
+      const nz = g.normals[i * 3 + 2];
+      let ox = 0, oy = 0, oz = 0, onx = 0, ony = 0, onz = 0;
+      for (let c = 0; c < 4; c++) {
+        const w = g.weights[i * 4 + c];
+        if (w === 0) continue;
+        const j = g.joints[i * 4 + c] * 16;
+        ox += w * (m[j] * px + m[j + 4] * py + m[j + 8] * pz + m[j + 12]);
+        oy += w * (m[j + 1] * px + m[j + 5] * py + m[j + 9] * pz + m[j + 13]);
+        oz += w * (m[j + 2] * px + m[j + 6] * py + m[j + 10] * pz + m[j + 14]);
+        onx += w * (m[j] * nx + m[j + 4] * ny + m[j + 8] * nz);
+        ony += w * (m[j + 1] * nx + m[j + 5] * ny + m[j + 9] * nz);
+        onz += w * (m[j + 2] * nx + m[j + 6] * ny + m[j + 10] * nz);
+      }
+      positions[i * 3] = ox;
+      positions[i * 3 + 1] = oy;
+      positions[i * 3 + 2] = oz;
+      const len = Math.hypot(onx, ony, onz) || 1;
+      normals[i * 3] = onx / len;
+      normals[i * 3 + 1] = ony / len;
+      normals[i * 3 + 2] = onz / len;
+    }
+  }
+
+  /** Scratch buffers sized for `skinInto` (allocated once per player). */
+  skinnedPositions(): Float32Array {
+    if (!this.skinnedPos) {
+      this.skinnedPos = new Float32Array(this.geometry.vertexCount * 3);
+      this.skinnedNrm = new Float32Array(this.geometry.vertexCount * 3);
+    }
+    return this.skinnedPos;
+  }
+
+  skinnedNormals(): Float32Array {
+    this.skinnedPositions();
+    return this.skinnedNrm!;
+  }
+
+  private skinnedPos: Float32Array | null = null;
+  private skinnedNrm: Float32Array | null = null;
+  private geometry: MeshGeometry;
 
   release(): void {
     this.mixer.stopAllAction();

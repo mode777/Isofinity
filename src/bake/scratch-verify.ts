@@ -690,10 +690,12 @@ async function runMeshSpike(): Promise<void> {
   // The character stands inside the cube's cell at a fixed animation time.
   const player = new CharacterPlayer(asset);
   player.update(1.5);
+  player.skinInto(player.skinnedPositions(), player.skinnedNormals());
   const off = asset.worldOffset;
   const meshDraws: MeshDraw[] = [
     {
-      palette: player.palette,
+      positions: player.skinnedPositions(),
+      normals: player.skinnedNormals(),
       origin: [2.1 + off[0], 0 + off[1], 2.2 + off[2]],
       yawMat: meshYawMat(0.4),
     },
@@ -717,7 +719,8 @@ async function runMeshSpike(): Promise<void> {
   // the frame; so must depth-only moves (the offset places the body
   // relative to the cube).
   player.update(0.9);
-  meshDraws[0] = { ...meshDraws[0], palette: player.palette };
+  player.skinInto(player.skinnedPositions(), player.skinnedNormals());
+  meshDraws[0] = { ...meshDraws[0], positions: player.skinnedPositions(), normals: player.skinnedNormals() };
   renderFrame();
   const hash3 = await sha256(px);
   ok(hash3 !== hash1, `animation time changes the frame (${hash3.slice(0, 16)}…)`);
