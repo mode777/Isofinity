@@ -132,11 +132,47 @@ void main() {
 // same projection/depth/light pipeline the sprite path uses. The screen
 // projection inlines the shared iso constants (ISO_GLSL) so CPU-projected
 // sprites and GPU-projected meshes can never drift apart.
-// Vertices arrive pre-skinned in world space (the CPU pose engine skins
-// them — see CharacterPlayer.skinInto); the vertex stage is a pure
-// passthrough through the shared iso projection. The GPU-side palette
-// blend was dropped: dynamic uniform-array indexing corrupted the mesh on
-// the test driver while the identical CPU math verified clean.
+// GPU-skinning vertex stage: palette blend against per-joint matrices
+// uploaded per frame by the CPU pose engine. Joint indices are floats
+// (integers 0..jointCount-1) rounded explicitly — float attributes avoid
+// the integer-attribute pitfalls hit during bring-up.
+const MESH_VERT_GPU = `#version 300 es
+precision highp float;
+in vec3 aPos;
+in vec3 aNormal;
+in vec2 aUv;
+in vec4 aWeight;
+in vec4 aJoint;
+uniform mat4 uPalette[${MAX_MESH_JOINTS}];
+uniform mat3 uYaw;
+uniform vec3 uOrigin;  // placement feet position (world x, y, z)
+uniform vec3 uProj;    // world-image origin px (x, y), px per unit
+uniform vec2 uRes;
+uniform vec4 uView;    // view transform: scale.xy, offset.xy (backing px)
+out vec3 vNormal;
+out vec3 vWorldPos;
+out vec2 vUv;
+${ISO_GLSL}
+void main() {
+  mat4 skin = aWeight.x * uPalette[int(aJoint.x + 0.5)]
+            + aWeight.y * uPalette[int(aJoint.y + 0.5)]
+            + aWeight.z * uPalette[int(aJoint.z + 0.5)]
+            + aWeight.w * uPalette[int(aJoint.w + 0.5)];
+  vec3 skinned = (skin * vec4(aPos, 1.0)).xyz;
+  vec3 wp = uYaw * skinned + uOrigin;
+  vWorldPos = wp;
+  vNormal = uYaw * (mat3(skin) * aNormal);
+  vUv = aUv;
+  vec2 px = vec2(uProj.x + dot(SCREEN_RIGHT, wp) * uProj.z,
+                 uProj.y - dot(SCREEN_UP, wp) * uProj.z);
+  px = px * uView.xy + uView.zw;
+  gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
+}
+`;
+
+// CPU-skinning vertex stage: vertices arrive pre-skinned in world space
+// (CharacterPlayer.skinInto); this stage is a pure passthrough through the
+// shared iso projection.
 const MESH_VERT = `#version 300 es
 precision highp float;
 in vec3 aPos;
@@ -248,16 +284,36 @@ export interface LightParams {
   ambient: [number, number, number];
 }
 
+/** How the mesh batch skins: GPU palette blend or pre-skinned vertices. */
+export type MeshSkinningMode = 'gpu' | 'cpu';
+
+interface MeshUniformSet {
+  res: WebGLUniformLocation;
+  view: WebGLUniformLocation;
+  light: Uniforms3;
+  yaw: WebGLUniformLocation;
+  origin: WebGLUniformLocation;
+  proj: WebGLUniformLocation;
+  sh: WebGLUniformLocation;
+  exposure: WebGLUniformLocation;
+  saturation: WebGLUniformLocation;
+  factor: WebGLUniformLocation;
+  palette: WebGLUniformLocation | null;
+}
+
 /**
- * One skinned-character draw: CPU-skinned vertex buffers plus the
- * placement's world transform. Opaque, drawn between the shadow and
+ * One skinned-character draw: the placement's world transform plus the
+ * skinning input for the active mode — a joint palette (GPU) or
+ * pre-skinned vertex buffers (CPU). Opaque, drawn between the shadow and
  * sprite batches.
  */
 export interface MeshDraw {
-  /** Pre-skinned world-space positions (bind-space * palette). */
-  positions: Float32Array;
-  /** Pre-skinned world-space normals (same transform). */
-  normals: Float32Array;
+  /** GPU mode: column-major `mat4[jointCount]` (`CharacterPlayer.palette`). */
+  palette?: Float32Array;
+  /** CPU mode: pre-skinned world-space positions (bind-space * palette). */
+  positions?: Float32Array;
+  /** CPU mode: pre-skinned world-space normals (same transform). */
+  normals?: Float32Array;
   /** Feet position in world units. */
   origin: [number, number, number];
   /** Column-major rotation about +Y (`meshYawMat`). */
@@ -294,23 +350,21 @@ export class Renderer {
   private highlightVbo: WebGLBuffer;
   private spriteVao: WebGLVertexArrayObject;
   private instVbo: WebGLBuffer;
-  private meshProg: WebGLProgram;
+  /** Skinning location: 'gpu' blends in the vertex stage, 'cpu' draws
+   *  pre-skinned vertices (see design.md D2). */
+  private meshSkinning: MeshSkinningMode = 'gpu';
+  private meshProgGpu: WebGLProgram;
+  private meshProgCpu: WebGLProgram;
   private meshVao: WebGLVertexArrayObject;
   private meshPosVbo: WebGLBuffer | null = null;
   private meshNrmVbo: WebGLBuffer | null = null;
   private meshUvVbo: WebGLBuffer | null = null;
+  private meshJointVbo: WebGLBuffer | null = null;
+  private meshWeightVbo: WebGLBuffer | null = null;
   private meshIbo: WebGLBuffer | null = null;
   private meshAlbedoTex: WebGLTexture | null = null;
   private meshIndexCount = 0;
-  private uMeshRes: WebGLUniformLocation;
-  private uMeshView: WebGLUniformLocation;
-  private uMeshLight: Uniforms3;
-  private uMeshYaw: WebGLUniformLocation;
-  private uMeshOrigin: WebGLUniformLocation;
-  private uMeshProj: WebGLUniformLocation;
-  private uMeshSh: WebGLUniformLocation;
-  private uMeshExposure: WebGLUniformLocation;
-  private uMeshSaturation: WebGLUniformLocation;
+  private meshUniforms: Record<'gpu' | 'cpu', MeshUniformSet>;
   private meshFrame: [number, number, number] = [0, 0, 64];
   private uFlatRes: WebGLUniformLocation;
   private uFlatView: WebGLUniformLocation;
@@ -425,30 +479,14 @@ export class Renderer {
     gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uRender')!, 0);
     gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uGbuffer')!, 1);
 
-    // Mesh program: joint palette + display uniforms. Depth map matches
-    // the sprite path exactly.
-    this.meshProg = link(gl, MESH_VERT, MESH_FRAG);
-    this.uMeshRes = gl.getUniformLocation(this.meshProg, 'uRes')!;
-    this.uMeshView = gl.getUniformLocation(this.meshProg, 'uView')!;
-    this.uMeshLight = {
-      dir: gl.getUniformLocation(this.meshProg, 'uLightDir')!,
-      key: gl.getUniformLocation(this.meshProg, 'uKeyLight')!,
-      ambient: gl.getUniformLocation(this.meshProg, 'uAmbient')!,
+    // Mesh programs (GPU- and CPU-skinning variants share the fragment
+    // stage); the depth map matches the sprite path exactly.
+    this.meshProgGpu = link(gl, MESH_VERT_GPU, MESH_FRAG);
+    this.meshProgCpu = link(gl, MESH_VERT, MESH_FRAG);
+    this.meshUniforms = {
+      gpu: this.meshUniformSet(this.meshProgGpu, true),
+      cpu: this.meshUniformSet(this.meshProgCpu, false),
     };
-    this.uMeshYaw = gl.getUniformLocation(this.meshProg, 'uYaw')!;
-    this.uMeshOrigin = gl.getUniformLocation(this.meshProg, 'uOrigin')!;
-    this.uMeshProj = gl.getUniformLocation(this.meshProg, 'uProj')!;
-    this.uMeshSh = gl.getUniformLocation(this.meshProg, 'uSh[0]')!;
-    this.uMeshExposure = gl.getUniformLocation(this.meshProg, 'uExposure')!;
-    this.uMeshSaturation = gl.getUniformLocation(this.meshProg, 'uSaturation')!;
-    gl.useProgram(this.meshProg);
-    gl.uniform1f(this.uMeshExposure, 1);
-    gl.uniform1f(this.uMeshSaturation, 1);
-    gl.uniform3f(this.uMeshProj, 0, 0, 64);
-    gl.uniform1f(gl.getUniformLocation(this.meshProg, 'uDepthA')!, -1 / (2 * DEPTH_LINEAR_RANGE));
-    gl.uniform1f(gl.getUniformLocation(this.meshProg, 'uDepthB')!, 0.5);
-    gl.uniform1i(gl.getUniformLocation(this.meshProg, 'uAlbedo')!, 0);
-    gl.uniform3fv(this.uMeshSh, new Float32Array(27));
     this.meshVao = gl.createVertexArray()!;
     this.setMesh(null, null);
 
@@ -565,13 +603,18 @@ export class Renderer {
    */
   setMesh(geometry: MeshGeometry | null, surface: MeshSurface | null): void {
     const gl = this.gl;
+    const gpu = this.meshSkinning === 'gpu';
+    const prog = gpu ? this.meshProgGpu : this.meshProgCpu;
     gl.bindVertexArray(this.meshVao);
     if (this.meshPosVbo) gl.deleteBuffer(this.meshPosVbo);
     if (this.meshNrmVbo) gl.deleteBuffer(this.meshNrmVbo);
     if (this.meshUvVbo) gl.deleteBuffer(this.meshUvVbo);
+    if (this.meshJointVbo) gl.deleteBuffer(this.meshJointVbo);
+    if (this.meshWeightVbo) gl.deleteBuffer(this.meshWeightVbo);
     if (this.meshIbo) gl.deleteBuffer(this.meshIbo);
     if (this.meshAlbedoTex) gl.deleteTexture(this.meshAlbedoTex);
     this.meshPosVbo = this.meshNrmVbo = this.meshUvVbo = this.meshIbo = null;
+    this.meshJointVbo = this.meshWeightVbo = null;
     this.meshAlbedoTex = null;
     this.meshIndexCount = 0;
     if (!geometry) {
@@ -582,23 +625,38 @@ export class Renderer {
     this.meshPosVbo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.meshPosVbo);
     gl.bufferData(gl.ARRAY_BUFFER, geometry.positions, gl.DYNAMIC_DRAW);
-    const aPos = gl.getAttribLocation(this.meshProg, 'aPos');
+    const aPos = gl.getAttribLocation(prog, 'aPos');
     gl.enableVertexAttribArray(aPos);
     gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 12, 0);
 
     this.meshNrmVbo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.meshNrmVbo);
     gl.bufferData(gl.ARRAY_BUFFER, geometry.normals, gl.DYNAMIC_DRAW);
-    const aNormal = gl.getAttribLocation(this.meshProg, 'aNormal');
+    const aNormal = gl.getAttribLocation(prog, 'aNormal');
     gl.enableVertexAttribArray(aNormal);
     gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 12, 0);
 
     this.meshUvVbo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.meshUvVbo);
     gl.bufferData(gl.ARRAY_BUFFER, geometry.uvs, gl.STATIC_DRAW);
-    const aUv = gl.getAttribLocation(this.meshProg, 'aUv');
+    const aUv = gl.getAttribLocation(prog, 'aUv');
     gl.enableVertexAttribArray(aUv);
     gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 8, 0);
+    if (gpu) {
+      this.meshJointVbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.meshJointVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, geometry.joints, gl.STATIC_DRAW);
+      const aJoint = gl.getAttribLocation(prog, 'aJoint');
+      gl.enableVertexAttribArray(aJoint);
+      gl.vertexAttribPointer(aJoint, 4, gl.FLOAT, false, 16, 0);
+
+      this.meshWeightVbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.meshWeightVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, geometry.weights, gl.STATIC_DRAW);
+      const aWeight = gl.getAttribLocation(prog, 'aWeight');
+      gl.enableVertexAttribArray(aWeight);
+      gl.vertexAttribPointer(aWeight, 4, gl.FLOAT, false, 16, 0);
+    }
 
     this.meshIbo = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.meshIbo);
@@ -620,19 +678,11 @@ export class Renderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.useProgram(this.meshProg);
-    if (surface) gl.uniform3f(this.uMeshFactor(), surface.factor[0], surface.factor[1], surface.factor[2]);
+    const u = this.meshUniforms[this.meshSkinning];
+    gl.useProgram(this.meshProgram);
+    if (surface) gl.uniform3f(u.factor, surface.factor[0], surface.factor[1], surface.factor[2]);
     gl.bindVertexArray(null);
   }
-
-  private uMeshFactor(): WebGLUniformLocation {
-    if (!this.uMeshAlbedoFactor) {
-      this.uMeshAlbedoFactor = this.gl.getUniformLocation(this.meshProg, 'uAlbedoFactor')!;
-    }
-    return this.uMeshAlbedoFactor;
-  }
-
-  private uMeshAlbedoFactor: WebGLUniformLocation | null = null;
 
   /** World-image pixel origin (the editor's ORIGIN_X/ORIGIN_Y) + PPU. */
   setMeshFrame(originXpx: number, originYpx: number, ppu: number): void {
@@ -641,15 +691,24 @@ export class Renderer {
 
   /** SH irradiance probe coefficients (27 floats; null = black ambient). */
   setShProbe(coeffs: Float32Array | null): void {
-    this.gl.useProgram(this.meshProg);
-    this.gl.uniform3fv(this.uMeshSh, coeffs ?? new Float32Array(27));
+    const gl = this.gl;
+    for (const u of [this.meshUniforms.gpu, this.meshUniforms.cpu]) {
+      gl.useProgram(u === this.meshUniforms.gpu ? this.meshProgGpu : this.meshProgCpu);
+      gl.uniform3fv(u.sh, coeffs ?? new Float32Array(27));
+    }
   }
 
   /** Display-referred env parameters that shaped the baked render texels. */
   setEnvDisplay(exposure: number, saturation: number): void {
-    this.gl.useProgram(this.meshProg);
-    this.gl.uniform1f(this.uMeshExposure, exposure);
-    this.gl.uniform1f(this.uMeshSaturation, saturation);
+    const gl = this.gl;
+    for (const [mode, u] of [
+      ['gpu', this.meshUniforms.gpu],
+      ['cpu', this.meshUniforms.cpu],
+    ] as const) {
+      gl.useProgram(mode === 'gpu' ? this.meshProgGpu : this.meshProgCpu);
+      gl.uniform1f(u.exposure, exposure);
+      gl.uniform1f(u.saturation, saturation);
+    }
   }
 
   /**
@@ -672,11 +731,14 @@ export class Renderer {
     if (this.meshPosVbo) gl.deleteBuffer(this.meshPosVbo);
     if (this.meshNrmVbo) gl.deleteBuffer(this.meshNrmVbo);
     if (this.meshUvVbo) gl.deleteBuffer(this.meshUvVbo);
+    if (this.meshJointVbo) gl.deleteBuffer(this.meshJointVbo);
+    if (this.meshWeightVbo) gl.deleteBuffer(this.meshWeightVbo);
     if (this.meshIbo) gl.deleteBuffer(this.meshIbo);
     if (this.meshAlbedoTex) gl.deleteTexture(this.meshAlbedoTex);
     gl.deleteVertexArray(this.meshVao);
     gl.deleteProgram(this.flatProg);
-    gl.deleteProgram(this.meshProg);
+    gl.deleteProgram(this.meshProgGpu);
+    gl.deleteProgram(this.meshProgCpu);
     gl.deleteProgram(this.spriteProg);
   }
 
@@ -685,9 +747,44 @@ export class Renderer {
     return this.gl;
   }
 
-  /** The mesh program (diagnostic harnesses only). */
+  /** The mesh program for the active skinning mode (diagnostics). */
   get meshProgram(): WebGLProgram {
-    return this.meshProg;
+    return this.meshSkinning === 'gpu' ? this.meshProgGpu : this.meshProgCpu;
+  }
+
+  private meshUniformSet(prog: WebGLProgram, gpu: boolean): MeshUniformSet {
+    const gl = this.gl;
+    gl.useProgram(prog);
+    const set: MeshUniformSet = {
+      res: gl.getUniformLocation(prog, 'uRes')!,
+      view: gl.getUniformLocation(prog, 'uView')!,
+      light: {
+        dir: gl.getUniformLocation(prog, 'uLightDir')!,
+        key: gl.getUniformLocation(prog, 'uKeyLight')!,
+        ambient: gl.getUniformLocation(prog, 'uAmbient')!,
+      },
+      yaw: gl.getUniformLocation(prog, 'uYaw')!,
+      origin: gl.getUniformLocation(prog, 'uOrigin')!,
+      proj: gl.getUniformLocation(prog, 'uProj')!,
+      sh: gl.getUniformLocation(prog, 'uSh[0]')!,
+      exposure: gl.getUniformLocation(prog, 'uExposure')!,
+      saturation: gl.getUniformLocation(prog, 'uSaturation')!,
+      factor: gl.getUniformLocation(prog, 'uAlbedoFactor')!,
+      palette: gpu ? gl.getUniformLocation(prog, 'uPalette[0]') : null,
+    };
+    gl.uniform1f(set.exposure, 1);
+    gl.uniform1f(set.saturation, 1);
+    gl.uniform3f(set.proj, 0, 0, 64);
+    gl.uniform1f(gl.getUniformLocation(prog, 'uDepthA')!, -1 / (2 * DEPTH_LINEAR_RANGE));
+    gl.uniform1f(gl.getUniformLocation(prog, 'uDepthB')!, 0.5);
+    gl.uniform1i(gl.getUniformLocation(prog, 'uAlbedo')!, 0);
+    gl.uniform3fv(set.sh, new Float32Array(27));
+    return set;
+  }
+
+  /** Select the skinning path; call before `setMesh` (it picks the VAO layout). */
+  setSkinningMode(mode: MeshSkinningMode): void {
+    this.meshSkinning = mode;
   }
 
   /** Readback of the default framebuffer (verification harnesses). */
@@ -724,10 +821,13 @@ export class Renderer {
     gl.useProgram(this.spriteProg);
     gl.uniform2f(this.uSpriteRes, canvas.width, canvas.height);
     gl.uniform4f(this.uSpriteView, view.zoom, view.zoom, view.panX, view.panY);
-    gl.useProgram(this.meshProg);
-    gl.uniform2f(this.uMeshRes, canvas.width, canvas.height);
-    gl.uniform4f(this.uMeshView, view.zoom, view.zoom, view.panX, view.panY);
-    gl.uniform3f(this.uMeshProj, this.meshFrame[0], this.meshFrame[1], this.meshFrame[2]);
+    for (const mode of ['gpu', 'cpu'] as const) {
+      const u = this.meshUniforms[mode];
+      gl.useProgram(mode === 'gpu' ? this.meshProgGpu : this.meshProgCpu);
+      gl.uniform2f(u.res, canvas.width, canvas.height);
+      gl.uniform4f(u.view, view.zoom, view.zoom, view.panX, view.panY);
+      gl.uniform3f(u.proj, this.meshFrame[0], this.meshFrame[1], this.meshFrame[2]);
+    }
 
     // 1. Ground: opaque, no depth interaction (writes none, tests none —
     //    sprites always composite over it).
@@ -754,20 +854,26 @@ export class Renderer {
     //    this depth. Skipped entirely when nothing is placed: no writes,
     //    no state, the frame matches the pre-mesh renderer exactly.
     if (meshes.length > 0 && this.meshIndexCount > 0) {
+      const gpu = this.meshSkinning === 'gpu';
+      const u = this.meshUniforms[this.meshSkinning];
       gl.enable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
-      gl.useProgram(this.meshProg);
-      uploadLight(gl, this.uMeshLight, this.light);
+      gl.useProgram(this.meshProgram);
+      uploadLight(gl, u.light, this.light);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.meshAlbedoTex);
       gl.bindVertexArray(this.meshVao);
       for (const mesh of meshes) {
-        gl.uniform3f(this.uMeshOrigin, mesh.origin[0], mesh.origin[1], mesh.origin[2]);
-        gl.uniformMatrix3fv(this.uMeshYaw, false, mesh.yawMat);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.meshPosVbo);
-        gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.DYNAMIC_DRAW);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.meshNrmVbo);
-        gl.bufferData(gl.ARRAY_BUFFER, mesh.normals, gl.DYNAMIC_DRAW);
+        gl.uniform3f(u.origin, mesh.origin[0], mesh.origin[1], mesh.origin[2]);
+        gl.uniformMatrix3fv(u.yaw, false, mesh.yawMat);
+        if (gpu) {
+          gl.uniformMatrix4fv(u.palette!, false, mesh.palette!);
+        } else {
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.meshPosVbo);
+          gl.bufferData(gl.ARRAY_BUFFER, mesh.positions!, gl.DYNAMIC_DRAW);
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.meshNrmVbo);
+          gl.bufferData(gl.ARRAY_BUFFER, mesh.normals!, gl.DYNAMIC_DRAW);
+        }
         gl.drawElements(gl.TRIANGLES, this.meshIndexCount, gl.UNSIGNED_INT, 0);
       }
       gl.disable(gl.DEPTH_TEST);

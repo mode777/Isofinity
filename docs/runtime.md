@@ -302,11 +302,18 @@ libraries only — GLTFLoader parses the committed CesiumMan asset,
 AnimationMixer samples the clip, and the pose engine
 (`src/runtime/meshAsset.ts`) writes a per-character joint palette
 (`bone.matrixWorld · boneInverse`, ≤ 64 joints) each frame. The raw-GL
-mesh batch (`src/runtime/renderer.ts`) palette-skins in the vertex
-shader and shades in the fragment shader (above); geometry is
-bind-transformed at load and re-anchored by a per-asset world offset
-(first rendered pose's feet at y = 0, centered over x/z, applied by the
-draw origin). Ambient probe: `src/runtime/shProbe.ts`.
+mesh batch (`src/runtime/renderer.ts`) skins in the vertex shader against
+that palette (GPU mode, the default) or draws CPU-skinned vertices
+(`setSkinningMode('cpu')` — same draw call, same result; the bring-up
+fallback, see the change's design.md D2); shading per the Lighting
+section. Geometry is bind-transformed at load and re-anchored by a
+per-asset world offset (first rendered pose's feet at y = 0, centered
+over x/z, applied by the draw origin). Ambient probe:
+`src/runtime/shProbe.ts`. Bring-up rule learned the hard way: **never
+leave a declared shader varying unwritten**, and keep mesh attribute
+buffers plain and separate — an undefined `vUv` varying plus an
+interleaved dynamic VBO once shredded every mesh (even unskinned ones)
+on one driver while all diagnostics showed the data exact.
 
 ## Renderer
 

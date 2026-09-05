@@ -7,6 +7,7 @@
  */
 import {
   CharacterPlayer,
+  bindPosePalette,
   makeCubeMesh,
   parseCharacterAsset,
 } from '../runtime/meshAsset.js';
@@ -163,6 +164,7 @@ async function main(): Promise<void> {
       label: '1. unskinned cube (identity palette, white)',
       expectation: 'a clean white cube standing on its ground spot',
       draw: (renderer, canvas) => {
+        renderer.setSkinningMode('cpu');
         renderer.setMesh(cube.geometry, { image: null, factor: [0.9, 0.9, 0.9] });
         const off = cube.worldOffset;
         renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
@@ -177,9 +179,10 @@ async function main(): Promise<void> {
       },
     },
     {
-      label: '2. CesiumMan bind pose (identity palette, white)',
+      label: '2. CesiumMan bind pose, CPU skinning (identity palette, white)',
       expectation: 'a clean standing figure, no texture',
       draw: (renderer) => {
+        renderer.setSkinningMode('cpu');
         renderer.setMesh(asset.geometry, { image: null, factor: [0.85, 0.85, 0.85] });
         const off = asset.worldOffset;
         renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
@@ -193,9 +196,10 @@ async function main(): Promise<void> {
       },
     },
     {
-      label: '3. CesiumMan frozen pose (palette at t = 0, white)',
+      label: '3. CesiumMan frozen pose, CPU skinning (palette at t = 0, white)',
       expectation: 'a clean figure in a walk pose',
       draw: (renderer) => {
+        renderer.setSkinningMode('cpu');
         renderer.setMesh(asset.geometry, { image: null, factor: [0.85, 0.85, 0.85] });
         const off = asset.worldOffset;
         player.skinInto(frozenPos, frozenNrm);
@@ -210,9 +214,10 @@ async function main(): Promise<void> {
       },
     },
     {
-      label: '4. CesiumMan animated (palette per frame, white)',
+      label: '4. CesiumMan animated, CPU skinning (palette per frame, white)',
       expectation: 'a walking figure',
       draw: (renderer, _canvas, dt) => {
+        renderer.setSkinningMode('cpu');
         renderer.setMesh(asset.geometry, { image: null, factor: [0.85, 0.85, 0.85] });
         const off = asset.worldOffset;
         if (dt !== null) player.update(dt);
@@ -228,9 +233,10 @@ async function main(): Promise<void> {
       },
     },
     {
-      label: '5. CesiumMan textured + SH ambient (the full editor path)',
+      label: '5. CesiumMan textured + SH ambient, CPU skinning',
       expectation: 'the textured, lit walking character',
       draw: (renderer, _canvas, dt) => {
+        renderer.setSkinningMode('cpu');
         renderer.setMesh(asset.geometry, asset.surface);
         const off = asset.worldOffset;
         if (dt !== null) player.update(dt);
@@ -239,6 +245,39 @@ async function main(): Promise<void> {
           {
             positions: player.skinnedPositions(),
             normals: player.skinnedNormals(),
+            origin: [off[0], off[1], off[2]],
+            yawMat: meshYawMat(0),
+          },
+        ]);
+      },
+    },
+    {
+      label: '6. CesiumMan bind pose, GPU skinning (palette upload path)',
+      expectation: 'identical to row 2 — proves GPU skinning works post-fix',
+      draw: (renderer) => {
+        renderer.setSkinningMode('gpu');
+        renderer.setMesh(asset.geometry, { image: null, factor: [0.85, 0.85, 0.85] });
+        const off = asset.worldOffset;
+        renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
+          {
+            palette: bindPosePalette(asset.geometry.jointCount),
+            origin: [off[0], off[1], off[2]],
+            yawMat: meshYawMat(0),
+          },
+        ]);
+      },
+    },
+    {
+      label: '7. CesiumMan animated, GPU skinning (the shipped mode)',
+      expectation: 'identical to row 4 — the walking character',
+      draw: (renderer, _canvas, dt) => {
+        renderer.setSkinningMode('gpu');
+        renderer.setMesh(asset.geometry, { image: null, factor: [0.85, 0.85, 0.85] });
+        const off = asset.worldOffset;
+        if (dt !== null) player.update(dt);
+        renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
+          {
+            palette: player.palette,
             origin: [off[0], off[1], off[2]],
             yawMat: meshYawMat(0),
           },

@@ -64,18 +64,42 @@ makes **zero GL calls**.
   compositor: single-context/single-state-owner; three.js-as-libraries;
   full-renderer adoption deferred with a known migration path).
 
-### D2 — CPU skinning, one draw call per character
+### D2 — Skinning: GPU palette blend, with a CPU fallback
 
-*Amendment (browser bring-up):* the original design skinned in the vertex
-shader against a dynamically-indexed `uPalette` uniform array. On the test
-driver that corrupted every mesh (the vertex fetch of non-trivial
-joint/weight data or the dynamic uniform-array lookup — the unskinned cube
-was pixel-correct while the identical, Node-verified data shredded). v1
-therefore skins **on the CPU** (`CharacterPlayer.skinInto`, the exact math
-`verify:mesh` exercises) and uploads pre-skinned world-space vertices per
-draw; the vertex shader is a passthrough. Cost for a few characters is
-sub-millisecond per frame; GPU palette skinning returns when the driver
-question is worth a dedicated spike.
+*Browser bring-up record (the root-cause hunt):* the first GPU-skinning
+build shredded **every** mesh — including an unskinned, identity-palette
+test cube — while a staged diagnostic (`/mesh-debug.html`) proved the
+pipeline layer by layer: parsed arrays byte-identical between browser and
+Node, the CPU palette math exact (`verify:mesh`), and the GPU's own
+fetch+transform verified exact via transform feedback (`gpuDiff ≈ 3e-8`).
+The fault was therefore never skinning; it sat in the shader/resource
+setup shared by all meshes:
+
+1. **`out vec2 vUv` was declared but never written** — an undefined
+   varying consumed by the fragment shader's texture lookup. Undefined
+   varyings have undefined content and may take driver-specific paths.
+2. **positions+normals shared one interleaved stride-24 VBO** streamed by
+   orphan+`bufferSubData`, the one structure the transform-feedback test
+   did not exercise.
+
+Fixing both (real `TEXCOORD_0` attribute; separate plain VBOs) repaired
+every mesh — and GPU palette skinning (dynamic `uPalette` indexing, float
+joint attributes) was re-enabled on the fixed structure and verified
+working in the same session. Which of the two was the precise trigger is
+not isolable from JS without deliberately re-broken shader variants; the
+durable rules are what matter:
+
+- **Never leave a declared varying unwritten** — undefined content is a
+  driver lottery.
+- **Keep mesh attribute buffers plain and separate** on this driver;
+  interleaved dynamic streaming was the untested structure.
+- **Both skinning modes ship** (`renderer.setSkinningMode('gpu' | 'cpu')`):
+  GPU blend is the default; `CharacterPlayer.skinInto` (CPU, the math
+  `verify:mesh` exercises) is the one-line fallback — same draw call, same
+  world-space result.
+
+Per-frame cost either way is negligible at v1 scale (one draw call per
+character; CPU skinning ≈ 13k small matrix ops per character).
 
 Vertex shader: `worldPos = Σ wᵢ · palette[jᵢ] · pos`,
 `normal = normalize(Σ wᵢ · mat3(palette[jᵢ]) · normal)`, 4 influences
