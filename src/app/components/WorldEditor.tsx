@@ -809,6 +809,10 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           title="Placement brush — built-in primitives and workspace sprites"
           value={selectedEntry?.value ?? ''}
           onChange={(e) => {
+            // Release focus: a focused select would both keep the E-key
+            // shortcut ignored and let the browser's select types-ahead
+            // treat E as "jump to the option starting with E".
+            e.currentTarget.blur();
             const entry = brushEntries.find((b) => b.value === e.target.value);
             if (!entry) return;
             lastBrush.current = entry.label;
@@ -842,7 +846,12 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           title="Brush direction — which way the brush faces (its baked view slot); E cycles through the available directions"
           value={dirValue}
           disabled={!multiView}
-          onChange={(e) => setBrushDir(doc.docId, e.target.value as ViewSlot)}
+          onChange={(e) => {
+            // Same focus release as the brush select: a focused direction
+            // select lets types-ahead snap E back to the E option.
+            e.currentTarget.blur();
+            setBrushDir(doc.docId, e.target.value as ViewSlot);
+          }}
         >
           {brushDirs.map((slot) => (
             <option key={slot} value={slot}>
