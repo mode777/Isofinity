@@ -269,7 +269,7 @@ h2 {
   min-width: 0;
 }
 
-.row .value-input {
+.value-input {
   flex: none;
   width: 4.6em;
   padding: 0.15rem 0.3rem;
