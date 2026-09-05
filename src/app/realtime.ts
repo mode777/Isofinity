@@ -3,6 +3,7 @@ import {
   AmbientLight,
   BufferGeometry,
   Color,
+  CylinderGeometry,
   DirectionalLight,
   Float32BufferAttribute,
   Group,
@@ -15,6 +16,7 @@ import {
   PointsMaterial,
   SRGBColorSpace,
   Scene,
+  SphereGeometry,
   Vector3,
   WebGLRenderer,
   type Material,
@@ -39,6 +41,60 @@ const AXIS_RGB: Record<'x' | 'y' | 'z', [number, number, number]> = {
   z: [0.38, 0.62, 1],
 };
 const ORIGIN_MARKER_HEX = 0xffd54f;
+
+/** Human reference figure: total height in meters (= world units). */
+export const HUMAN_REFERENCE_HEIGHT = 1.8;
+/** Ground gap between the figure and the yaw-rotated box's near corner. */
+const HUMAN_REFERENCE_GAP = 0.3;
+const HUMAN_COLOR = 0x9aa0a6;
+
+/**
+ * Human-scale reference figure: a low-poly mannequin (legs, torso, head)
+ * exactly `HUMAN_REFERENCE_HEIGHT` tall, feet on the ground plane (y = 0).
+ * A scale proxy for the Realtime 3D view — editor chrome only, never part
+ * of any bake. Axis-aligned in the fixed camera frame; callers position it
+ * beside the yaw-rotated box (never apply the slot model rotation to it).
+ */
+function buildHumanReference(): Group {
+  const h = HUMAN_REFERENCE_HEIGHT;
+  const material = new MeshStandardMaterial({
+    color: HUMAN_COLOR,
+    roughness: 0.85,
+    metalness: 0,
+  });
+  const part = (
+    geometry: CylinderGeometry | SphereGeometry,
+    y: number,
+  ): Mesh => {
+    const mesh = new Mesh(geometry, material);
+    mesh.position.y = y;
+    return mesh;
+  };
+  const group = new Group();
+  group.add(
+    // Legs: 0 … 0.45h.
+    part(new CylinderGeometry(0.05 * h, 0.05 * h, 0.45 * h, 12), 0.225 * h)
+      .translateX(0.055 * h),
+    part(new CylinderGeometry(0.05 * h, 0.05 * h, 0.45 * h, 12), 0.225 * h)
+      .translateX(-0.055 * h),
+    // Torso: 0.45h … 0.8h, slightly tapered.
+    part(new CylinderGeometry(0.085 * h, 0.105 * h, 0.35 * h, 12), 0.625 * h),
+    // Head: top lands exactly at h.
+    part(new SphereGeometry(0.067 * h, 16, 12), 0.933 * h),
+  );
+  return group;
+}
+
+/** Dispose every direct child's geometry and material(s). */
+function disposeRenderables(group: Group): void {
+  for (const child of group.children) {
+    const renderable = child as Mesh | LineSegments | Points;
+    renderable.geometry.dispose();
+    const material = renderable.material as Material | Material[];
+    if (Array.isArray(material)) for (const m of material) m.dispose();
+    else material.dispose();
+  }
+}
 
 /** Corner index pairs (bit 0 = x, bit 1 = y, bit 2 = z) forming the 12 edges. */
 const BOX_EDGES: [number, number][] = [
@@ -139,6 +195,7 @@ export class RealtimeMeshView {
   private camRight: Vector3;
   private camUp: Vector3;
   private overlay: Group;
+  private human: Group;
 
   constructor(canvas: HTMLCanvasElement, prim: Primitive, azimuthDeg: number = ISO_AZIMUTH_DEG) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -205,6 +262,19 @@ export class RealtimeMeshView {
     applySlotModelRotation(this.overlay, prim.size, yawDeg);
     this.overlay.visible = false;
     this.scene.add(this.overlay);
+
+    // Human-scale reference: fixed in the camera frame (never slot-rotated),
+    // standing just outside the yaw-rotated box's camera-facing ground
+    // corner — the fixed iso camera sits toward +x/+z at 45° azimuth — so
+    // the figure stays beside the asset in every view slot.
+    this.human = buildHumanReference();
+    this.human.position.set(
+      boxSize[0] + HUMAN_REFERENCE_GAP * Math.SQRT1_2,
+      0,
+      boxSize[2] + HUMAN_REFERENCE_GAP * Math.SQRT1_2,
+    );
+    this.human.visible = false;
+    this.scene.add(this.human);
   }
 
   /** Match the canvas backing store to the panel's CSS size. */
@@ -250,17 +320,17 @@ export class RealtimeMeshView {
     this.overlay.visible = on;
   }
 
+  /** Show or hide the human-scale reference figure. */
+  setHumanReference(on: boolean): void {
+    this.human.visible = on;
+  }
+
   /** Release materials, GL resources and the canvas' WebGL context. */
   dispose(): void {
     for (const material of this.materials) material.dispose();
     this.materials = [];
-    for (const child of this.overlay.children) {
-      const renderable = child as LineSegments | Points;
-      renderable.geometry.dispose();
-      const material = renderable.material as Material | Material[];
-      if (Array.isArray(material)) for (const m of material) m.dispose();
-      else material.dispose();
-    }
+    disposeRenderables(this.overlay);
+    disposeRenderables(this.human);
     this.scene.clear();
     this.renderer.dispose();
     this.renderer.forceContextLoss();

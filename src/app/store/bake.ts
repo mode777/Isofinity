@@ -752,6 +752,18 @@ export function setBoxOverlay(docId: string, on: boolean): void {
   });
 }
 
+/**
+ * Toggle the Realtime 3D view's human-scale reference figure. Editor-only
+ * state: never marks the document dirty and never reaches a bundle.
+ */
+export function setHumanReference(docId: string, on: boolean): void {
+  const doc = bakeDoc(docId);
+  if (!doc) return;
+  update(docId, (d) => {
+    d.humanReference = on;
+  });
+}
+
 export function setEnvParams(
   docId: string,
   patch: Partial<Pick<PtEnvironment, 'rotationDeg' | 'intensity' | 'exposure' | 'saturation'>>,

@@ -28,6 +28,7 @@ import {
   setActiveSlot,
   setBakeView,
   setBoxOverlay,
+  setHumanReference,
   setViewTransform,
   sourcePrimitive,
 } from '../store/bake.js';
@@ -348,6 +349,7 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
             azimuthDeg={slotAzimuthDeg(slot)}
             transform={transform ?? REALTIME_FIT}
             overlay={!!doc.boxOverlay}
+            humanReference={!!doc.humanReference}
           />
         ) : view !== 'realtime' ? (
           <canvas ref={imageRef} className="viewport-canvas" />
@@ -380,6 +382,14 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
             onClick={() => setBoxOverlay(doc.docId, !doc.boxOverlay)}
           >
             Box
+          </button>
+          <button
+            className={doc.humanReference ? 'active' : ''}
+            disabled={!prim}
+            title="Toggle a 1.8 m human-scale reference beside the asset (Realtime 3D view)"
+            onClick={() => setHumanReference(doc.docId, !doc.humanReference)}
+          >
+            Human
           </button>
         </div>
         <div className="slot-switcher">

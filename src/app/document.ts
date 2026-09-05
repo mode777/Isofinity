@@ -153,6 +153,11 @@ export interface BakeDocument {
    * never written into bundles.
    */
   boxOverlay?: boolean;
+  /**
+   * Viewport human-scale reference toggle (Realtime 3D view). In-memory
+   * editor state only — never written into bundles.
+   */
+  humanReference?: boolean;
 }
 
 export interface WorldDocument {
