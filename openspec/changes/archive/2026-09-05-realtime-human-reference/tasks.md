@@ -19,7 +19,7 @@
 ## 5. Verification
 
 - [x] 5.1 Run `npm run build` (tsc + vite) — must pass. `npm run verify:bundles` is unaffected (no `src/bake/bundle.ts`/`export.ts` change) but run it once to confirm zero diff.
-- [ ] 5.2 Browser harness (user-run per AGENTS.md): `npm run dev` → `/scratch-verify.html` still passes existing checks; then in the sprite editor walk the spec scenarios — toggle shows/hides the figure; a model set to 1.8 m height aligns with the figure's head; figure stays fixed across all four slots; a re-bake with the toggle on produces passes/bundle identical to a bake with it off.
+- [x] 5.2 Browser harness (user-run per AGENTS.md): `npm run dev` → `/scratch-verify.html` still passes existing checks; then in the sprite editor walk the spec scenarios — toggle shows/hides the figure; a model set to 1.8 m height aligns with the figure's head; figure stays fixed across all four slots; a re-bake with the toggle on produces passes/bundle identical to a bake with it off.
 
 ## 6. Follow-up: base-mesh figure + drag repositioning
 
@@ -28,4 +28,4 @@
 - [x] 6.3 Persist the dragged ground position per document in memory (`humanRefPos` on `BakeDocument`, `setHumanReferencePos` store action, never serialized, never dirty), applied over the default corner spot on view recreation (slot/tab switches). Verify: `npm run build` passes; position survives slot and tab switches in dev.
 - [x] 6.4 Docs: update the `docs/runtime.md` Human reference bullet (mesh figure, dragging, per-document spot) and the `docs/roadmap.md` Done entry. Verify: wording matches the updated spec.
 - [x] 6.5 Run `npm run build` and `npm run verify:bundles` — must pass with zero bundle-format diff.
-- [ ] 6.6 Browser harness (user-run): extend the walkthrough — the figure is the base mesh at 1.8 m; dragging it on the ground never pans the view; a press beside it pans; the dragged spot survives slot and tab switches; baked passes stay identical with the figure shown/moved/hidden.
+- [x] 6.6 Browser harness (user-run): extend the walkthrough — the figure is the base mesh at 1.8 m; dragging it on the ground never pans the view; a press beside it pans; the dragged spot survives slot and tab switches; baked passes stay identical with the figure shown/moved/hidden.
