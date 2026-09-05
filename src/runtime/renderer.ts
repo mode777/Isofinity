@@ -37,6 +37,11 @@ const vec3 SCREEN_UP = vec3(${isoFloat(SCREEN_UP[0])}, ${isoFloat(SCREEN_UP[1])}
 // tonemapped texel the path-traced render pass stores.
 const ACES_GLSL = `
 uniform float uExposure;
+vec3 RRTAndODTFit(vec3 v) {
+  vec3 a = v * (v + 0.0245786) - 0.000090537;
+  vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+  return a / b;
+}
 vec3 ACESFilmic(vec3 color) {
   const mat3 ACESInputMat = mat3(
     vec3(0.59719, 0.07600, 0.02840),
@@ -53,11 +58,6 @@ vec3 ACESFilmic(vec3 color) {
   color = RRTAndODTFit(color);
   color = ACESOutputMat * color;
   return clamp(color, 0.0, 1.0);
-}
-vec3 RRTAndODTFit(vec3 v) {
-  vec3 a = v * (v + 0.0245786) - 0.000090537;
-  vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
-  return a / b;
 }
 `;
 
