@@ -11,6 +11,7 @@ import {
   makeCubeMesh,
   parseCharacterAsset,
 } from '../runtime/meshAsset.js';
+import cesiumManUrl from './assets/CesiumMan.glb?url';
 import { meshYawMat, Renderer } from '../runtime/renderer.js';
 import { RUNTIME_PPU } from '../runtime/assets.js';
 
@@ -33,9 +34,7 @@ interface Stage {
 }
 
 async function main(): Promise<void> {
-  const asset = await parseCharacterAsset(
-    await (await fetch(new URL('/src/app/assets/CesiumMan.glb', window.location.origin))).arrayBuffer(),
-  );
+  const asset = await parseCharacterAsset(await (await fetch(cesiumManUrl)).arrayBuffer());
   const cube = makeCubeMesh(0.5);
 
   const player = new CharacterPlayer(asset);

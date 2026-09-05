@@ -27,6 +27,10 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: 'index.html',
+        // Verification harnesses ship with the site (Pages deploys build
+        // every push): /scratch-verify.html, /mesh-debug.html.
+        'scratch-verify': 'scratch-verify.html',
+        'mesh-debug': 'mesh-debug.html',
       },
     },
   },
