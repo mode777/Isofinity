@@ -48,6 +48,11 @@ list when a change lands (and prune it — history belongs in the archives).
   90° yaw steps with the model rotated, not the camera (see
   `docs/decisions/0005`), per-slot viewport + switcher, Bake All and
   Remove view actions; worlds still consume the N view.
+- World editor viewport navigation — wheel-zoom/middle-drag-pan over the
+  fixed projected world image (sprite-editor `ViewTransform` conventions,
+  per-document in-memory state, picking invariant under the transform),
+  and a depth-tested brush ghost previewing the next placement under the
+  cursor.
 
 ## Planned
 

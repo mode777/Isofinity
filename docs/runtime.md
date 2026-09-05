@@ -126,6 +126,26 @@ below. Available placement tools are the document's sprite layers; new
 world documents start with an empty grid. World save/load works against
 the workspace `worlds/` folder as described in Worlds.
 
+The world viewport is one zoomable panel: it shows the fixed projected
+world image (the bake's isometric projection, CPU-computed once) through
+a 2D view transform — mouse wheel zooms around the cursor, middle-drag
+pans (left paints, right erases), and corner `− / % / + / Fit` controls
+mirror the sprite viewport (shared `ViewTransform`/zoom constants in
+`src/app/bakeView.ts`). Picking inverts the same transform, so
+placements land at the same ground position at every zoom level. The
+transform defaults to fit (whole grid letterboxed) and is per-document
+in-memory editor state — it survives tab switches and is never written
+into world JSON.
+
+With a brush (pencil) active and its layer loaded, the viewport renders
+that brush's sprite as a ghost at the exact position the next click
+would place (cursor-centered, like `placeAt`). The ghost is an ordinary
+depth-tested sprite instance slotted into the painter-sorted batch, so
+per-pixel occlusion shows exactly how the placement would sit among its
+neighbors; it is preview-only (never placed, never marks the document
+dirty) and yields the hover feedback to the eraser's unit-cell
+highlight.
+
 ## Assets
 
 The world editor uploads two WebGL2 `TEXTURE_2D_ARRAY`s: the render pass
@@ -233,8 +253,11 @@ fragment shader:
 
 Raw WebGL2, no scene graph, no matrices. Because the camera is fixed and
 orthographic, all projection happens once on the CPU
-(`src/shared/iso.ts` — same constants as the bake); the GPU side is a pure
-2D compositor with three draw batches per frame:
+(`src/shared/iso.ts` — same constants as the bake); the GPU side is a
+pure 2D compositor with three draw batches per frame. A single `uView`
+scale+offset uniform (backing-store pixels) applies the editor
+viewport's zoom/pan to every batch at draw time — the world data itself
+stays in world-image pixels:
 
 1. **Ground** — the grid's cell top faces (y=0) as a static vertex-color
    triangle batch, CPU-projected at startup. No depth interaction.
@@ -259,8 +282,10 @@ cursor-centered) — not grid-snapped — so overlapping objects exercise the
 per-pixel occlusion. Left-click/drag places the selected tool, right-click
 erases the nearest placement whose unit-cube footprint contains the
 cursor, tool buttons or eraser selects. Ground picking inverts the shared
-projection analytically (`screenToGround`), no hit-testing. The 12×12
-checkerboard is a visual reference only.
+projection analytically (`screenToGround`) after inverting the viewport's
+zoom/pan transform, no hit-testing. The 12×12 checkerboard is a visual
+reference only. Viewport navigation: wheel zooms around the cursor,
+middle-drag pans; the left/right placement bindings never move.
 
 ## Source layout
 

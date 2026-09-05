@@ -463,15 +463,39 @@ canvas {
   border: 1px solid #333;
 }
 
+.world-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  padding: 1rem;
+}
+
+/* The world viewport: one zoomable panel filling the space between the
+   toolbar and the hint line. The canvas is a panel-sized backing store
+   showing the fixed projected world image through the view transform. */
+.world-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #333;
+  background: #0e1013;
+}
+
 .world-editor canvas {
   cursor: crosshair;
   touch-action: none;
 }
 
-.world-editor canvas.empty {
-  background: #0e1013;
-  min-width: 8rem;
-  min-height: 4rem;
+.world-viewport canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
 }
 
 .editor-toolbar {

@@ -170,6 +170,12 @@ export interface WorldDocument {
    * (sprite layer id or primitive id), or 'eraser'.
    */
   tool: string;
+  /**
+   * Viewport zoom/pan over the fixed projected world image; null = fit
+   * (the whole grid letterboxed in the panel). In-memory editor state
+   * only — never written into world files.
+   */
+  viewTransform: ViewTransform | null;
 }
 
 export type EditorDocument = BakeDocument | WorldDocument;

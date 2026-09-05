@@ -12,6 +12,7 @@ import type {
   LightState,
   PrimitiveKind,
   SunState,
+  ViewTransform,
   WorldDocument,
 } from '../document.js';
 import { DEFAULT_LIGHT, DEFAULT_SUN, PRIMITIVE_KINDS } from '../document.js';
@@ -43,6 +44,7 @@ export function newWorldDoc(): string {
     light: { ...DEFAULT_LIGHT },
     sun: { ...DEFAULT_SUN },
     tool: '',
+    viewTransform: null,
   };
   ed().addDoc(doc);
   return doc.docId;
@@ -173,6 +175,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       light: data.light,
       sun: data.sun,
       tool: '',
+      viewTransform: null,
     };
 
     const skipped: { asset: string; reason: string }[] = [];
@@ -324,6 +327,22 @@ export function setTool(docId: string, tool: string): void {
   if (!doc) return;
   update(docId, (d) => {
     d.tool = tool;
+  });
+}
+
+/**
+ * Set the world viewport's zoom/pan (null = fit the whole grid to the
+ * panel). Editor-only state: never marks the document dirty and never
+ * reaches a saved world file.
+ */
+export function setWorldViewTransform(
+  docId: string,
+  transform: ViewTransform | null,
+): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  update(docId, (d) => {
+    d.viewTransform = transform;
   });
 }
 

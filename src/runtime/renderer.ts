@@ -19,9 +19,11 @@ const FLAT_VERT = `#version 300 es
 in vec2 aPos;
 in vec3 aColor;
 uniform vec2 uRes;
+uniform vec4 uView;  // view transform: scale.xy, offset.xy (backing-store px)
 out vec3 vColor;
 void main() {
-  gl_Position = vec4(aPos.x / uRes.x * 2.0 - 1.0, 1.0 - aPos.y / uRes.y * 2.0, 0.0, 1.0);
+  vec2 px = aPos * uView.xy + uView.zw;
+  gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
   vColor = aColor;
 }
 `;
@@ -43,11 +45,13 @@ in vec4 aInst;   // px.xy, layer, depthOff
 in vec4 aInst2;  // quadSize px, sprite texel size
 uniform vec2 uRes;
 uniform vec2 uMaxSize;
+uniform vec4 uView;  // view transform: scale.xy, offset.xy (backing-store px)
 out vec2 vUv;
 flat out float vLayer;
 flat out float vDepthOff;
 void main() {
   vec2 px = aInst.xy + aCorner * aInst2.xy;
+  px = px * uView.xy + uView.zw;
   gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
   vUv = mix(vec2(0.5), aInst2.zw - 0.5, aCorner) / uMaxSize;
   vLayer = aInst.z;
@@ -102,6 +106,20 @@ function link(gl: WebGL2RenderingContext, vertSrc: string, fragSrc: string): Web
 
 export const DEPTH_LINEAR_RANGE = 64;
 
+/**
+ * A 2D view transform over the world-projected image: zoom/pan given in
+ * backing-store (device) pixels. All vertex data stays in world-image
+ * pixels; this transform scales/offsets it at draw time. Structurally
+ * compatible with the editor's `ViewTransform`.
+ */
+export interface RenderView {
+  zoom: number;
+  panX: number;
+  panY: number;
+}
+
+const IDENTITY_VIEW: RenderView = { zoom: 1, panX: 0, panY: 0 };
+
 export interface LightParams {
   dir: [number, number, number];
   key: [number, number, number];
@@ -122,9 +140,11 @@ export class Renderer {
   private instVbo: WebGLBuffer;
   private uFlatRes: WebGLUniformLocation;
   private uFlatAlpha: WebGLUniformLocation;
+  private uFlatView: WebGLUniformLocation;
   private uFlatLight: Uniforms3;
   private uSpriteRes: WebGLUniformLocation;
   private uSpriteMaxSize: WebGLUniformLocation;
+  private uSpriteView: WebGLUniformLocation;
   private uSpriteLight: Uniforms3;
   private uDepthA: WebGLUniformLocation;
   private uDepthB: WebGLUniformLocation;
@@ -155,6 +175,7 @@ export class Renderer {
     this.spriteProg = link(gl, SPRITE_VERT, SPRITE_FRAG);
     this.uFlatRes = gl.getUniformLocation(this.flatProg, 'uRes')!;
     this.uFlatAlpha = gl.getUniformLocation(this.flatProg, 'uAlpha')!;
+    this.uFlatView = gl.getUniformLocation(this.flatProg, 'uView')!;
     this.uFlatLight = {
       dir: gl.getUniformLocation(this.flatProg, 'uLightDir')!,
       key: gl.getUniformLocation(this.flatProg, 'uKeyLight')!,
@@ -162,6 +183,7 @@ export class Renderer {
     };
     this.uSpriteRes = gl.getUniformLocation(this.spriteProg, 'uRes')!;
     this.uSpriteMaxSize = gl.getUniformLocation(this.spriteProg, 'uMaxSize')!;
+    this.uSpriteView = gl.getUniformLocation(this.spriteProg, 'uView')!;
     this.uSpriteLight = {
       dir: gl.getUniformLocation(this.spriteProg, 'uLightDir')!,
       key: gl.getUniformLocation(this.spriteProg, 'uKeyLight')!,
@@ -356,11 +378,23 @@ export class Renderer {
     gl.bindVertexArray(null);
   }
 
-  render(instances: Float32Array, count: number, highlight: Float32Array | null): void {
+  render(
+    instances: Float32Array,
+    count: number,
+    highlight: Float32Array | null,
+    view: RenderView = IDENTITY_VIEW,
+  ): void {
     const gl = this.gl;
     const canvas = gl.canvas as HTMLCanvasElement;
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    gl.useProgram(this.flatProg);
+    gl.uniform2f(this.uFlatRes, canvas.width, canvas.height);
+    gl.uniform4f(this.uFlatView, view.zoom, view.zoom, view.panX, view.panY);
+    gl.useProgram(this.spriteProg);
+    gl.uniform2f(this.uSpriteRes, canvas.width, canvas.height);
+    gl.uniform4f(this.uSpriteView, view.zoom, view.zoom, view.panX, view.panY);
 
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
