@@ -53,10 +53,11 @@ list when a change lands (and prune it — history belongs in the archives).
   conventions, per-document in-memory state, picking invariant under the
   transform), three-finger touch panning, and a depth-tested brush ghost
   previewing the next placement under the cursor.
-- Human-scale reference in the sprite editor's Realtime 3D view — a
-  toggleable procedural 1.8 m figure standing beside the asset, fixed in
-  the bake camera frame across view slots; editor chrome only (never
-  baked, never persisted).
+- Human-scale reference in the sprite editor's Realtime 3D view — the
+  bundled base mesh normalized to 1.8 m, toggleable, draggable along the
+  ground plane with a per-document in-memory spot, fixed in the bake
+  camera frame across view slots; editor chrome only (never baked, never
+  persisted).
 
 ## Planned
 

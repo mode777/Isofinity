@@ -20,3 +20,12 @@
 
 - [x] 5.1 Run `npm run build` (tsc + vite) — must pass. `npm run verify:bundles` is unaffected (no `src/bake/bundle.ts`/`export.ts` change) but run it once to confirm zero diff.
 - [ ] 5.2 Browser harness (user-run per AGENTS.md): `npm run dev` → `/scratch-verify.html` still passes existing checks; then in the sprite editor walk the spec scenarios — toggle shows/hides the figure; a model set to 1.8 m height aligns with the figure's head; figure stays fixed across all four slots; a re-bake with the toggle on produces passes/bundle identical to a bake with it off.
+
+## 6. Follow-up: base-mesh figure + drag repositioning
+
+- [x] 6.1 Replace the procedural figure with the bundled base mesh: ship `src/app/assets/free_base_mesh.glb` as a vite `?url` asset (add `src/vite-env.d.ts` with `vite/client` types), load it async in `RealtimeMeshView` via `GLTFLoader`, normalize at load (uniform scale to `HUMAN_REFERENCE_HEIGHT`, feet to y = 0, centered over the ground position) and keep the procedural mannequin only as a load-failure fallback; re-render once loaded. Verify: `npm run build` passes; dev shows the mesh figure at true 1.8 m scale.
+- [x] 6.2 Drag repositioning: `RealtimeMeshView` gains raycast helpers (`hitHuman` pick, `dragHumanTo` ground-plane move, `setHumanPosition`); `RealtimeCanvas` handles pointerdown/move/up on its host — a press on the figure drags it (pointer capture, stopPropagation so the view does not pan), a press elsewhere pans as before; grab/grabbing cursor on hover/drag. Verify: `npm run build` passes; dev drag moves the figure on the ground without panning.
+- [x] 6.3 Persist the dragged ground position per document in memory (`humanRefPos` on `BakeDocument`, `setHumanReferencePos` store action, never serialized, never dirty), applied over the default corner spot on view recreation (slot/tab switches). Verify: `npm run build` passes; position survives slot and tab switches in dev.
+- [x] 6.4 Docs: update the `docs/runtime.md` Human reference bullet (mesh figure, dragging, per-document spot) and the `docs/roadmap.md` Done entry. Verify: wording matches the updated spec.
+- [x] 6.5 Run `npm run build` and `npm run verify:bundles` — must pass with zero bundle-format diff.
+- [ ] 6.6 Browser harness (user-run): extend the walkthrough — the figure is the base mesh at 1.8 m; dragging it on the ground never pans the view; a press beside it pans; the dragged spot survives slot and tab switches; baked passes stay identical with the figure shown/moved/hidden.

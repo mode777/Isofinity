@@ -29,6 +29,7 @@ import {
   setBakeView,
   setBoxOverlay,
   setHumanReference,
+  setHumanReferencePos,
   setViewTransform,
   sourcePrimitive,
 } from '../store/bake.js';
@@ -350,6 +351,8 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
             transform={transform ?? REALTIME_FIT}
             overlay={!!doc.boxOverlay}
             humanReference={!!doc.humanReference}
+            humanPos={doc.humanRefPos ?? null}
+            onHumanMove={(pos) => setHumanReferencePos(doc.docId, pos)}
           />
         ) : view !== 'realtime' ? (
           <canvas ref={imageRef} className="viewport-canvas" />

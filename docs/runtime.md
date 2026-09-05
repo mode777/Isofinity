@@ -76,12 +76,15 @@ disabled when the document is view-only.
   hairline overlay in the 2D views (`projectBoxFrame`, `src/bake/iso.ts`)
   and as scene-space `LineSegments` in the realtime view.
 - **Human reference** (per-document toggle in the view-controls row,
-  Realtime 3D only): a procedural 1.8 m figure standing on the ground
-  plane just outside the yaw-rotated asset box's camera-facing corner —
-  fixed in the bake camera frame, so it stays beside the asset in every
-  view slot without rotating with the model (`src/app/realtime.ts`). A
-  scale aid only: never baked into any pass, never serialized; the toggle
-  is in-memory editor state.
+  Realtime 3D only): the bundled base mesh (`free_base_mesh.glb`,
+  `src/app/assets/`), normalized at load to exactly 1.8 m with feet on
+  the ground plane, standing beside the asset — fixed in the bake camera
+  frame, so it does not rotate with the model across view slots
+  (`src/app/realtime.ts`). Its default spot is just outside the
+  yaw-rotated box's camera-facing corner; it can be dragged anywhere on
+  the ground plane (a left press on the figure drags it, a press
+  elsewhere pans the view), and the dragged spot is kept per document in
+  memory. A scale aid only: never baked into any pass, never serialized.
 - The properties panel offers, top to bottom: preset management (save /
   list / delete / import), the source (model scale), the path-trace
   settings, and environment controls (HDRI file or workspace `hdri/`,

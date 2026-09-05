@@ -1,6 +1,7 @@
 import {
   ACESFilmicToneMapping,
   AmbientLight,
+  Box3,
   BufferGeometry,
   Color,
   CylinderGeometry,
@@ -12,20 +13,27 @@ import {
   Mesh,
   MeshStandardMaterial,
   OrthographicCamera,
+  Plane,
   Points,
   PointsMaterial,
+  Raycaster,
   SRGBColorSpace,
   Scene,
   SphereGeometry,
+  Vector2,
   Vector3,
   WebGLRenderer,
+  type Intersection,
   type Material,
+  type Object3D,
 } from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { PAD_PX, applySlotModelRotation } from '../bake/bake.js';
 import { ISO_AZIMUTH_DEG, frameIsoBox } from '../bake/iso.js';
 import type { Primitive } from '../bake/primitives.js';
 import { yawRotatedBoxSize, type Vec3 } from '../shared/iso.js';
 import type { ViewTransform } from './document.js';
+import humanMeshUrl from './assets/free_base_mesh.glb?url';
 
 /** Fixed realtime-view lighting (geometry inspection, not look matching). */
 const KEY_COLOR = 0xfff1dd;
@@ -49,13 +57,13 @@ const HUMAN_REFERENCE_GAP = 0.3;
 const HUMAN_COLOR = 0x9aa0a6;
 
 /**
- * Human-scale reference figure: a low-poly mannequin (legs, torso, head)
- * exactly `HUMAN_REFERENCE_HEIGHT` tall, feet on the ground plane (y = 0).
- * A scale proxy for the Realtime 3D view — editor chrome only, never part
- * of any bake. Axis-aligned in the fixed camera frame; callers position it
+ * Fallback reference figure (procedural low-poly mannequin, legs/torso/
+ * head) exactly `HUMAN_REFERENCE_HEIGHT` tall, feet on the ground plane.
+ * Only used when the bundled base mesh fails to load; same editor-chrome
+ * semantics. Axis-aligned in the fixed camera frame; callers position it
  * beside the yaw-rotated box (never apply the slot model rotation to it).
  */
-function buildHumanReference(): Group {
+function buildMannequin(): Group {
   const h = HUMAN_REFERENCE_HEIGHT;
   const material = new MeshStandardMaterial({
     color: HUMAN_COLOR,
@@ -85,15 +93,45 @@ function buildHumanReference(): Group {
   return group;
 }
 
-/** Dispose every direct child's geometry and material(s). */
-function disposeRenderables(group: Group): void {
-  for (const child of group.children) {
-    const renderable = child as Mesh | LineSegments | Points;
-    renderable.geometry.dispose();
-    const material = renderable.material as Material | Material[];
+/**
+ * Load the bundled base-mesh figure into `group`, normalized at load:
+ * uniform scale so the height is exactly `HUMAN_REFERENCE_HEIGHT`, feet
+ * translated to y = 0, centered over the group origin (its ground spot).
+ * Falls back to the procedural mannequin if loading fails. `onLoad` lets
+ * the view repaint once the figure arrives.
+ */
+function loadHumanMesh(group: Group, onLoad: () => void): void {
+  new GLTFLoader().load(
+    humanMeshUrl,
+    (gltf) => {
+      const obj = gltf.scene;
+      const box = new Box3().setFromObject(obj);
+      const height = box.max.y - box.min.y;
+      if (height > 0) obj.scale.setScalar(HUMAN_REFERENCE_HEIGHT / height);
+      const fit = new Box3().setFromObject(obj);
+      const center = fit.getCenter(new Vector3());
+      obj.position.set(-center.x, -fit.min.y, -center.z);
+      group.add(obj);
+      onLoad();
+    },
+    undefined,
+    () => {
+      group.add(buildMannequin());
+      onLoad();
+    },
+  );
+}
+
+/** Dispose every geometry and material(s) under `root` (any depth). */
+function disposeRenderables(root: Object3D): void {
+  root.traverse((obj) => {
+    const renderable = obj as Mesh;
+    renderable.geometry?.dispose();
+    const material = renderable.material as Material | Material[] | undefined;
+    if (!material) return;
     if (Array.isArray(material)) for (const m of material) m.dispose();
     else material.dispose();
-  }
+  });
 }
 
 /** Corner index pairs (bit 0 = x, bit 1 = y, bit 2 = z) forming the 12 edges. */
@@ -196,6 +234,10 @@ export class RealtimeMeshView {
   private camUp: Vector3;
   private overlay: Group;
   private human: Group;
+  /** Last rendered transform, for repaints from outside the React flow. */
+  private lastTransform: ViewTransform | null = null;
+  private readonly raycaster = new Raycaster();
+  private readonly groundPlane = new Plane(new Vector3(0, 1, 0), 0);
 
   constructor(canvas: HTMLCanvasElement, prim: Primitive, azimuthDeg: number = ISO_AZIMUTH_DEG) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -264,10 +306,11 @@ export class RealtimeMeshView {
     this.scene.add(this.overlay);
 
     // Human-scale reference: fixed in the camera frame (never slot-rotated),
-    // standing just outside the yaw-rotated box's camera-facing ground
+    // defaulting to just outside the yaw-rotated box's camera-facing ground
     // corner — the fixed iso camera sits toward +x/+z at 45° azimuth — so
-    // the figure stays beside the asset in every view slot.
-    this.human = buildHumanReference();
+    // the figure stays beside the asset in every view slot. The base mesh
+    // loads async and is normalized to the reference height on arrival.
+    this.human = new Group();
     this.human.position.set(
       boxSize[0] + HUMAN_REFERENCE_GAP * Math.SQRT1_2,
       0,
@@ -275,6 +318,7 @@ export class RealtimeMeshView {
     );
     this.human.visible = false;
     this.scene.add(this.human);
+    loadHumanMesh(this.human, () => this.rerender());
   }
 
   /** Match the canvas backing store to the panel's CSS size. */
@@ -285,6 +329,7 @@ export class RealtimeMeshView {
 
   /** Draw one frame for the shared zoom/pan state (fit = zoom 1, pan 0). */
   render(transform: ViewTransform): void {
+    this.lastTransform = transform;
     const canvas = this.renderer.domElement;
     const cssW = canvas.width / (window.devicePixelRatio || 1);
     const cssH = canvas.height / (window.devicePixelRatio || 1);
@@ -323,6 +368,51 @@ export class RealtimeMeshView {
   /** Show or hide the human-scale reference figure. */
   setHumanReference(on: boolean): void {
     this.human.visible = on;
+  }
+
+  /** Place the figure's feet anchor at a ground position (x/z, world). */
+  setHumanPosition(x: number, z: number): void {
+    this.human.position.set(x, 0, z);
+    this.rerender();
+  }
+
+  /** True when a viewport point (CSS px) hits the visible figure. */
+  hitHuman(cssX: number, cssY: number): boolean {
+    if (!this.human.visible) return false;
+    return this.pick(cssX, cssY, this.human).length > 0;
+  }
+
+  /**
+   * Drag the figure's feet anchor under a viewport point (CSS px) by
+   * raycasting the ground plane; returns the new ground position, or null
+   * when the ray misses the plane (parallel to it).
+   */
+  dragHumanTo(cssX: number, cssY: number): [number, number] | null {
+    this.raycaster.setFromCamera(this.ndcFor(cssX, cssY), this.camera);
+    const hit = new Vector3();
+    if (!this.raycaster.ray.intersectPlane(this.groundPlane, hit)) return null;
+    this.human.position.set(hit.x, 0, hit.z);
+    this.rerender();
+    return [hit.x, hit.z];
+  }
+
+  /** Repaint from the last render call (async loads, drag moves). */
+  private rerender(): void {
+    if (this.lastTransform) this.render(this.lastTransform);
+  }
+
+  private ndcFor(cssX: number, cssY: number): Vector2 {
+    const canvas = this.renderer.domElement;
+    const dpr = window.devicePixelRatio || 1;
+    return new Vector2(
+      (cssX / (canvas.width / dpr)) * 2 - 1,
+      -(cssY / (canvas.height / dpr)) * 2 + 1,
+    );
+  }
+
+  private pick(cssX: number, cssY: number, target: Object3D): Intersection[] {
+    this.raycaster.setFromCamera(this.ndcFor(cssX, cssY), this.camera);
+    return this.raycaster.intersectObject(target, true);
   }
 
   /** Release materials, GL resources and the canvas' WebGL context. */

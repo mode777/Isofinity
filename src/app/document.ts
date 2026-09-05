@@ -158,6 +158,12 @@ export interface BakeDocument {
    * editor state only — never written into bundles.
    */
   humanReference?: boolean;
+  /**
+   * Ground position (world x/z) of the human reference figure; null/absent
+   * = the default spot beside the yaw-rotated box. In-memory editor state
+   * only — never written into bundles.
+   */
+  humanRefPos?: [number, number] | null;
 }
 
 export interface WorldDocument {

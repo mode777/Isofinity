@@ -36,22 +36,23 @@ on `BakeDocument`). The human reference follows this exact pattern.
 
 ## Decisions
 
-### 1. Procedural low-poly humanoid, built in `realtime.ts`
+### 1. Reference mesh: bundled `free_base_mesh.glb` (supersedes the original procedural mannequin)
 
-Build the figure from three.js primitives (box/capsule torso, sphere head,
-two legs) scaled so total height is exactly the reference constant.
+Per user request, the figure is the editor's bundled base mesh
+(`src/app/assets/free_base_mesh.glb`, ~2 MB, static — no skins/animations),
+loaded async in `RealtimeMeshView` via `GLTFLoader` from a vite `?url`
+asset import. At load it is normalized against its bounding box: uniform
+scale so the height is exactly `HUMAN_REFERENCE_HEIGHT`, feet translated to
+y = 0, centered over its ground position — the numbers in the file
+(cm-scale, feet not at 0) become irrelevant. If the load ever fails the
+original procedural mannequin is added as a fallback so the feature stays
+usable. The mesh keeps its own materials and shades with the view's fixed
+lights like any scene object.
 
-- *Rejected: loading a humanoid glTF* — adds an asset dependency and load
-  path to a zero-dependency preview; licensing and loading cost for
-  something that only needs to read as "a person".
-- *Rejected: billboard silhouette texture* — needs an image asset and reads
-  wrong as the (fixed) camera orbits nothing; a lit mannequin shades
-  consistently with the view's existing fixed lights.
-- *Rejected: a ruler/scale bar* — precise but does not answer "how big does
-  this feel next to a person", which is the request.
-
-Material: neutral, semi-matte (`MeshStandardMaterial`, similar roughness to
-the preview), so it reads as an object in the scene rather than UI.
+- *Original choice (superseded): procedural mannequin* — chosen to avoid an
+  asset dependency; the user explicitly overrode this with a concrete mesh.
+- *Rejected: normalizing offline and shipping pre-scaled* — a runtime
+  Box3 normalization is four lines and immune to re-export drift.
 
 ### 2. Fixed reference height 1.8 m, one named constant
 
@@ -98,6 +99,29 @@ existing `RealtimeCanvas` props; the view rebuilds are unnecessary — the
 figure is created once per `RealtimeMeshView` construction and shown/hidden
 via `visible`, like the overlay.
 
+### 7. Dragging: raycast pick on pointerdown, ground-plane move, in-memory spot
+
+Pressing the left button on the figure starts a figure drag; pressing
+anywhere else keeps the existing view pan. `RealtimeCanvas` adds pointer
+handlers on its host div: pointerdown raycasts the figure (`Raycaster` +
+ortho camera works unchanged); a hit captures the pointer and stops
+propagation so `SpriteEditor`'s pan handler never sees the gesture.
+Pointermove raycasts the ground plane y = 0 and moves the figure's feet
+anchor there; hover/drag set a grab/grabbing cursor for affordance.
+
+- *Rejected: figure follows the mouse without a click* (the user's
+  fallback suggestion) — the figure would never hold still; the user
+  prefers dragging.
+- *Rejected: an offset/transform gizmo* — overkill for one ground-plane
+  position; direct dragging is the whole interaction.
+
+The dragged ground position persists as `humanRefPos?: [number, number] |
+null` on `BakeDocument` (in-memory editor state only — never serialized,
+ADR 0006; toggling/moving never marks dirty). A new view (slot or tab
+switch) applies the stored position over its default corner spot; null
+keeps the default. Drag writes go through a `setHumanReferencePos` store
+action, mirroring the other editor-chrome actions.
+
 ## Risks / Trade-offs
 
 - [Figure partly outside the fit frame for small/short assets] → accepted;
@@ -105,8 +129,11 @@ via `visible`, like the overlay.
 - [1.8 m may not match a project's actual human scale] → single named
   constant; trivially adjustable; non-goal to expose as UI for now.
 - [Very wide models could overlap the figure] → the figure hugs the
-  yaw-rotated box corner with a fixed gap; worst case is partial
+  yaw-rotated box corner with a fixed gap, and the user can drag it
+  anywhere (decision 7); worst case at the default spot is partial
   intersection, acceptable for an editor aid.
+- [Bundled mesh adds ~2 MB to the bundle] → accepted (user's explicit
+  choice); vite emits it as a hashed asset, loaded once per view creation.
 - [Extra draw cost] → negligible (~hundreds of triangles, one more mesh).
 
 ## Migration Plan

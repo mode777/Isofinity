@@ -764,6 +764,22 @@ export function setHumanReference(docId: string, on: boolean): void {
   });
 }
 
+/**
+ * Store the human reference figure's dragged ground position (null =
+ * back to the default spot). Editor-only state: never marks the document
+ * dirty and never reaches a bundle.
+ */
+export function setHumanReferencePos(
+  docId: string,
+  pos: [number, number] | null,
+): void {
+  const doc = bakeDoc(docId);
+  if (!doc) return;
+  update(docId, (d) => {
+    d.humanRefPos = pos;
+  });
+}
+
 export function setEnvParams(
   docId: string,
   patch: Partial<Pick<PtEnvironment, 'rotationDeg' | 'intensity' | 'exposure' | 'saturation'>>,

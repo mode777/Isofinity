@@ -3,25 +3,33 @@
 ### Requirement: Sprite viewport human-scale reference
 
 The sprite viewport SHALL offer a toggleable human-scale reference figure in
-the Realtime 3D view: when enabled, a simple humanoid figure of fixed
-reference height **1.8 m** (1 world unit = 1 m) SHALL stand on the ground
-plane beside the asset, inside the bake's fixed isometric camera frame, so
-the asset's size can be judged against a human. The toggle SHALL live in the
-viewport's view controls next to the bounding-box overlay toggle. The figure
-SHALL be placed at a fixed position relative to the bake camera frame —
-adjacent to the yaw-rotated asset box's camera-facing corner — so it stays
-visible in every view slot and does not rotate with the slot's model yaw.
+the Realtime 3D view: when enabled, a humanoid figure of fixed reference
+height **1.8 m** (1 world unit = 1 m) SHALL stand on the ground plane beside
+the asset, inside the bake's fixed isometric camera frame, so the asset's
+size can be judged against a human. The figure SHALL be the editor's bundled
+base mesh (`free_base_mesh.glb`), normalized at load — uniform scale to
+exactly 1.8 m height, feet on the ground plane, centered over its ground
+position. The toggle SHALL live in the viewport's view controls next to the
+bounding-box overlay toggle.
+
+The figure SHALL be placed at a fixed default position relative to the bake
+camera frame — adjacent to the yaw-rotated asset box's camera-facing corner —
+and SHALL be repositionable: with the reference enabled, the user SHALL be
+able to drag the figure along the ground plane with the left mouse button.
+Dragging the figure SHALL NOT pan the viewport (the drag targets the figure
+when the pointer press lands on it, and pans the view otherwise), and the
+figure SHALL show pointer feedback when hovered or dragged. The repositioned
+ground position SHALL be kept per sprite document in memory — persisting
+across view-slot switches and tab switches, never saved into sprite bundles
+or world files; a document that was never dragged shows the default spot.
 
 The reference figure SHALL be editor chrome only: it SHALL NOT participate in
 any bake, SHALL NOT appear in any baked pass (g-buffer or render), and SHALL
-NOT be serialized into sprite bundles or world files. Toggling it SHALL NOT
-mark the document dirty. The figure SHALL be drawn from data the document
-already holds (source geometry, box extent, fixed camera), so live sources
-show it regardless of bake state. The toggle SHALL be available exactly when
-the Realtime 3D view is available (the document has source geometry). The
-figure SHALL track the view's zoom and pan. The toggle's state SHALL be kept
-per sprite document in memory — persisting across view switches and tab
-switches, never saved into sprite bundles.
+NOT be serialized into sprite bundles or world files. Toggling or moving it
+SHALL NOT mark the document dirty. The figure SHALL track the view's zoom and
+pan. The toggle SHALL be available exactly when the Realtime 3D view is
+available (the document has source geometry). The figure does not rotate with
+the slot's model yaw.
 
 #### Scenario: Toggle shows and hides the figure
 
@@ -37,13 +45,33 @@ switches, never saved into sprite bundles.
 - **THEN** the model's top edge aligns with the figure's head, both standing
   on the same ground plane
 
-#### Scenario: Figure stays put across slot switches
+#### Scenario: Default spot beside the asset
 
-- **WHEN** the user switches the active view slot from N to E to S to W with
-  the reference shown
-- **THEN** the figure remains at the same position relative to the camera
-  frame, standing beside the yaw-rotated asset box in every slot, and never
+- **WHEN** a document that was never dragged shows the reference
+- **THEN** the figure stands just outside the yaw-rotated asset box's
+  camera-facing corner, beside the asset in every view slot, and never
   rotates with the model
+
+#### Scenario: Dragging repositions the figure
+
+- **WHEN** the user presses the left mouse button on the figure and drags
+  across the viewport
+- **THEN** the figure follows the cursor along the ground plane, the viewport
+  does not pan during the drag, and releasing drops the figure at that spot
+
+#### Scenario: Pressing beside the figure still pans
+
+- **WHEN** the user presses the left mouse button on the viewport with the
+  reference enabled but not on the figure
+- **THEN** the drag pans the view exactly as when the reference is hidden
+
+#### Scenario: Dragged position persists per document
+
+- **WHEN** the user drags the figure to a spot, switches the active view slot
+  or to another sprite tab and back
+- **THEN** the figure stands at the dragged spot in the first document, other
+  documents are unaffected, and no bundle or world file contains the position;
+  toggling or dragging did not turn the document dirty
 
 #### Scenario: Reference never reaches baked output
 
@@ -63,11 +91,3 @@ switches, never saved into sprite bundles.
 - **WHEN** the user zooms or pans the Realtime 3D view with the figure shown
 - **THEN** the figure scales and moves with the scene, keeping its size
   relative to the asset
-
-#### Scenario: Toggle state is per document and never persisted
-
-- **WHEN** the user enables the reference on one sprite tab, switches to
-  another sprite tab and back, then saves the first document
-- **THEN** the first tab still shows the reference, the second tab is
-  unaffected, and the saved bundle contains no reference-toggle state; the
-  document did not turn dirty from toggling
