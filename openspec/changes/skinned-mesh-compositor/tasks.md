@@ -22,11 +22,11 @@
 ## 5. World integration (character brush)
 
 - [x] 5.1 Add the in-memory mesh placement kind to the world document/world model (asset ref, position, height, yaw; depth key via `depthOf`) — no serialization; verify save writes unchanged `isoinfinity-world/3` JSON and load ignores meshes
-- [ ] 5.2 Wire the built-in character brush into `WorldEditor.tsx`: place/erase (topmost across kinds), height control, ghost preview at the cursor, contact-shadow ellipse; verify ghost occlusion and erase topmost against mixed sprite/character scenes
-- [ ] 5.3 Confirm surface snap works for the character brush unchanged (sprite g-buffer path) and animated playback loops in place at wall-clock pace; verify in the browser
+- [x] 5.2 Wire the built-in character brush into `WorldEditor.tsx`: place/erase (topmost across kinds), height control, ghost preview at the cursor, contact-shadow ellipse; verify ghost occlusion and erase topmost against mixed sprite/character scenes
+- [x] 5.3 Confirm surface snap works for the character brush unchanged (sprite g-buffer path) and animated playback loops in place at wall-clock pace; verify in the browser
 
 ## 6. Verification and docs
 
-- [ ] 6.1 Extend `/scratch-verify.html` with a fixed mesh-in-scene golden hash (CesiumMan placed among test sprites, fixed camera/light) so future renderer changes diff against it; run the harness and record the hash (browser run by user)
-- [ ] 6.2 Run the full gates: `npm run build`, `npm run verify:bundles` (must stay green — no bake/format code touched), and the scratch-verify bake checks; record results
+- [x] 6.1 Extend `/scratch-verify.html` with a fixed mesh-in-scene golden hash (CesiumMan placed among test sprites, fixed camera/light) so future renderer changes diff against it; run the harness and record the hash (browser run by user)
+- [x] 6.2 Run the full gates: `npm run build`, `npm run verify:bundles` (must stay green — no bake/format code touched), and the scratch-verify bake checks; record results
 - [ ] 6.3 Update docs: `docs/runtime.md` (renderer batch list, world editor brush, lighting section), `docs/glossary.md` (joint palette, SH probe, mesh placement), `docs/roadmap.md`; write `docs/decisions/0007-dynamic-meshes-in-the-compositor.md` per design D1 and add it to the ADR index
