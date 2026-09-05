@@ -119,11 +119,11 @@ save/export available) with the reason in the editor and status bar.
 ### Place in world
 
 A sprite document with baked passes (including a render pass) can be
-placed into a world document — the **N view's** passes convert to a
+placed into a world document — the **active slot's** passes convert to a
 `SpriteLayer` in memory (row-flip + half-float g-buffer, same helpers as
-the old boot bake; non-N views are editor-side only until a
-placement-orientation change lands, see `docs/roadmap.md`), become a
-placement tool, and one instance is placed. No bundle is
+the old boot bake; place-in-world hands off exactly that one view as a
+north-facing layer, independent of the multi-view brush loading below),
+becomes a placement tool, and one instance is placed. No bundle is
 written; the world document turns dirty. With no world tab open, a new
 world document is created. Saving the world records the sprite's asset id;
 reloading resolves it against `sprites/<id>.sprite` (missing bundles are
@@ -160,6 +160,13 @@ neighbors; it is preview-only (never placed, never marks the document
 dirty) and yields the hover feedback to the eraser's unit-cell
 highlight.
 
+A multi-view sprite brush can face any direction it baked: a direction
+dropdown next to the brush select lists the brush's available view slots
+(N/E/S/W order; enabled only when the brush is a multi-view sprite) and
+pressing `E` cycles through them with wrap. The ghost immediately shows
+the chosen view; already-placed sprites keep their direction. Brush
+direction is per-document in-memory editor state — never saved.
+
 ## Assets
 
 The world editor uploads two WebGL2 `TEXTURE_2D_ARRAY`s: the render pass
@@ -184,19 +191,26 @@ workspace control explains its absence and dialogs/downloads keep working.
 ### Worlds
 
 **Save world** writes `worlds/<name>.json` (name defaults to the first
-free `world-<n>`): the format marker `isoinfinity-world/2`, every placement
-(asset id + continuous ground position + height, always written) and the
+free `world-<n>`): the format marker `isoinfinity-world/3`, every placement
+(asset id + continuous ground position + height, always written; facing
+direction, written only when not north) and the
 full light state — manual azimuth/elevation, intensity, key and ambient
 colors, dynamic-light switch, plus the sun-position values. Saving an
 existing name overwrites it. Loading a world validates the file completely
-first (format marker `isoinfinity-world/2` or the older `/1`, placements
-with optional finite height, light/sun fields) so a corrupt file fails with
+first (format marker `isoinfinity-world/3` or the older `/1`+`/2`,
+placements with optional finite height and optional direction
+(`n`/`e`/`s`/`w`), light/sun fields) so a corrupt file fails with
 a named error and opens nothing; `/1` placements and `/2` placements
-without a height restore at ground level. A valid file then restores the
+without a height restore at ground level, and placements without a
+direction restore facing north. A valid file then restores the
 sun values, recomputes the sun, re-applies the saved manual angles (so
 hand-tweaked directions round-trip), loads every referenced sprite bundle
-from `sprites/`, and places the sprites whose asset ids loaded — placements
-referencing missing bundles are skipped and named in the status line.
+from `sprites/` (each stored view slot with a render pass loads as a
+placeable direction of that asset; views without a render pass are
+skipped with a note, and a placement whose saved direction has no loaded
+view restores facing north), and places the sprites whose asset ids
+loaded — placements referencing missing bundles are skipped and named in
+the status line.
 
 ### Loading sprite bundles
 
@@ -317,10 +331,13 @@ the placement then takes its height from the visible surface under the
 cursor, computed CPU-side from the world document's in-memory g-buffers
 (max composite depth among the covering placements' texels, unprojected
 via the orthonormal frame). Height level and snap are per-document
-in-memory editor state, never saved. Left-click/drag places the selected
+in-memory editor state, never saved. The **`E` key** cycles the brush
+through its available directions (N → E → S → W, wrapping, skipping
+views the sprite does not provide; no-op for single-view brushes and
+while a form control has focus). Left-click/drag places the selected
 tool, right-click erases the nearest placement whose unit-cube footprint
-contains the cursor — resolving to the **topmost** (greatest depth key) —
-tool buttons or eraser selects. Ground picking inverts the shared
+contains the cursor — resolving to the **topmost** (greatest depth key)
+— tool buttons or eraser selects. Ground picking inverts the shared
 projection analytically (`screenToGround`) after inverting the viewport's
 zoom/pan transform, no hit-testing. The 12×12 checkerboard is a visual
 reference only. Viewport navigation: two-finger scroll pans, pinch

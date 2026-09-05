@@ -1,4 +1,4 @@
-import { VIEW_DIR } from '../shared/iso.js';
+import { VIEW_DIR, type ViewSlot } from '../shared/iso.js';
 
 export interface Placement {
   x: number;
@@ -6,6 +6,12 @@ export interface Placement {
   /** Height above the ground plane (world units, >= 0). */
   y: number;
   primId: string;
+  /**
+   * Which baked view slot the placement stands in (the rotated asset's
+   * direction, ADR 0005). Depth/sort stays direction-independent: every
+   * slot is rendered from the same fixed camera.
+   */
+  dir: ViewSlot;
   key: number;
 }
 
@@ -22,8 +28,8 @@ export function depthOf(x: number, y: number, z: number): number {
 export class World {
   private items: Placement[] = [];
 
-  place(x: number, z: number, primId: string, y = 0): void {
-    this.items.push({ x, z, y, primId, key: depthOf(x, y, z) });
+  place(x: number, z: number, primId: string, y = 0, dir: ViewSlot = 'n'): void {
+    this.items.push({ x, z, y, primId, dir, key: depthOf(x, y, z) });
   }
 
   removeAt(x: number, z: number): Placement | null {

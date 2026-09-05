@@ -187,8 +187,12 @@ fixed camera with the model yaw-rotated (see Camera above):
   PT render) sequentially over N→E→S→W; a failed slot ends the batch with
   its named error and earlier slots keep their passes. Changing settings
   mid-batch discards the in-flight pass and stops the loop.
-- Worlds consume only the N view today; placing non-N views (placement
-  orientation) is planned (`docs/roadmap.md`).
+- Worlds consume the N view plus every extra slot that carries a render
+  pass: each placeable view loads as a direction-tagged sprite layer
+  (`<asset>` for N, `<asset>@<slot>` for the rest, one `SpriteLayer` with
+  its own baked size/origin), placements carry a direction, and the world
+  editor's brush direction control (dropdown + `E`) picks the facing
+  (`docs/runtime.md`, World editor).
 
 ### Path-traced pass (`render`)
 

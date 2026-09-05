@@ -194,6 +194,13 @@ export interface WorldDocument {
    */
   surfaceSnap: boolean;
   /**
+   * Which way the current brush faces (its baked view slot). Only
+   * meaningful for multi-view sprite brushes; affects the ghost preview
+   * and the direction of new placements. In-memory editor state only —
+   * never written into world files.
+   */
+  brushDir: ViewSlot;
+  /**
    * Viewport zoom/pan over the fixed projected world image; null = fit
    * (the whole grid letterboxed in the panel). In-memory editor state
    * only — never written into world files.

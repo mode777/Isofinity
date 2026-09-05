@@ -50,11 +50,18 @@ the pointer for the real semantics.
 
 ## World
 
-- **World** — placements + light state, saved as `isoinfinity-world/2`
-  JSON in `worlds/` (`/1` still loads; missing heights = ground level).
+- **World** — placements + light state, saved as `isoinfinity-world/3`
+  JSON in `worlds/` (`/1`+`/2` still load; missing heights = ground
+  level, missing directions = north).
 - **Sprite layer** — a world's loaded sprite asset: padded passes in two
   texture arrays (render RGBA8 + g-buffer RGBA16F) plus per-layer size/
-  origin (`src/runtime/assets.ts`).
+  origin (`src/runtime/assets.ts`). A multi-view asset loads one layer
+  per placeable view slot.
+- **Placement direction** — which baked view slot a placement stands in
+  (`n`/`e`/`s`/`w`, default `n`): the brush's facing at placement time,
+  persisted with the placement (omitted in world files when north).
+  Rendering resolves the placement's layer via `viewLayerId(asset, dir)`;
+  picking and erase stay direction-independent.
 - **Placement** — one instance of a sprite layer at a continuous ground
   position and height; free-form (not grid-snapped), height ≥ 0.
 - **Placement height** — a placement's world-unit offset above the ground

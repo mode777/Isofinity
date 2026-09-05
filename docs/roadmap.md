@@ -47,7 +47,15 @@ list when a change lands (and prune it — history belongs in the archives).
 - Multi-view sprite bakes (`isoinfinity-bake/6`) — N/E/S/W view slots at
   90° yaw steps with the model rotated, not the camera (see
   `docs/decisions/0005`), per-slot viewport + switcher, Bake All and
-  Remove view actions; worlds still consume the N view.
+  Remove view actions.
+- Placement directions (`isoinfinity-world/3`, `/2`+`/1` still load) —
+  multi-view bundles load every placeable view as a direction-tagged
+  sprite layer; a brush-direction dropdown next to the brush select and
+  the `E` key (cycle with wrap) pick the facing for new placements; the
+  ghost previews the chosen view; each placement renders, occludes and
+  lights from its direction's baked g-buffer and persists its direction
+  (omitted when north); erase and picking stay direction-independent.
+  No renderer, shading or bake-format changes.
 - World editor viewport navigation — scroll-pan/pinch-zoom/middle-drag
   over the fixed projected world image (sprite-editor `ViewTransform`
   conventions, per-document in-memory state, picking invariant under the
@@ -75,8 +83,6 @@ list when a change lands (and prune it — history belongs in the archives).
 
 ## Planned
 
-- World placement of non-N views (placement orientation + runtime view
-  selection — the `/6` view table is editor-consumable only today).
 - Real shadow mapping — placement heights made per-pixel world positions
   reconstructable from the composited depth, which a light-space occluder
   pass can consume; until then raised objects anchor visually only via

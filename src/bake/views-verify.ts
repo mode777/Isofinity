@@ -8,7 +8,8 @@
 import { buildBundle, parseBake } from './bundle.js';
 import type { BakeResult } from './bake.js';
 import { strToU8, zipSync } from 'three/examples/jsm/libs/fflate.module.js';
-import { slotAzimuthDeg } from '../shared/iso.js';
+import { slotAzimuthDeg, type ViewSlot } from '../shared/iso.js';
+import { orderedViewSlots, parseViewLayerId, viewLayerId } from '../runtime/assets.js';
 
 declare const process: { exit(code?: number): void };
 
@@ -203,6 +204,65 @@ async function main(): Promise<void> {
       threw = err instanceof Error ? err.message : String(err);
     }
     ok(threw.includes('view slot'), `unknown view slot rejected (got "${threw}")`);
+  }
+
+  // 5. Placement-direction support: which views a bundle exposes as
+  // placeable (loadBundleViews decodes the same set — the PNG decode
+  // itself needs a browser and is covered by the scratch-verify), plus
+  // the direction-tagged layer-id convention.
+  {
+    console.log('test: per-view placeability + direction-tagged layer ids');
+    const makeZip = (manifest: Record<string, unknown>, extra: Record<string, Uint8Array> = {}): Uint8Array =>
+      zipSync({
+        'manifest.json': strToU8(JSON.stringify(manifest)),
+        'x-gbuffer.exr': new Uint8Array(4),
+        ...extra,
+      });
+    const viewPasses = (render: boolean, tag = ''): Record<string, unknown> => ({
+      gbuffer: { file: `x${tag}-gbuffer.exr`, encoding: 'exr-f32-linear', channels: 'rgb=world-normal a=ray-depth' },
+      ...(render
+        ? { render: { file: `x${tag}-render.png`, encoding: 'png-r8-srgb', channels: 'rgb=tonemapped-render a=coverage' } }
+        : {}),
+    });
+    const slotEntry = (slot: ViewSlot, render: boolean): Record<string, unknown> => ({
+      slot,
+      azimuthDeg: slotAzimuthDeg(slot),
+      sprite: { width: 2, height: 2, originPx: [0, 0] },
+      passes: viewPasses(render, slot === 'n' ? '' : `-${slot}`),
+    });
+    // n/e/w with render passes, s stored without one (not placeable).
+    const manifest: Record<string, unknown> = {
+      format: 'isoinfinity-bake/6',
+      id: 'x',
+      pxPerUnit: 128,
+      sprite: { width: 2, height: 2, originPx: [0, 0] },
+      passes: viewPasses(true),
+      views: [slotEntry('n', true), slotEntry('e', true), slotEntry('s', false), slotEntry('w', true)],
+    };
+    const entries: Record<string, Uint8Array> = {};
+    for (const slot of ['e', 's', 'w'] as const) {
+      entries[`x-${slot}-gbuffer.exr`] = new Uint8Array(4);
+    }
+    entries['x-render.png'] = new Uint8Array(4);
+    entries['x-e-render.png'] = new Uint8Array(4);
+    entries['x-w-render.png'] = new Uint8Array(4);
+    const parsed = parseBake(makeZip(manifest, entries).buffer as ArrayBuffer);
+    const placeable = ['n', ...parsed.views.filter((v) => v.render !== null).map((v) => v.slot)];
+    const skipped = parsed.views.filter((v) => v.render === null).map((v) => v.slot);
+    ok(JSON.stringify(placeable) === JSON.stringify(['n', 'e', 'w']),
+      `placeable views are n/e/w (got ${JSON.stringify(placeable)})`);
+    ok(JSON.stringify(skipped) === JSON.stringify(['s']),
+      `s skipped for lacking a render pass (got ${JSON.stringify(skipped)})`);
+    ok(JSON.stringify(orderedViewSlots(skipped)) === JSON.stringify(['s']),
+      'orderedViewSlots sorts into N/E/S/W order');
+
+    ok(viewLayerId('tree', 'n') === 'tree' && viewLayerId('tree', 'e') === 'tree@e',
+      'viewLayerId keeps north plain and tags extra slots');
+    ok(parseViewLayerId('tree').slot === 'n' && parseViewLayerId('tree@w').asset === 'tree' &&
+        parseViewLayerId('tree@w').slot === 'w',
+      'parseViewLayerId round-trips tagged ids');
+    ok(parseViewLayerId('tree@mail').slot === 'n' && parseViewLayerId('tree@mail').asset === 'tree@mail',
+      'non-slot @ suffixes stay part of the asset id');
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

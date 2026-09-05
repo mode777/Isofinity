@@ -5,8 +5,9 @@ import {
   VIEW_DIR,
   groundToScreen,
   screenToGround,
+  type ViewSlot,
 } from '../../shared/iso.js';
-import { RUNTIME_PPU, layersToSet } from '../../runtime/assets.js';
+import { RUNTIME_PPU, layersToSet, viewLayerId } from '../../runtime/assets.js';
 import { Renderer, type FlatBatch } from '../../runtime/renderer.js';
 import { depthOf } from '../../runtime/world.js';
 import { PRIMITIVE_KINDS } from '../document.js';
@@ -14,10 +15,13 @@ import type { ViewTransform, WorldDocument } from '../document.js';
 import { fitTransform, panned, ZOOM_STEP, zoomAround } from '../bakeView.js';
 import { lightParams } from '../light.js';
 import {
+  brushDirections,
+  cycleBrushDir,
   eraseAt,
   placeAt,
   saveWorld,
   selectBrush,
+  setBrushDir,
   setHeightLevel,
   setSurfaceSnap,
   setTool,
@@ -320,7 +324,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       const v = -(wy - ORIGIN_Y) / PPU;
       let best = -Infinity;
       for (const p of live.world.list()) {
-        const li = live.layers.findIndex((l) => l.id === p.primId);
+        // The visible surface comes from what is rendered: the
+        // placement's own direction view.
+        const li = live.layers.findIndex(
+          (l) => l.id === viewLayerId(p.primId, p.dir),
+        );
         if (li < 0) continue;
         const layer = live.layers[li];
         const scale = PPU / spriteSet.ppus[li];
@@ -369,11 +377,19 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       // The ghost preview: when a brush with a loaded layer is active and
       // the cursor is over the canvas, preview the placement (cursor-
       // centered at the effective height, exactly what placeAt will do)
-      // as a depth-tested sprite.
-      const brushIndex =
-        live.tool && live.tool !== 'eraser'
-          ? live.layers.findIndex((l) => l.id === live.tool)
-          : -1;
+      // as a depth-tested sprite, in the brush's chosen direction (the
+      // plain north id is the fallback when that view is not loaded —
+      // same rule placeAt follows).
+      const brushId =
+        live.tool && live.tool !== 'eraser' ? live.tool : '';
+      let brushIndex = brushId
+        ? live.layers.findIndex(
+            (l) => l.id === viewLayerId(brushId, live.brushDir),
+          )
+        : -1;
+      if (brushIndex < 0 && brushId) {
+        brushIndex = live.layers.findIndex((l) => l.id === brushId);
+      }
       const ghost =
         hover && brushIndex >= 0
           ? (() => {
@@ -413,7 +429,9 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           emit(ghost.layer, ghost.x, ghost.y, ghost.z);
           ghostDone = true;
         }
-        const layerIndex = live.layers.findIndex((l) => l.id === p.primId);
+        const layerIndex = live.layers.findIndex(
+          (l) => l.id === viewLayerId(p.primId, p.dir),
+        );
         if (layerIndex < 0) continue;
         emit(layerIndex, p.x, p.y, p.z);
       }
@@ -676,6 +694,29 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     // which re-uploads the sprite texture arrays.
   }, [doc.docId, spriteSet]);
 
+  // The `E` key cycles the brush through its available directions
+  // (wrapping; the store action no-ops for single-view brushes). Form
+  // controls keep the key for typing.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== 'e' && e.key !== 'E') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        el?.isContentEditable
+      ) {
+        return;
+      }
+      cycleBrushDir(doc.docId);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [doc.docId]);
+
   const connected = useWorkspace((s) => s.state.kind) === 'connected';
   const sprites = useProject((s) => s.sprites);
   const worlds = useProject((s) => s.worlds);
@@ -705,6 +746,18 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     return [...primitives, ...spriteEntries];
   }, [connected, sprites]);
   const selectedEntry = brushEntries.find((e) => e.label === activeTool);
+
+  // The active brush's placeable directions; more than one means a
+  // multi-view sprite brush — the only case the direction control and
+  // the E key act on.
+  const brushDirs = useMemo(
+    () =>
+      activeTool && activeTool !== 'eraser' ? brushDirections(doc, activeTool) : [],
+    [doc, activeTool],
+  );
+  const dirValue = brushDirs.includes(doc.brushDir) ? doc.brushDir : brushDirs[0] ?? 'n';
+  const multiView = brushDirs.length > 1;
+  const dirLabel = multiView ? ` (${dirValue.toUpperCase()})` : '';
 
   const onSaveWorld = (): void => {
     const suggested = doc.ref
@@ -784,6 +837,19 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
             </optgroup>
           ) : null}
         </select>
+        <select
+          aria-label="Brush direction"
+          title="Brush direction — which way the brush faces (its baked view slot); E cycles through the available directions"
+          value={dirValue}
+          disabled={!multiView}
+          onChange={(e) => setBrushDir(doc.docId, e.target.value as ViewSlot)}
+        >
+          {brushDirs.map((slot) => (
+            <option key={slot} value={slot}>
+              {slot.toUpperCase()}
+            </option>
+          ))}
+        </select>
         <button
           className={activeTool === 'eraser' ? 'active' : ''}
           title="Eraser — left-click/drag removes placements"
@@ -803,7 +869,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           <HeightInput value={doc.heightLevel} onCommit={(v) => setHeightLevel(doc.docId, v)} />
         </label>
         <span className="hint">
-          {activeTool === 'eraser' ? 'eraser' : activeTool === '' ? 'no brush' : activeTool}
+          {activeTool === 'eraser'
+            ? 'eraser'
+            : activeTool === ''
+              ? 'no brush'
+              : `${activeTool}${dirLabel}`}
         </span>
       </EditorToolbar>
       <div className="world-viewport" ref={viewportRef}>
@@ -832,8 +902,8 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           ? 'tool: eraser — left-click/drag erases'
           : activeTool === ''
             ? 'pick a brush above — left-click/drag places it, right-click erases'
-            : `tool: ${activeTool} — left-click/drag places, right-click erases`}
-        {' — shift+move sets the placement height, scroll pans, pinch zooms, middle-drag pans'}
+            : `tool: ${activeTool}${dirLabel} — left-click/drag places, right-click erases`}
+        {' — E cycles the brush direction, shift+move sets the placement height, scroll pans, pinch zooms, middle-drag pans'}
       </p>
     </div>
   );

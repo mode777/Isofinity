@@ -11,8 +11,44 @@ import {
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import type { PtEnvironment } from '../bake/pt.js';
 import { parseBake, type BakeManifest, type BakeProvenance } from '../bake/bundle.js';
+import {
+  EXTRA_VIEW_SLOTS,
+  VIEW_SLOTS,
+  type ExtraViewSlot,
+  type ViewSlot,
+} from '../shared/iso.js';
 
 export const RUNTIME_PPU = 64;
+
+/**
+ * Direction-tagged layer ids: an asset's north layer keeps the plain
+ * asset id; an extra view slot appends `@<slot>` (`tree`, `tree@e`).
+ * Placements store the base asset id plus a direction and resolve their
+ * layer through `viewLayerId`. A literal asset id ending in `@<slot>`
+ * could shadow an extra view of another asset — accepted (asset ids are
+ * sanitized sprite file names); see the placement-directions design.
+ */
+export function viewLayerId(asset: string, slot: ViewSlot): string {
+  return slot === 'n' ? asset : `${asset}@${slot}`;
+}
+
+/** Split a direction-tagged layer id back into asset id and slot. */
+export function parseViewLayerId(id: string): { asset: string; slot: ViewSlot } {
+  const at = id.lastIndexOf('@');
+  if (at >= 0) {
+    const slot = id.slice(at + 1);
+    if ((EXTRA_VIEW_SLOTS as readonly string[]).includes(slot)) {
+      return { asset: id.slice(0, at), slot: slot as ExtraViewSlot };
+    }
+  }
+  return { asset: id, slot: 'n' };
+}
+
+/** Order direction slots in the canonical N → E → S → W view-slot order. */
+export function orderedViewSlots(slots: Iterable<ViewSlot>): ViewSlot[] {
+  const set = new Set(slots);
+  return VIEW_SLOTS.filter((s) => set.has(s));
+}
 
 /**
  * One sprite in upload orientation: rows top-down, row 0 = sprite top.
@@ -121,23 +157,31 @@ export function layersToSet(layers: SpriteLayer[]): SpriteSet {
 }
 
 /**
- * Parse a bundle into a placeable layer plus its manifest and provenance
- * record (null for bundles saved without one, e.g. `/4`).
+ * A bundle parsed into every placeable view: the north layer (render
+ * required, as always) plus each extra view slot that carries its own
+ * render pass, each with its own baked size and origin. Extra views
+ * without a render pass are not placeable — they come back in `skipped`
+ * so the caller can note them; the bundle still loads.
  */
-export async function loadBundleLayer(
-  buffer: ArrayBuffer,
-): Promise<{
-  layer: SpriteLayer;
+export interface BundleViews {
+  /** North view; id is the bundle's manifest id. */
+  north: SpriteLayer;
+  /** Placeable extra views in manifest order. */
+  extras: { slot: ExtraViewSlot; layer: SpriteLayer }[];
+  /** Extra stored views skipped for lacking a render pass. */
+  skipped: ExtraViewSlot[];
   manifest: BakeManifest;
   provenance: BakeProvenance | null;
-}> {
-  const { manifest, gbuffer, render, provenance } = parseBake(buffer);
+}
+
+export async function loadBundleViews(buffer: ArrayBuffer): Promise<BundleViews> {
+  const { manifest, gbuffer, render, views, provenance } = parseBake(buffer);
   if (!render) {
     throw new Error('bundle has no render pass — re-bake with an environment');
   }
   const w = manifest.sprite.width;
   const h = manifest.sprite.height;
-  const layer: SpriteLayer = {
+  const north: SpriteLayer = {
     id: manifest.id,
     pxPerUnit: manifest.pxPerUnit,
     width: w,
@@ -146,7 +190,46 @@ export async function loadBundleLayer(
     gbuffer: decodeExrGbuffer(await gbuffer.arrayBuffer(), w, h),
     render: await decodePng(render, w, h),
   };
-  return { layer, manifest, provenance };
+  const extras: BundleViews['extras'] = [];
+  const skipped: ExtraViewSlot[] = [];
+  for (const view of views) {
+    if (!view.render) {
+      skipped.push(view.slot);
+      continue;
+    }
+    extras.push({
+      slot: view.slot,
+      layer: {
+        id: viewLayerId(manifest.id, view.slot),
+        pxPerUnit: manifest.pxPerUnit,
+        width: view.width,
+        height: view.height,
+        originPx: view.originPx,
+        gbuffer: decodeExrGbuffer(
+          await view.gbuffer.arrayBuffer(),
+          view.width,
+          view.height,
+        ),
+        render: await decodePng(view.render, view.width, view.height),
+      },
+    });
+  }
+  return { north, extras, skipped, manifest, provenance };
+}
+
+/**
+ * Parse a bundle into its north-view placeable layer plus its manifest
+ * and provenance record (null for bundles saved without one, e.g. `/4`).
+ */
+export async function loadBundleLayer(
+  buffer: ArrayBuffer,
+): Promise<{
+  layer: SpriteLayer;
+  manifest: BakeManifest;
+  provenance: BakeProvenance | null;
+}> {
+  const { north, manifest, provenance } = await loadBundleViews(buffer);
+  return { layer: north, manifest, provenance };
 }
 
 export async function decodePng(blob: Blob, w: number, h: number): Promise<Uint8Array> {

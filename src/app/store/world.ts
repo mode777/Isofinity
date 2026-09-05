@@ -1,10 +1,17 @@
 import { sunDirection } from '../../shared/sun.js';
+import { type ExtraViewSlot, type ViewSlot } from '../../shared/iso.js';
 import {
   BUNDLE_EXT,
   readWorkspaceFile,
   writeWorkspaceFile,
 } from '../../shared/workspace.js';
-import { loadBundleLayer, type SpriteLayer } from '../../runtime/assets.js';
+import {
+  loadBundleViews,
+  orderedViewSlots,
+  parseViewLayerId,
+  viewLayerId,
+  type SpriteLayer,
+} from '../../runtime/assets.js';
 import { World } from '../../runtime/world.js';
 import type {
   BakeDocument,
@@ -20,9 +27,9 @@ import { nextDocId, useEditor, type EditorState } from './editor.js';
 import { bakePrimitiveLayer, anyBakeBusy, resultToLayer } from './bake.js';
 import { SPRITE_EXTS, useProject } from './project.js';
 
-const WORLD_FORMAT = 'isoinfinity-world/2';
-/** Older formats the parser still accepts; heights default to ground. */
-const LEGACY_WORLD_FORMATS = ['isoinfinity-world/1'];
+const WORLD_FORMAT = 'isoinfinity-world/3';
+/** Older formats the parser still accepts; heights/directions default. */
+const LEGACY_WORLD_FORMATS = ['isoinfinity-world/1', 'isoinfinity-world/2'];
 
 const ed = (): EditorState => useEditor.getState();
 const worldDoc = (docId: string): WorldDocument | null => {
@@ -48,6 +55,7 @@ export function newWorldDoc(): string {
     tool: '',
     heightLevel: 0,
     surfaceSnap: false,
+    brushDir: 'n',
     viewTransform: null,
   };
   ed().addDoc(doc);
@@ -59,10 +67,12 @@ interface WorldFile {
   format: string;
   name?: string;
   savedAt?: string;
-  sprites: { asset: string; x: number; z: number; y: number }[];
+  sprites: { asset: string; x: number; z: number; y: number; dir?: ViewSlot }[];
   light: LightState;
   sun: SunState;
 }
+
+const VIEW_SLOT_SET: ReadonlySet<string> = new Set(['n', 'e', 's', 'w']);
 
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
@@ -92,7 +102,16 @@ function parseWorldFile(text: string, fileName: string): WorldFile {
     if (s.y !== undefined && !isFiniteNumber(s.y)) {
       throw fail('malformed sprite placement — height must be a finite number');
     }
-    sprites.push({ asset: s.asset, x: s.x, z: s.z, y: s.y === undefined ? 0 : s.y });
+    if (s.dir !== undefined && (typeof s.dir !== 'string' || !VIEW_SLOT_SET.has(s.dir))) {
+      throw fail('malformed sprite placement — direction must be a view slot (n/e/s/w)');
+    }
+    sprites.push({
+      asset: s.asset,
+      x: s.x,
+      z: s.z,
+      y: s.y === undefined ? 0 : s.y,
+      dir: (s.dir as ViewSlot | undefined) ?? 'n',
+    });
   }
   const l = obj.light as Record<string, unknown> | undefined;
   if (
@@ -185,11 +204,14 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       tool: '',
       heightLevel: 0,
       surfaceSnap: false,
+      brushDir: 'n',
       viewTransform: null,
     };
 
     const skipped: { asset: string; reason: string }[] = [];
-    const loaded = new Map<string, SpriteLayer>();
+    /** Bundles that loaded but had view slots without a render pass. */
+    const viewSkipped: { asset: string; slots: ExtraViewSlot[] }[] = [];
+    const loaded = new Map<string, SpriteLayer[]>();
     const markSkipped = (asset: string, err: unknown): void => {
       const reason = err instanceof Error ? err.message : String(err);
       console.error(`world load: sprite "${asset}" failed to load:`, err);
@@ -203,7 +225,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
           try {
             loaded.set(
               entry.asset,
-              await bakePrimitiveLayer(entry.asset as PrimitiveKind),
+              [await bakePrimitiveLayer(entry.asset as PrimitiveKind)],
             );
           } catch (bakeErr) {
             markSkipped(entry.asset, bakeErr);
@@ -218,17 +240,31 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       }
       try {
         const bundleFile = await readWorkspaceFile('sprites', bundleName);
-        const { layer } = await loadBundleLayer(await bundleFile.arrayBuffer());
-        // Pin the layer id to the placement's asset id: a bundle's
+        const views = await loadBundleViews(await bundleFile.arrayBuffer());
+        // Pin the layer ids to the placement's asset id: a bundle's
         // manifest id can differ from the file name it was saved as.
-        loaded.set(entry.asset, { ...layer, id: entry.asset });
+        loaded.set(entry.asset, [
+          { ...views.north, id: entry.asset },
+          ...views.extras.map(({ slot, layer }) => ({
+            ...layer,
+            id: viewLayerId(entry.asset, slot),
+          })),
+        ]);
+        if (views.skipped.length > 0) {
+          viewSkipped.push({ asset: entry.asset, slots: views.skipped });
+        }
       } catch (err) {
         markSkipped(entry.asset, err);
       }
     }
-    doc.layers = [...loaded.values()];
+    doc.layers = loaded.size > 0 ? [...loaded.values()].flat() : [];
     for (const s of data.sprites) {
-      if (loaded.has(s.asset)) doc.world.place(s.x, s.z, s.asset, s.y);
+      if (!loaded.has(s.asset)) continue;
+      // A placement whose saved direction has no loaded view (render
+      // pass missing) still restores, facing north.
+      const savedDir = s.dir ?? 'n';
+      const dirs = brushDirections(doc, s.asset);
+      doc.world.place(s.x, s.z, s.asset, s.y, dirs.includes(savedDir) ? savedDir : 'n');
     }
     doc.tool = doc.layers[0]?.id ?? '';
 
@@ -240,6 +276,11 @@ export async function openWorldDoc(fileName: string): Promise<void> {
           ? `, skipped: ${skipped
               .map((s) => `${s.asset} (${s.reason})`)
               .join('; ')} — save each sprite into sprites/ (with a render pass) and re-save the world`
+          : '') +
+        (viewSkipped.length > 0
+          ? `${skipped.length > 0 ? ';' : ' —'} no render pass, direction(s) unavailable: ${viewSkipped
+              .map((v) => `${v.asset} (${v.slots.join('/').toUpperCase()})`)
+              .join('; ')}`
           : ''),
     );
   } catch (err) {
@@ -302,7 +343,14 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
       format: WORLD_FORMAT,
       name,
       savedAt: new Date().toISOString(),
-      sprites: placements.map((p) => ({ asset: p.primId, x: p.x, z: p.z, y: p.y })),
+      sprites: placements.map((p) => ({
+        asset: p.primId,
+        x: p.x,
+        z: p.z,
+        y: p.y,
+        // North is the default; a north-facing placement may omit dir.
+        ...(p.dir !== 'n' ? { dir: p.dir } : {}),
+      })),
       light: doc.light,
       sun: doc.sun,
     };
@@ -368,11 +416,15 @@ export function placeAt(docId: string, gx: number, gz: number, y = 0): void {
     if (doc.world.removeAt(gx, gz)) ed().markDirty(docId);
     return;
   }
-  if (!doc.layers.some((l) => l.id === doc.tool)) {
+  // The brush faces the chosen direction; if that view's layer is gone
+  // (e.g. it had no render pass), fall back to north.
+  let dir = doc.brushDir;
+  if (!doc.layers.some((l) => l.id === viewLayerId(doc.tool, dir))) dir = 'n';
+  if (!doc.layers.some((l) => l.id === viewLayerId(doc.tool, dir))) {
     ed().setStatus(`brush "${doc.tool}" is not loaded — pick a brush from the toolbar`);
     return;
   }
-  doc.world.place(gx - 0.5, gz - 0.5, doc.tool, y);
+  doc.world.place(gx - 0.5, gz - 0.5, doc.tool, y, dir);
   ed().markDirty(docId);
 }
 
@@ -397,6 +449,45 @@ export function setSurfaceSnap(docId: string, on: boolean): void {
   if (!doc) return;
   update(docId, (d) => {
     d.surfaceSnap = on;
+  });
+}
+
+/**
+ * The directions the given brush asset can face: the view slots with a
+ * loaded layer, in canonical N/E/S/W order.
+ */
+export function brushDirections(doc: WorldDocument, asset: string): ViewSlot[] {
+  return orderedViewSlots(
+    doc.layers
+      .map((l) => parseViewLayerId(l.id))
+      .filter((p) => p.asset === asset)
+      .map((p) => p.slot),
+  );
+}
+
+/**
+ * Set the brush's facing direction (per-document editor state, not
+ * saved). Ignored for directions the brush does not provide.
+ */
+export function setBrushDir(docId: string, dir: ViewSlot): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  if (!brushDirections(doc, doc.tool).includes(dir)) return;
+  if (dir === doc.brushDir) return;
+  update(docId, (d) => {
+    d.brushDir = dir;
+  });
+}
+
+/** Cycle the brush to its next available direction (the `E` key), wrapping. */
+export function cycleBrushDir(docId: string): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  const dirs = brushDirections(doc, doc.tool);
+  if (dirs.length < 2) return;
+  const next = dirs[(dirs.indexOf(doc.brushDir) + 1) % dirs.length];
+  update(docId, (d) => {
+    d.brushDir = next;
   });
 }
 
@@ -470,22 +561,34 @@ export async function selectBrush(docId: string, brush: Brush): Promise<void> {
   }
   brushBusy.add(docId);
   try {
-    let layer: SpriteLayer;
+    let layers: SpriteLayer[];
+    let skippedNote = '';
     if (brush.kind === 'sprite') {
       const fileName = brush.fileName ?? `${brush.id}${BUNDLE_EXT}`;
       ed().setStatus(`Loading brush sprite ${fileName}…`);
       const file = await readWorkspaceFile('sprites', fileName);
-      const parsed = await loadBundleLayer(await file.arrayBuffer());
-      layer = { ...parsed.layer, id: brush.id };
+      const views = await loadBundleViews(await file.arrayBuffer());
+      // Pin the layer ids to the brush's asset id: a bundle's manifest
+      // id can differ from the file name it was saved as.
+      layers = [
+        { ...views.north, id: brush.id },
+        ...views.extras.map(({ slot, layer }) => ({
+          ...layer,
+          id: viewLayerId(brush.id, slot),
+        })),
+      ];
+      if (views.skipped.length > 0) {
+        skippedNote = ` — ${views.skipped.join('/').toUpperCase()} view skipped (no render pass)`;
+      }
     } else {
-      layer = await bakePrimitiveLayer(brush.id);
+      layers = [await bakePrimitiveLayer(brush.id)];
     }
     update(docId, (d) => {
-      d.layers = [...d.layers, layer];
+      d.layers = [...d.layers, ...layers];
       d.tool = brush.id;
     });
     ed().markDirty(docId);
-    ed().setStatus(brushStatus(brush.id));
+    ed().setStatus(brushStatus(brush.id) + skippedNote);
   } catch (err) {
     ed().setStatus(
       `Brush "${brush.id}" failed to load: ${err instanceof Error ? err.message : String(err)}`,
