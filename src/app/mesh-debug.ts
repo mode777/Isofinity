@@ -16,8 +16,10 @@ import { meshYawMat, Renderer } from '../runtime/renderer.js';
 import { RUNTIME_PPU } from '../runtime/assets.js';
 
 const PPU = RUNTIME_PPU;
-const ORIGIN_X = 260;
-const ORIGIN_Y = 380;
+// The stages draw their subject at the world origin, which projects to
+// exactly (ORIGIN_X, ORIGIN_Y) — the canvas center for 260x400.
+const ORIGIN_X = 130;
+const ORIGIN_Y = 250;
 
 const out = document.getElementById('out')!;
 function log(msg: string, cls?: 'pass' | 'fail'): void {
@@ -51,7 +53,7 @@ async function main(): Promise<void> {
         renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
             palette: bindPosePalette(1),
-            origin: [1.2 + off[0], 0, 1.2 + off[1] * 0 + off[2]],
+            origin: [off[0], off[1], off[2]],
             yawMat: meshYawMat(0.5),
           },
         ]);
@@ -67,7 +69,7 @@ async function main(): Promise<void> {
         renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
             palette: bindPosePalette(asset.geometry.jointCount),
-            origin: [1.2 + off[0], 0 + off[1], 1.2 + off[2]],
+            origin: [off[0], off[1], off[2]],
             yawMat: meshYawMat(0),
           },
         ]);
@@ -82,7 +84,7 @@ async function main(): Promise<void> {
         renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
             palette: frozen,
-            origin: [1.2 + off[0], 0 + off[1], 1.2 + off[2]],
+            origin: [off[0], off[1], off[2]],
             yawMat: meshYawMat(0),
           },
         ]);
@@ -98,7 +100,7 @@ async function main(): Promise<void> {
         renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
             palette: player.palette,
-            origin: [1.2 + off[0], 0 + off[1], 1.2 + off[2]],
+            origin: [off[0], off[1], off[2]],
             yawMat: meshYawMat(0),
           },
         ]);
@@ -114,7 +116,7 @@ async function main(): Promise<void> {
         renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
             palette: player.palette,
-            origin: [1.2 + off[0], 0 + off[1], 1.2 + off[2]],
+            origin: [off[0], off[1], off[2]],
             yawMat: meshYawMat(0),
           },
         ]);
