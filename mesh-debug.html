@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Isofinity — dynamic-mesh debug (scratch)</title>
+    <style>
+      body { font-family: system-ui, sans-serif; background: #14161a; color: #ddd; max-width: 60rem; margin: 2rem auto; padding: 0 1rem; }
+      .row { display: flex; align-items: center; gap: 1rem; margin: 0.75rem 0; }
+      canvas { background: #1c1f24; border: 1px solid #333; }
+      .pass { color: #7dc47f; }
+      .fail { color: #e07a7a; }
+      pre { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Dynamic-mesh pipeline debug</h1>
+    <p>Escalating stages of the mesh path. Each row isolates one layer;
+    the first broken row localizes the fault:</p>
+    <ol>
+      <li><b>unskinned cube</b> — attributes + projection + palette-uniform mechanics with known data</li>
+      <li><b>bind pose</b> — real CesiumMan geometry + indices, identity palette, no texture</li>
+      <li><b>frozen pose</b> — real palette data (t = 0), no animation</li>
+      <li><b>animated</b> — per-frame palette upload</li>
+      <li><b>textured</b> — the full editor path (texture + SH ambient + ACES)</li>
+    </ol>
+    <div id="rows"></div>
+    <pre id="out"></pre>
+    <script type="module" src="/src/app/mesh-debug.ts"></script>
+  </body>
+</html>

@@ -129,6 +129,57 @@ export function bindPosePalette(jointCount: number): Float32Array {
 }
 
 /**
+ * A minimal unskinned asset (one joint, identity palette): a box standing
+ * on the ground plane, feet at y = 0, centered over x/z. Diagnostic brush
+ * for isolating skinning from attribute/projection/shading layers.
+ */
+export function makeCubeMesh(size = 0.5): CharacterAsset {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  const faces: [number[], number[]][] = [
+    [[1, 0, 0], [0, 1, 0]],
+    [[-1, 0, 0], [0, 1, 0]],
+    [[0, 1, 0], [1, 0, 0]],
+    [[0, -1, 0], [1, 0, 0]],
+    [[0, 0, 1], [1, 0, 0]],
+    [[0, 0, -1], [1, 0, 0]],
+  ];
+  for (const [n, t] of faces) {
+    const b = [n[1] * t[2] - n[2] * t[1], n[2] * t[0] - n[0] * t[2], n[0] * t[1] - n[1] * t[0]];
+    const half = size / 2;
+    const center = [n[0] * half, size / 2 + n[1] * half, n[2] * half];
+    const base = positions.length / 3;
+    for (const [su, sv] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      positions.push(
+        center[0] + (t[0] * su + b[0] * sv) * half,
+        center[1] + (t[1] * su + b[1] * sv) * half,
+        center[2] + (t[2] * su + b[2] * sv) * half,
+      );
+      normals.push(n[0], n[1], n[2]);
+    }
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  const vertexCount = positions.length / 3;
+  return {
+    geometry: {
+      positions: new Float32Array(positions),
+      normals: new Float32Array(normals),
+      joints: new Float32Array(vertexCount * 4),
+      weights: new Float32Array(vertexCount * 4).map((_, i) => (i % 4 === 0 ? 1 : 0)),
+      indices: new Uint32Array(indices),
+      vertexCount,
+      jointCount: 1,
+    },
+    surface: { image: null, factor: [1, 1, 1] },
+    source: new Object3D(),
+    clips: [],
+    height: size,
+    worldOffset: [0, 0, 0],
+  };
+}
+
+/**
  * Parse skinned glTF bytes into a `CharacterAsset`. Takes the first
  * `SkinnedMesh` (the character brush ships exactly one), pre-applies its
  * bind transform to the vertex data, re-anchors feet at y=0 over the
