@@ -25,4 +25,4 @@
 ## 5. Verification
 
 - [x] 5.1 Run `npm run build` and `npm run verify:bundles`; fix findings.
-- [ ] 5.2 Browser pass via `npm run dev`: pick a 4-view sprite — dropdown lists N/E/S/W, `E` cycles with wrap, ghost shows the selected view, placements render/occlude per direction, right-click erase still removes the topmost; save/reload the world (directions persist); reload an old `/2` world (all north); pick a `/5` sprite and a primitive (dropdown disabled, `E` no-op); type `E` in the height field (letter enters, direction unchanged). Update `/scratch-verify.html` only if bake behavior changed (it should not).
+- [x] 5.2 Browser pass via `npm run dev`: pick a 4-view sprite — dropdown lists N/E/S/W, `E` cycles with wrap, ghost shows the selected view, placements render/occlude per direction, right-click erase still removes the topmost; save/reload the world (directions persist); reload an old `/2` world (all north); pick a `/5` sprite and a primitive (dropdown disabled, `E` no-op); type `E` in the height field (letter enters, direction unchanged). Update `/scratch-verify.html` only if bake behavior changed (it should not).
