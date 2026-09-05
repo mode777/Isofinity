@@ -24,4 +24,4 @@
 
 - [x] 5.1 Update `docs/bake-pipeline.md` render-pass notes: incremental tile-grid accumulation, the derived `tiles` provenance field, and the live preview behavior; verify the doc matches the implemented manifest shape
 - [x] 5.2 Run `npm run build` (tsc + vite) and fix any type or build errors; confirm no dependency changes were needed
-- [ ] 5.3 Browser acceptance pass (user-run, dev server): render a small primitive (grid 1 — expect byte-identical output to pre-change), render a large model at high samples while interacting with the UI (page stays responsive), confirm re-bake from provenance reproduces the saved pass, and confirm no WebGL context-loss warnings in the console
+- [x] 5.3 Browser acceptance pass (user-run, dev server): render a small primitive (grid 1 — expect byte-identical output to pre-change), render a large model at high samples while interacting with the UI (page stays responsive), confirm re-bake from provenance reproduces the saved pass, and confirm no WebGL context-loss warnings in the console
