@@ -116,11 +116,12 @@ export async function updateShProbe(docId: string): Promise<void> {
   if (!doc) return;
   const gen = (probeGeneration.get(docId) ?? 0) + 1;
   probeGeneration.set(docId, gen);
-  // A user-selected world HDRI overrides the provenance-derived one.
+  // A user-selected world HDRI overrides the provenance-derived one, but
+  // keeps the world's display parameters (rotation/intensity were tuned
+  // for the sprites' bake; resetting them blows out bright outdoor
+  // HDRIs). Defaults only when nothing was captured yet.
   const env = doc.userEnv ?? doc.env;
-  const params = doc.userEnv
-    ? DEFAULT_ENV_PARAMS
-    : (doc.envParams ?? DEFAULT_ENV_PARAMS);
+  const params = doc.envParams ?? DEFAULT_ENV_PARAMS;
   try {
     let equirect;
     if (env?.kind === 'hdri') {
