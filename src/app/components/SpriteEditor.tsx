@@ -165,7 +165,11 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
     const ctx = canvas.getContext('2d')!;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.imageSmoothingEnabled = transform.zoom < 1;
-    ctx.clearRect(0, 0, panel.w, panel.h);
+    // Mid-grey backdrop instead of the page background: the passes have
+    // transparent surroundings (the grounding shadow is mid-alpha black),
+    // which is invisible against a dark panel.
+    ctx.fillStyle = '#6f6f6f';
+    ctx.fillRect(0, 0, panel.w, panel.h);
     ctx.drawImage(
       image,
       transform.panX,
