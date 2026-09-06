@@ -5,10 +5,22 @@
  *   npx esbuild src/bake/views-verify.ts --bundle --platform=node \
  *     --format=esm --outfile=/tmp/views-verify.mjs && node /tmp/views-verify.mjs
  */
-import { buildBundle, parseBake } from './bundle.js';
+import { buildBundle, parseBake, type BakeProvenance } from './bundle.js';
+import { applySlotModelRotation, PAD_PX } from './bake.js';
 import type { BakeResult } from './bake.js';
+import { buildManifest } from './export.js';
 import { strToU8, zipSync } from 'three/examples/jsm/libs/fflate.module.js';
-import { slotAzimuthDeg, type ViewSlot } from '../shared/iso.js';
+import { Object3D } from 'three';
+import { projectBoxFrame, ISO_AZIMUTH_DEG } from './iso.js';
+import {
+  slotAnchorPoint,
+  slotAzimuthDeg,
+  slotYawDeg,
+  VIEW_SLOTS,
+  yawRotatedBoxSize,
+  type Vec3,
+  type ViewSlot,
+} from '../shared/iso.js';
 import { orderedViewSlots, parseViewLayerId, viewLayerId } from '../runtime/assets.js';
 
 declare const process: { exit(code?: number): void };
@@ -88,6 +100,128 @@ async function main(): Promise<void> {
       'parsed e view keeps its sprite rect');
     ok(parsed.render === null && parsed.views[0].render === null,
       'no render passes in a raster-only bundle');
+  }
+
+  // 1b. The authored-anchor slot mapping mirrors the slot model rotation:
+  // every point of the unrotated asset must land where the rotated model
+  // puts it, so per-slot origins anchor the same spot of the asset.
+  {
+    console.log('test: slotAnchorPoint mirrors the slot model rotation');
+    const size: Vec3 = [2, 1, 0.5];
+    const points: Vec3[] = [];
+    for (let i = 0; i < 8; i++) {
+      points.push([
+        (i & 1) * size[0],
+        ((i >> 1) & 1) * size[1],
+        ((i >> 2) & 1) * size[2],
+      ]);
+    }
+    points.push([0.3 * size[0], 0.4 * size[1], 0.9 * size[2]]);
+    let mismatches = 0;
+    for (const slot of VIEW_SLOTS) {
+      const yaw = slotYawDeg(slot);
+      for (const p of points) {
+        const obj = new Object3D();
+        obj.position.set(p[0], p[1], p[2]);
+        applySlotModelRotation(obj, size, yaw);
+        const want = slotAnchorPoint(p, size, yaw);
+        if (
+          !approx(obj.position.x, want[0], 1e-9) ||
+          !approx(obj.position.y, want[1], 1e-9) ||
+          !approx(obj.position.z, want[2], 1e-9)
+        ) {
+          mismatches++;
+        }
+      }
+    }
+    ok(mismatches === 0, `all box corners map identically in every slot (${mismatches} mismatches)`);
+  }
+
+  // 1c. Authored origin: the provenance record and the per-view originPx
+  // derived from the anchor (quarter-turn + pure projection) survive a
+  // bundle save/parse unchanged.
+  {
+    console.log('test: authored origin round trips through the manifest');
+    const prov: BakeProvenance = {
+      source: { kind: 'primitive', primitive: 'cube' },
+      bake: { samples: 16, bounces: 2, textureSize: 256 },
+      environment: { procedural: true },
+    };
+    const size: Vec3 = [2, 1, 0.5];
+    const anchor: Vec3 = [0.5, 0.25, 0.125];
+
+    // The E slot's derived anchor + projected originPx, computed the same
+    // way the editor derives them.
+    const rotated = yawRotatedBoxSize(size, 90);
+    const anchorE = slotAnchorPoint(anchor, size, 90);
+    const originPxE = projectBoxFrame(rotated, 128, PAD_PX, ISO_AZIMUTH_DEG, anchorE).origin;
+
+    const north = { ...fakeResult(slotAzimuthDeg('n')), size, originPx: [4.5, 8.25] as [number, number] };
+    const eastView = { ...fakeResult(slotAzimuthDeg('e')), size: rotated, originPx: originPxE };
+    const bytes = await buildBundle(
+      north,
+      undefined,
+      { ...prov, origin: [...anchor] as [number, number, number] },
+      [{ slot: 'e', result: eastView }],
+    );
+    const parsed = parseBake(bytes.buffer as ArrayBuffer);
+    ok(
+      parsed.manifest.provenance !== undefined &&
+        JSON.stringify(parsed.manifest.provenance!.origin) === JSON.stringify([0.5, 0.25, 0.125]),
+      `provenance origin round trips (got ${JSON.stringify(parsed.manifest.provenance?.origin)})`,
+    );
+    const nEntry = (parsed.manifest.views ?? []).find((v) => v.slot === 'n');
+    const eEntry = (parsed.manifest.views ?? []).find((v) => v.slot === 'e');
+    ok(
+      !!nEntry &&
+        approx(nEntry.sprite.originPx[0], 4.5, 5e-4) &&
+        approx(nEntry.sprite.originPx[1], 8.25, 5e-4),
+      'n view keeps its anchored originPx',
+    );
+    ok(
+      !!eEntry &&
+        approx(eEntry.sprite.originPx[0], originPxE[0], 5e-4) &&
+        approx(eEntry.sprite.originPx[1], originPxE[1], 5e-4),
+      'e view keeps the derived projected originPx',
+    );
+    ok(
+      parsed.views[0].slot === 'e' && approx(parsed.views[0].originPx[0], originPxE[0], 5e-4),
+      'parsed e view record carries the derived originPx',
+    );
+  }
+
+  // 1d. buildManifest normalizes the provenance origin: rounded at 1e-4,
+  // dropped entirely at the default (byte-stability with older saves).
+  {
+    console.log('test: provenance origin normalized (round + default omission)');
+    const prov: BakeProvenance = {
+      source: { kind: 'primitive', primitive: 'cube' },
+      bake: { samples: 16, bounces: 2, textureSize: 256 },
+      environment: { procedural: true },
+    };
+    const north = fakeResult(slotAzimuthDeg('n'));
+    const rounded = await buildBundle(north, undefined, {
+      ...prov,
+      origin: [0.12345678, 0, 0],
+    });
+    const parsedRounded = parseBake(rounded.buffer as ArrayBuffer);
+    ok(
+      parsedRounded.manifest.provenance?.origin?.[0] === 0.1235,
+      `origin rounds to 1e-4 (got ${JSON.stringify(parsedRounded.manifest.provenance?.origin)})`,
+    );
+    const defaulted = await buildBundle(north, undefined, { ...prov, origin: [0, 0, 0] });
+    const parsedDefaulted = parseBake(defaulted.buffer as ArrayBuffer);
+    ok(
+      parsedDefaulted.manifest.provenance !== undefined &&
+        parsedDefaulted.manifest.provenance!.origin === undefined,
+      'default origin omitted from the manifest',
+    );
+    // Byte-stability: a default-anchored manifest is byte-identical to a
+    // pre-origin manifest of the same passes.
+    const result = north;
+    const withDefault = JSON.stringify(buildManifest(result, undefined, { ...prov, origin: [0, 0, 0] }));
+    const withoutField = JSON.stringify(buildManifest(result, undefined, prov));
+    ok(withDefault === withoutField, 'default-origin manifest bytes equal pre-origin bytes');
   }
 
   // 2. Remove-view omission: saving without the extra view drops it.

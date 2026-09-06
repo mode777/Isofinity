@@ -86,14 +86,21 @@ disabled when the document is view-only.
   elsewhere pans the view), and the dragged spot is kept per document in
   memory. A scale aid only: never baked into any pass, never serialized.
 - The properties panel offers, top to bottom: preset management (save /
-  list / delete / import), the source (model scale), the path-trace
+  list / delete / import), the source (model scale), the **origin** (the
+  authored 3D placement anchor, ADR 0008), the path-trace
   settings, and environment controls (HDRI file or workspace `hdri/`,
   rotation/intensity/exposure/saturation). Model scale can be entered as a
   **height in meters** — derived from the model's native extent (`scale =
   height / extentY`); the scale stays the canonical stored value and
   provenance keeps recording it, so the meters value itself is never
   persisted. The panel shows a px-size warning when the active slot's
-  projected sprite would exceed the 8192 px cap before baking.
+  projected sprite would exceed the 8192 px cap before baking. The Origin
+  section's X/Y/Z inputs (asset units from the box corner) and its
+  **Set to ground center** button are editable only in the north view —
+  the other slots show the value with a hint — and every baked view's
+  `originPx` re-projects immediately on edit (the passes themselves never
+  depend on the anchor, so no re-bake is needed). A scale change rescales
+  the anchor with the box.
 - The panel has no bake or render buttons: the sprite editor toolbar holds
   the render pass action (plus **Bake All** over N→E→S→W and **Remove
   view** for non-N slots), which implicitly re-bakes the raster g-buffer
@@ -106,8 +113,9 @@ disabled when the document is view-only.
 ### Provenance (isoinfinity-bake/6)
 
 Saved bundles carry a `provenance` manifest section: the source (primitive
-name, or workspace model file + scale), the path-trace settings, and the
-environment (procedural marker or `hdri/` file name + parameters).
+name, or workspace model file + scale), the path-trace settings, the
+environment (procedural marker or `hdri/` file name + parameters), and —
+when authored away from the box corner — the sprite's origin anchor.
 Provenance is view-independent — all baked slots of a document share it.
 Opening a `/6` bundle restores it into the document together with the
 stored non-N views (`/4` and `/5` open as N-only); the document can then
@@ -158,7 +166,12 @@ depth-tested sprite instance slotted into the painter-sorted batch, so
 per-pixel occlusion shows exactly how the placement would sit among its
 neighbors; it is preview-only (never placed, never marks the document
 dirty) and yields the hover feedback to the eraser's unit-cell
-highlight.
+highlight. Placement anchors at the layer's recorded origin — the sprite
+is drawn so its `originPx` lands at the placement's position (the cell's
+min corner at the placement height), so a sprite authored with a
+ground-center origin pivots around its center when its facing changes,
+while ground-footprint picking and erase stay cell-based regardless of
+the anchor (ADR 0008).
 
 The toolbar's **character** brush places the built-in animated character
 (Khronos CesiumMan, committed with attribution) as a *mesh placement*:

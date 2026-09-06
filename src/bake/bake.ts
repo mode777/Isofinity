@@ -20,7 +20,7 @@ import {
   frameIsoBox,
   isoDirection,
 } from './iso.js';
-import { yawRotatedBoxSize, type Vec3 } from '../shared/iso.js';
+import { yawRotatedBoxSize, slotAnchorPoint, type Vec3 } from '../shared/iso.js';
 import type { MaterialGroup, Primitive } from './primitives.js';
 
 export const PX_PER_UNIT = 128;
@@ -204,17 +204,21 @@ function buildDrawGroups(
  * camera itself stays in the fixed iso frame, so the stored normals and
  * depth are world-space data of the rotated asset (depth always measured
  * along the fixed world view direction). `camera.azimuthDeg` in the result
- * records the slot's view azimuth.
+ * records the slot's view azimuth. `origin` is the authored anchor point in
+ * the unrotated asset space (default: the box min corner); each slot
+ * anchors at the same physical point of the rotated asset.
  */
 export function bakePrimitive(
   prim: Primitive,
   pxPerUnit: number = PX_PER_UNIT,
   azimuthDeg: number = ISO_AZIMUTH_DEG,
+  origin: Vec3 = [0, 0, 0],
 ): BakeResult {
   const r = getRenderer();
   const yawDeg = azimuthDeg - ISO_AZIMUTH_DEG;
   const boxSize = yawRotatedBoxSize(prim.size, yawDeg);
-  const frame = frameIsoBox(boxSize, pxPerUnit, PAD_PX);
+  const anchor = slotAnchorPoint(origin, prim.size, yawDeg);
+  const frame = frameIsoBox(boxSize, pxPerUnit, PAD_PX, ISO_AZIMUTH_DEG, anchor);
   const viewDir = isoDirection(ISO_AZIMUTH_DEG, ISO_ELEVATION_DEG);
   const { width, height } = frame;
   if (width > MAX_SPRITE_PX || height > MAX_SPRITE_PX) {

@@ -6,7 +6,15 @@ import {
 } from '../../bake/export.js';
 import { depthRange, projectBoxFrame } from '../../bake/iso.js';
 import { PAD_PX } from '../../bake/bake.js';
-import { VIEW_SLOTS, slotAzimuthDeg, type Vec3, type ViewSlot } from '../../shared/iso.js';
+import {
+  VIEW_SLOTS,
+  slotAnchorPoint,
+  slotAzimuthDeg,
+  slotYawDeg,
+  yawRotatedBoxSize,
+  type Vec3,
+  type ViewSlot,
+} from '../../shared/iso.js';
 import {
   fitTransform,
   panned,
@@ -166,15 +174,21 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
       image.height * transform.zoom,
     );
     // Bounding-box overlay: box edges neutral, the three origin-adjacent
-    // edges per axis, and a cross at the world origin — all in image
-    // pixels so they track zoom/pan with the sprite. The slot's baked box
-    // is the rotated model's (min corner re-anchored), projected from the
-    // fixed world camera.
+    // edges per axis, and a cross at the authored origin anchor — all in
+    // image pixels so they track zoom/pan with the sprite. The slot's
+    // baked box is the rotated model's (min corner re-anchored), projected
+    // from the fixed world camera; the anchor maps into the slot frame via
+    // the same quarter-turn the model itself follows.
     if (doc.boxOverlay && passes) {
+      const yaw = slotYawDeg(slot);
+      const unrotated = yawRotatedBoxSize(passes.result.size as Vec3, -yaw);
+      const anchor = slotAnchorPoint(doc.origin, unrotated, yaw);
       const proj = projectBoxFrame(
         passes.result.size as Vec3,
         passes.result.pxPerUnit,
         PAD_PX,
+        undefined,
+        anchor,
       );
       const { zoom, panX, panY } = transform;
       const px = (p: [number, number]): number => panX + p[0] * zoom;
@@ -211,7 +225,7 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
       ctx.stroke();
       ctx.restore();
     }
-  }, [view, image, panel, transform, doc.boxOverlay, passes, slot]);
+  }, [view, image, panel, transform, doc.boxOverlay, doc.origin, passes, slot]);
 
   // Wheel zoom around the cursor (native listener so preventDefault works).
   // Realtime 3D measures pan from the panel center, the 2D views from the
@@ -352,6 +366,7 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
             overlay={!!doc.boxOverlay}
             humanReference={!!doc.humanReference}
             humanPos={doc.humanRefPos ?? null}
+            origin={doc.origin}
             onHumanMove={(pos) => setHumanReferencePos(doc.docId, pos)}
           />
         ) : view !== 'realtime' ? (

@@ -17,6 +17,7 @@ holds only what stays true after a change is archived.
 | [0005](0005-multi-view-rotates-the-model-not-the-camera.md) | Accepted | Multi-view bakes rotate the model, not the camera |
 | [0006](0006-three-layer-state-model.md) | Accepted | Three-layer state model (persisted / in-memory / engine objects) |
 | [0007](0007-dynamic-meshes-in-the-compositor.md) | Accepted | Dynamic meshes render inside the raw-GL compositor (three.js as CPU libraries) |
+| [0008](0008-authored-placement-anchor.md) | Accepted | The placement anchor is an authored per-asset origin (N-authored, slot-rotated) |
 
 ## Adding a decision
 

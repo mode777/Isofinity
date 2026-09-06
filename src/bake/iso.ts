@@ -63,6 +63,7 @@ export function frameIsoBox(
   pxPerUnit: number,
   padPx: number,
   azimuthDeg: number = ISO_AZIMUTH_DEG,
+  origin: Vec3 = [0, 0, 0],
 ): IsoFrame {
   const dir = isoDirection(azimuthDeg, ISO_ELEVATION_DEG);
   const center = new Vector3(size[0] / 2, size[1] / 2, size[2] / 2);
@@ -120,10 +121,13 @@ export function frameIsoBox(
   const width = Math.round((camera.right - camera.left) * pxPerUnit);
   const height = Math.round((camera.top - camera.bottom) * pxPerUnit);
 
-  const origin = new Vector3(0, 0, 0).project(camera);
+  // The origin anchor is a point of the (slot-transformed) asset, expressed
+  // in the frame the box occupies; the default box min corner preserves the
+  // historical anchor.
+  const anchor = new Vector3(origin[0], origin[1], origin[2]).project(camera);
   const originPx: [number, number] = [
-    (origin.x * 0.5 + 0.5) * width,
-    (1 - (origin.y * 0.5 + 0.5)) * height,
+    (anchor.x * 0.5 + 0.5) * width,
+    (1 - (anchor.y * 0.5 + 0.5)) * height,
   ];
 
   return { camera, width, height, originPx, viewDir: dir.clone() };
@@ -142,7 +146,7 @@ export interface BoxFrameProjection {
   height: number;
   /** The 12 box edges. */
   edges: PxSegment[];
-  /** World origin (box min corner); equals the frame's `originPx`. */
+  /** Projected origin anchor; equals the frame's `originPx`. */
   origin: PxPoint;
   /** Origin-adjacent box edges along +X/+Y/+Z. */
   axes: { x: PxSegment; y: PxSegment; z: PxSegment };
@@ -166,17 +170,19 @@ const BOX_EDGES: [number, number][] = [
 
 /**
  * Project a bake box into sprite pixels using the same padded isometric
- * frame the bake (and the realtime view) frames it with. Pure math — no
- * render — so the editor can draw the box overlay and preview the sprite
- * pixel size without touching the GPU.
+ * frame the bake (and the realtime view) frames it with. `origin` is the
+ * projected origin anchor in asset space (default: the box min corner).
+ * Pure math — no render — so the editor can draw the box overlay and
+ * preview the sprite pixel size without touching the GPU.
  */
 export function projectBoxFrame(
   size: Vec3,
   pxPerUnit: number,
   padPx: number,
   azimuthDeg: number = ISO_AZIMUTH_DEG,
+  origin: Vec3 = [0, 0, 0],
 ): BoxFrameProjection {
-  const frame = frameIsoBox(size, pxPerUnit, padPx, azimuthDeg);
+  const frame = frameIsoBox(size, pxPerUnit, padPx, azimuthDeg, origin);
   const pixels: PxPoint[] = [];
   for (let i = 0; i < 8; i++) {
     const corner = new Vector3(

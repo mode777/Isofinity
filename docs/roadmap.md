@@ -81,6 +81,13 @@ list when a change lands (and prune it — history belongs in the archives).
   along the view direction) instead of fixed planes, so large models bake
   without near/far-clipped geometry; no format change, old sprites
   re-bake via provenance.
+- Authored placement anchor (ADR 0008) — the sprite properties panel's
+  Origin section (north view only) sets a 3D anchor in asset space with a
+  ground-center convenience button; every view slot derives its anchor by
+  the slot's quarter-turn, per-view `originPx` re-projects on edit without
+  a re-bake, the anchor rides provenance (omitted at the default, no
+  format bump), and placement lands it at the placement point while
+  picking/erase stay cell-based.
 
 ## In progress
 

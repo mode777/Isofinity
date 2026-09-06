@@ -11,10 +11,12 @@ import {
   loadHdriFile,
   loadHdriFromWorkspace,
   savePreset,
+  setBakeOrigin,
   setEnvParams,
   setModelHeight,
   setModelScale,
   setSettings,
+  sourceExtent,
 } from '../store/bake.js';
 import { useProject } from '../store/project.js';
 import { useWorkspace } from '../store/workspace.js';
@@ -120,6 +122,54 @@ function PresetsSection(props: { doc: BakeDocument }): React.JSX.Element {
   );
 }
 
+/**
+ * The authored placement anchor (ADR 0008): a 3D point of the asset in the
+ * N view's asset space, measured from the box min corner. Editing is
+ * north-only by spec — other slots show the value with a hint; a fully
+ * baked view re-projects its origin immediately, so a re-bake is never
+ * needed for an anchor change. Never starts a bake or render pass.
+ */
+function OriginSection(props: { doc: BakeDocument }): React.JSX.Element | null {
+  const { doc } = props;
+  const extent = sourceExtent(doc);
+  if (doc.viewOnly || !extent) return null;
+  const editable = doc.activeSlot === 'n';
+  const set = (axis: 0 | 1 | 2, v: number): void => {
+    const next = [...doc.origin] as [number, number, number];
+    next[axis] = v;
+    setBakeOrigin(doc.docId, next);
+  };
+  const setGroundCenter = (): void =>
+    setBakeOrigin(doc.docId, [extent[0] / 2, 0, extent[2] / 2]);
+  const fmt = (v: number): string => String(Number(v.toFixed(3)));
+  return (
+    <Section title="Origin">
+      {(['X', 'Y', 'Z'] as const).map((axisLabel, axis) => (
+        <NumberRow
+          key={axisLabel}
+          label={axisLabel}
+          value={Number(doc.origin[axis].toFixed(4))}
+          min={0}
+          max={extent[axis]}
+          onChange={(v) => set(axis as 0 | 1 | 2, v)}
+          disabled={!editable}
+        />
+      ))}
+      <button disabled={!editable} onClick={setGroundCenter}>
+        Set to ground center
+      </button>
+      {editable ? (
+        <p className="hint">
+          placement anchor, asset units from the box corner ({fmt(doc.origin[0])},{' '}
+          {fmt(doc.origin[1])}, {fmt(doc.origin[2])})
+        </p>
+      ) : (
+        <p className="hint">the origin is set in the north view</p>
+      )}
+    </Section>
+  );
+}
+
 export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Element {
   const { doc } = props;
   const hdriInput = useRef<HTMLInputElement>(null);
@@ -200,6 +250,8 @@ export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Elemen
           </>
         ) : null}
       </Section>
+
+      <OriginSection doc={doc} />
 
       <Section title="Path tracing">
         <SliderRow

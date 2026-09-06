@@ -119,6 +119,13 @@ export interface BakeProvenance {
         exposure: number;
         saturation: number;
       };
+  /**
+   * The sprite's origin anchor point in the N view's asset space, measured
+   * from the box min corner. Optional: absent means the default box min
+   * corner `(0,0,0)`, which the manifest omits for byte-stability with
+   * older bundles.
+   */
+  origin?: [number, number, number];
 }
 
 export interface BakeManifest {
@@ -178,6 +185,27 @@ export interface BundleExtraView {
   slot: ExtraViewSlot;
   result: BakeResult;
   render?: PtImage | null;
+}
+
+/**
+ * Provenance as written into a manifest: the optional origin anchor is
+ * rounded (1e-4) and dropped entirely at the default `(0,0,0)` so
+ * default-anchored bundles stay byte-identical to pre-origin saves.
+ */
+function manifestProvenance(provenance: BakeProvenance): BakeProvenance {
+  const origin = provenance.origin;
+  if (!origin) return provenance;
+  const rounded = [
+    Math.round(origin[0] * 1e4) / 1e4,
+    Math.round(origin[1] * 1e4) / 1e4,
+    Math.round(origin[2] * 1e4) / 1e4,
+  ] as [number, number, number];
+  if (rounded[0] === 0 && rounded[1] === 0 && rounded[2] === 0) {
+    const withoutOrigin: BakeProvenance = { ...provenance };
+    delete withoutOrigin.origin;
+    return withoutOrigin;
+  }
+  return { ...provenance, origin: rounded };
 }
 
 export function buildManifest(
@@ -246,7 +274,7 @@ export function buildManifest(
     };
   }
   if (provenance) {
-    manifest.provenance = provenance;
+    manifest.provenance = manifestProvenance(provenance);
   }
   // The view table lists every stored slot; n mirrors the top-level fields
   // (which remain the north view's, keeping /5-era readers working).

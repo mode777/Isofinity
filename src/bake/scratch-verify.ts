@@ -971,6 +971,22 @@ async function main(): Promise<void> {
       proj.origin[0] === frame.originPx[0] && proj.origin[1] === frame.originPx[1],
       'origin projects to originPx',
     );
+    // Authored anchor: a non-zero origin parameter moves the projected
+    // origin to the anchor's projection (same frame — only the anchor
+    // moves) and still agrees with the frame's originPx.
+    const anchor: Vec3 = [0.5, 0.25, 1.25];
+    const projA = projectBoxFrame(size, PPU, PAD_PX, undefined, anchor);
+    const frameA = frameIsoBox(size, PPU, PAD_PX, undefined, anchor);
+    ok(
+      projA.origin[0] === frameA.originPx[0] && projA.origin[1] === frameA.originPx[1],
+      'authored anchor projects to originPx',
+    );
+    ok(
+      (projA.origin[0] !== proj.origin[0] || projA.origin[1] !== proj.origin[1]) &&
+        projA.width === proj.width &&
+        projA.height === proj.height,
+      'the anchor moves the origin cross without reframing the box',
+    );
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;

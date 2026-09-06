@@ -28,11 +28,19 @@ the pointer for the real semantics.
   isoinfinity-bake/6`, camera/sprite/passes data for N, optional `views[]`
   table for E/S/W.
 - **Provenance** — manifest block (since `/5`): source, path-trace
-  settings, environment. View-independent; lets a sprite re-bake in place.
-  Missing/unresolvable ⇒ the document opens **view-only**.
+  settings, environment, and the optional origin anchor. View-independent;
+  lets a sprite re-bake in place. Missing/unresolvable ⇒ the document opens
+  **view-only**.
 - **`pxPerUnit`** — fixed sprite resolution: pixels per world unit (128).
-- **`originPx`** — projected pixel position of the box's world origin
-  `(0,0,0)`; the anchor for multi-cube blitting and placement.
+- **Origin anchor** — the authored 3D placement handle of a sprite: a point
+  in the N view's asset space measured from the box min corner (default
+  `(0,0,0)` = the corner). Set in the sprite properties panel's Origin
+  section (north view only); every slot derives its anchor by the slot's
+  quarter-turn (`slotAnchorPoint`), and each view's `originPx` records the
+  projection. Placement lands the anchor at the placement's position
+  (ADR 0008).
+- **`originPx`** — projected pixel position of a view's origin anchor in
+  sprite pixels; the anchor for multi-cube blitting and placement.
 
 ## Editor
 

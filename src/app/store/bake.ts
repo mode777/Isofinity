@@ -1,4 +1,5 @@
-import { bakePrimitive } from '../../bake/bake.js';
+import { bakePrimitive, PAD_PX } from '../../bake/bake.js';
+import { ISO_AZIMUTH_DEG, projectBoxFrame } from '../../bake/iso.js';
 import {
   buildBundle,
   type BakeProvenance,
@@ -30,7 +31,15 @@ import {
   readWorkspaceFile,
   writeWorkspaceFile,
 } from '../../shared/workspace.js';
-import { EXTRA_VIEW_SLOTS, VIEW_SLOTS, slotAzimuthDeg, type ViewSlot } from '../../shared/iso.js';
+import {
+  EXTRA_VIEW_SLOTS,
+  VIEW_SLOTS,
+  slotAnchorPoint,
+  slotAzimuthDeg,
+  slotYawDeg,
+  type Vec3,
+  type ViewSlot,
+} from '../../shared/iso.js';
 import {
   bakeFloatToHalf,
   proceduralEnvironment,
@@ -62,6 +71,9 @@ const PRIMITIVES: Record<PrimitiveKind, () => Primitive> = {
 };
 
 const MODEL_EXTS = ['.glb', '.gltf'];
+
+/** The default anchor: the box min corner. */
+const DEFAULT_ORIGIN: Vec3 = [0, 0, 0];
 
 const ed = (): EditorState => useEditor.getState();
 const bakeDoc = (docId: string): BakeDocument | null => {
@@ -117,6 +129,7 @@ function baseBakeDoc(title: string): BakeDocument {
     source: null,
     gltf: null,
     scale: 1,
+    origin: [0, 0, 0],
     env: { kind: 'procedural' },
     ptEnv: proceduralEnvironment(),
     settings: { ...DEFAULT_PT_SETTINGS },
@@ -317,6 +330,7 @@ export async function openBundleDoc(fileName: string): Promise<void> {
         textureSize: prov.bake.textureSize,
         denoise: false,
       };
+      doc.origin = finiteOrigin(prov.origin);
       if (prov.source.kind === 'primitive') {
         doc.source = { kind: 'primitive', primitive: prov.source.primitive as PrimitiveKind };
       } else {
@@ -402,6 +416,99 @@ function primitiveFor(doc: BakeDocument): Primitive {
   throw new Error('document has no bake source (view-only)');
 }
 
+// --- origin anchor ----------------------------------------------------------
+
+/** The document's scaled source box extent (asset-space units). */
+export function sourceExtent(doc: BakeDocument): Vec3 | null {
+  if (!doc.source) return null;
+  if (doc.source.kind === 'model') {
+    return doc.gltf
+      ? [
+          doc.gltf.extent[0] * doc.scale,
+          doc.gltf.extent[1] * doc.scale,
+          doc.gltf.extent[2] * doc.scale,
+        ]
+      : null;
+  }
+  return PRIMITIVES[doc.source.primitive]().size;
+}
+
+/**
+ * Validate an authored origin: non-finite components are rejected (null),
+ * everything else clamps into the source box so the anchor stays on the
+ * asset.
+ */
+function clampOrigin(origin: Vec3, extent: Vec3): Vec3 | null {
+  const out: number[] = [];
+  for (let i = 0; i < 3; i++) {
+    const v = origin[i];
+    if (!Number.isFinite(v)) return null;
+    out.push(Math.min(extent[i], Math.max(0, v)));
+  }
+  return [out[0], out[1], out[2]];
+}
+
+/** Restored provenance origin: finite components only, else the default corner. */
+function finiteOrigin(value: unknown): Vec3 {
+  if (
+    Array.isArray(value) &&
+    value.length === 3 &&
+    typeof value[0] === 'number' &&
+    Number.isFinite(value[0]) &&
+    typeof value[1] === 'number' &&
+    Number.isFinite(value[1]) &&
+    typeof value[2] === 'number' &&
+    Number.isFinite(value[2])
+  ) {
+    return [value[0], value[1], value[2]];
+  }
+  return [0, 0, 0];
+}
+
+/** Re-project an anchor into a baked slot's stored frame (pure math). */
+function anchorOriginPx(anchor: Vec3, size: Vec3, pxPerUnit: number): [number, number] {
+  return projectBoxFrame(size, pxPerUnit, PAD_PX, ISO_AZIMUTH_DEG, anchor).origin;
+}
+
+/**
+ * Set the document's authored origin anchor (N-view asset space, measured
+ * from the box min corner). Non-finite input is rejected; values clamp
+ * into the source box. Every baked view's `originPx` re-projects
+ * immediately — the anchor never changes the rendered pixels (framing
+ * depends only on size/ppu/pad), so no re-bake is needed.
+ */
+export function setBakeOrigin(docId: string, origin: Vec3): void {
+  const doc = bakeDoc(docId);
+  if (!doc || doc.viewOnly || !doc.source) return;
+  const extent = sourceExtent(doc);
+  if (!extent) return;
+  const next = clampOrigin(origin, extent);
+  if (!next) return;
+  update(docId, (d) => {
+    d.origin = next;
+    if (d.result) {
+      const r = d.result;
+      d.result = { ...r, originPx: anchorOriginPx(next, r.size, r.pxPerUnit) };
+    }
+    for (const slot of EXTRA_VIEW_SLOTS) {
+      const passes = d.extraViews[slot];
+      if (!passes) continue;
+      const anchor = slotAnchorPoint(next, extent, slotYawDeg(slot));
+      d.extraViews = {
+        ...d.extraViews,
+        [slot]: {
+          ...passes,
+          result: {
+            ...passes.result,
+            originPx: anchorOriginPx(anchor, passes.result.size, passes.result.pxPerUnit),
+          },
+        },
+      };
+    }
+  });
+  ed().markDirty(docId);
+}
+
 // --- pass actions ---------------------------------------------------------
 
 /** The status-bar label for a slot's passes (north stays unlabelled). */
@@ -418,7 +525,11 @@ function bakeRaster(docId: string, slot: ViewSlot = 'n'): void {
   const doc = bakeDoc(docId);
   if (!doc || doc.viewOnly) return;
   try {
-    const result = bakePrimitive(primitiveFor(doc), undefined, slotAzimuthDeg(slot));
+    // The anchor clamps defensively: a restored document's source may have
+    // changed extent since the origin was authored.
+    const extent = sourceExtent(doc);
+    const origin = extent ? (clampOrigin(doc.origin, extent) ?? DEFAULT_ORIGIN) : DEFAULT_ORIGIN;
+    const result = bakePrimitive(primitiveFor(doc), undefined, slotAzimuthDeg(slot), origin);
     update(docId, (d) => {
       if (slot === 'n') {
         d.result = result;
@@ -719,7 +830,16 @@ export function setModelScale(docId: string, scale: number): void {
   const value = Number.isFinite(scale) && scale > 0 ? scale : 1;
   invalidateRunningRender();
   update(docId, (d) => {
+    // The anchor keeps marking the same relative spot of the asset: it
+    // rescales with the box, then clamps into the new extent.
+    const ratio = value / d.scale;
     d.scale = value;
+    const extent = sourceExtent(d);
+    if (extent) {
+      d.origin =
+        clampOrigin([d.origin[0] * ratio, d.origin[1] * ratio, d.origin[2] * ratio], extent) ??
+        d.origin;
+    }
   });
   ed().markDirty(docId);
 }
@@ -852,7 +972,7 @@ function environmentOf(doc: BakeDocument): PresetEnvironment {
 
 function provenanceOf(doc: BakeDocument): BakeProvenance | null {
   if (!doc.source) return null;
-  return {
+  const provenance: BakeProvenance = {
     source:
       doc.source.kind === 'primitive'
         ? { kind: 'primitive', primitive: doc.source.primitive }
@@ -865,6 +985,12 @@ function provenanceOf(doc: BakeDocument): BakeProvenance | null {
     },
     environment: environmentOf(doc),
   };
+  // The authored anchor rides in provenance (omitted at the default so
+  // default-anchored bundles stay byte-identical).
+  if (doc.origin.some((v) => v !== 0)) {
+    provenance.origin = [doc.origin[0], doc.origin[1], doc.origin[2]];
+  }
+  return provenance;
 }
 
 /** Resolve a user-supplied bundle name to a `.sprite` file name. */

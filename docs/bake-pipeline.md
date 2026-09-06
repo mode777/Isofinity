@@ -72,6 +72,10 @@ everything falls back to file dialogs and downloads exactly as before
 - Asset-space position is **not stored**; it is derived from pixel + depth
   (see below). The box origin is tracked by the asset layout, so assets
   tile losslessly.
+- The **origin anchor** is the one authored point of the asset: a 3D
+  coordinate in the N view's asset space, measured from the box min corner
+  (default `(0,0,0)`). It is placement metadata, not geometry — framing and
+  passes never depend on it (see Sprite placement below).
 - The **g-buffer pass** stores world-space normals. Boxes are axis-aligned,
   so asset-local and world normals are identical; only the position offset
   differs per asset.
@@ -259,13 +263,22 @@ for anti-aliasing, so sprite edges converge to true AA.
 
 ### Sprite placement
 
-`sprite.originPx` in the manifest is the projected box min corner `(0,0,0)`
-in sprite pixel coordinates. Compositing a multi-cube asset = blit each
+`sprite.originPx` in the manifest is the projected **origin anchor** — the
+authored 3D point in asset space, defaulting to the box min corner
+`(0,0,0)`. Each view slot anchors the same physical point of the asset: the
+N slot at the authored point, every other slot at the point rotated by the
+slot's quarter-turn about the box center (`slotAnchorPoint` mirrors the
+model transform exactly), so all views' `originPx` mark the same spot and a
+facing change pivots around it. Compositing a multi-cube asset = blit each
 cube's sprite offset by the projected difference of their origins; no per-
-asset alignment work is needed. Sprites of different assets may differ in
-pixel size (`pxPerUnit` is fixed, the box is not): the runtime pads every
-sprite into a shared max-size texture array (data anchored bottom-left) and
-moves quad size + sprite texel size into per-instance attributes.
+asset alignment work is needed. Placement draws the sprite so its
+`originPx` lands at the placement's projected position — the same point
+where the box corner lands today (the placement's ground cell corner at the
+placement height) — so the authored anchor, not the box corner, is the
+handle. Sprites of different assets may differ in pixel size (`pxPerUnit`
+is fixed, the box is not): the runtime pads every sprite into a shared
+max-size texture array (data anchored bottom-left) and moves quad size +
+sprite texel size into per-instance attributes.
 
 ### Manifest (`<id>-bake.json`)
 
@@ -290,8 +303,11 @@ unchanged; the g-buffer EXR keeps the v3 byte conventions exactly). The
 editor-facing `provenance` block (added in `/5`) records the bake source (a
 primitive name, or a workspace model file name + uniform scale), the
 path-trace settings (sample count, bounces, texture size, and the render
-pass's derived tile grid once one has run), and the environment (a
-`procedural` marker or an `hdri/` file name + parameters) — so the
+pass's derived tile grid once one has run), the environment (a
+`procedural` marker or an `hdri/` file name + parameters), and — when the
+sprite anchors away from its box min corner — the authored origin anchor as
+a 3D coordinate in the N view's asset space (omitted at the default, so
+default-anchored bundles stay byte-identical to pre-origin saves) — so the
 integrated editor can re-open a sprite editable and re-bake it in place.
 `/5` and later without a `provenance` block is valid; the editor then opens
 it view-only.
@@ -303,7 +319,10 @@ passes data so the table is the authoritative view list). Each entry holds
 `passes` table; extra views' zip entries are named
 `<id>-<slot>-gbuffer.exr` / `<id>-<slot>-render.png`. Top-level fields stay
 the N view's data, so a `/5`-era reader can still consume the N view of a
-`/6` bundle.
+`/6` bundle. The provenance block later gained one more optional field —
+the origin anchor (`origin`) — without a format bump (the `bake.tiles`
+precedent: optional provenance fields don't bump; readers that don't know
+the field ignore it, and bundles omit it at the default).
 
 ### Bundle (`<id>.sprite`)
 

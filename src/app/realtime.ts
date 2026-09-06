@@ -31,7 +31,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { PAD_PX, applySlotModelRotation } from '../bake/bake.js';
 import { ISO_AZIMUTH_DEG, frameIsoBox } from '../bake/iso.js';
 import type { Primitive } from '../bake/primitives.js';
-import { yawRotatedBoxSize, type Vec3 } from '../shared/iso.js';
+import { slotAnchorPoint, yawRotatedBoxSize, type Vec3 } from '../shared/iso.js';
 import type { ViewTransform } from './document.js';
 import humanMeshUrl from './assets/free_base_mesh.glb?url';
 
@@ -155,8 +155,10 @@ const BOX_EDGES: [number, number][] = [
  * `(0,0,0)` to `size` with the origin-adjacent edges colored per axis
  * (X red, Y green, Z blue) and the origin marked. Drawn on top of the
  * mesh (no depth test), matching the 2D views' overlay semantics.
+ * Returns the group and its origin marker so the marker can track the
+ * authored anchor (`setOrigin`).
  */
-function buildBoxOverlay(size: Vec3): Group {
+function buildBoxOverlay(size: Vec3): { group: Group; marker: Points } {
   const corners: [number, number, number][] = [];
   for (let i = 0; i < 8; i++) {
     corners.push([
@@ -204,7 +206,7 @@ function buildBoxOverlay(size: Vec3): Group {
   marker.renderOrder = 1001;
   const group = new Group();
   group.add(lines, marker);
-  return group;
+  return { group, marker };
 }
 
 /**
@@ -233,6 +235,10 @@ export class RealtimeMeshView {
   private camRight: Vector3;
   private camUp: Vector3;
   private overlay: Group;
+  /** The overlay's origin marker; repositioned by `setOrigin`. */
+  private overlayMarker: Points;
+  private readonly primSize: Vec3;
+  private readonly yawDeg: number;
   private human: Group;
   /** Last rendered transform, for repaints from outside the React flow. */
   private lastTransform: ViewTransform | null = null;
@@ -249,6 +255,8 @@ export class RealtimeMeshView {
     // vertical axis while the camera stays in the fixed iso frame, so the
     // preview shows the asset exactly as its non-north views bake it.
     const yawDeg = azimuthDeg - ISO_AZIMUTH_DEG;
+    this.primSize = prim.size;
+    this.yawDeg = yawDeg;
     const boxSize = yawRotatedBoxSize(prim.size, yawDeg);
     const frame = frameIsoBox(boxSize, 128, PAD_PX);
     this.camera = frame.camera;
@@ -300,7 +308,9 @@ export class RealtimeMeshView {
       }
     }
 
-    this.overlay = buildBoxOverlay(prim.size);
+    const overlay = buildBoxOverlay(prim.size);
+    this.overlayMarker = overlay.marker;
+    this.overlay = overlay.group;
     applySlotModelRotation(this.overlay, prim.size, yawDeg);
     this.overlay.visible = false;
     this.scene.add(this.overlay);
@@ -363,6 +373,18 @@ export class RealtimeMeshView {
   /** Show or hide the bounding-box overlay. */
   setBoxOverlay(on: boolean): void {
     this.overlay.visible = on;
+  }
+
+  /**
+   * Move the overlay's origin marker to the authored anchor point (asset
+   * space, from the box min corner). The overlay group carries the slot
+   * rotation, so the marker's local position is the anchor mapped into the
+   * slot's rotated frame — the same spot the slot's bake anchors.
+   */
+  setOrigin(origin: Vec3): void {
+    const a = slotAnchorPoint(origin, this.primSize, this.yawDeg);
+    this.overlayMarker.position.set(a[0], a[1], a[2]);
+    this.rerender();
   }
 
   /** Show or hide the human-scale reference figure. */

@@ -5,7 +5,7 @@ import type { PtEnvironment, PtImage, PtSettings } from '../bake/pt.js';
 import type { SpriteLayer } from '../runtime/assets.js';
 import type { CharacterAsset } from '../runtime/meshAsset.js';
 import type { World } from '../runtime/world.js';
-import type { ViewSlot } from '../shared/iso.js';
+import type { ViewSlot, Vec3 } from '../shared/iso.js';
 
 export type PrimitiveKind =
   | 'sphere'
@@ -98,6 +98,13 @@ export interface BakeDocument {
   /** Live parsed model for `source.kind === 'model'`. */
   gltf: GltfSource | null;
   scale: number;
+  /**
+   * Authored placement anchor, in the N view's asset space measured from
+   * the box min corner (the default `(0,0,0)` anchors the min corner).
+   * Persisted state: it travels in the bundle's provenance and shapes every
+   * baked view's `originPx` (see ADR 0008).
+   */
+  origin: Vec3;
   env: EnvSource;
   /** Live environment (texture + params) used by the path tracer. */
   ptEnv: PtEnvironment;

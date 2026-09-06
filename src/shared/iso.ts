@@ -32,6 +32,35 @@ export function yawRotatedBoxSize(size: Vec3, yawDeg: number): Vec3 {
     : [size[0], size[1], size[2]];
 }
 
+/**
+ * Map a point of the unrotated asset (min corner at the origin) into a
+ * view slot's rotated asset frame: exactly the transform
+ * `applySlotModelRotation` applies to the model — rotate about the
+ * unrotated box center, re-anchor at the rotated box center. Slot yaws
+ * are multiples of 90°, so this is exact quarter-turn arithmetic:
+ *
+ * - 0°:   (x, y, z)
+ * - 90°:  (z, y, sx - x)
+ * - 180°: (sx - x, y, sz - z)
+ * - 270°: (sz - z, y, x)
+ */
+export function slotAnchorPoint(origin: Vec3, size: Vec3, yawDeg: number): Vec3 {
+  const quarter = ((Math.round(yawDeg / 90) % 4) + 4) % 4;
+  const [x, y, z] = origin;
+  const sx = size[0];
+  const sz = size[2];
+  switch (quarter) {
+    case 1:
+      return [z, y, sx - x];
+    case 2:
+      return [sx - x, y, sz - z];
+    case 3:
+      return [sz - z, y, x];
+    default:
+      return [x, y, z];
+  }
+}
+
 const AZ = (ISO_AZIMUTH_DEG * Math.PI) / 180;
 const EL = (ISO_ELEVATION_DEG * Math.PI) / 180;
 const SA = Math.sin(AZ);

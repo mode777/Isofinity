@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Primitive } from '../../bake/primitives.js';
+import type { Vec3 } from '../../shared/iso.js';
 import type { ViewTransform } from '../document.js';
 import { RealtimeMeshView } from '../realtime.js';
 import { useEditor } from '../store/editor.js';
@@ -22,6 +23,8 @@ export function RealtimeCanvas(props: {
   humanReference: boolean;
   /** The figure's stored ground spot; null = the view's default spot. */
   humanPos: [number, number] | null;
+  /** The authored origin anchor (asset space) the overlay marker tracks. */
+  origin: Vec3;
   /** Called with the ground spot after each drag move. */
   onHumanMove: (pos: [number, number]) => void;
 }): React.JSX.Element {
@@ -68,11 +71,12 @@ export function RealtimeCanvas(props: {
     if (!view || !size) return;
     view.resize(size.w, size.h);
     view.setBoxOverlay(props.overlay);
+    view.setOrigin(props.origin);
     view.setHumanReference(props.humanReference);
     if (props.humanPos) view.setHumanPosition(props.humanPos[0], props.humanPos[1]);
     view.render(props.transform);
     // prim: a recreated view (e.g. scale change) must draw immediately.
-  }, [props.prim, props.transform, props.overlay, props.humanReference, props.humanPos, size]);
+  }, [props.prim, props.transform, props.overlay, props.origin, props.humanReference, props.humanPos, size]);
 
   /** Viewport point (CSS px) of a pointer event, relative to the host. */
   const cssPoint = (e: React.PointerEvent<HTMLDivElement>): [number, number] => {
