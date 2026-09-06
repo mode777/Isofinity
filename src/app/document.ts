@@ -182,6 +182,25 @@ export interface EnvDisplayParams {
   saturation: number;
 }
 
+/**
+ * The ground plane's material state. `material` (file name in the
+ * workspace's materials/ folder) and `tileScale` (tiles per world unit)
+ * persist in world files; `maps` is the decoded material (engine object,
+ * never serialized) the renderer uploads.
+ */
+export interface GroundState {
+  material: string | null;
+  tileScale: number;
+  maps: import('./groundMaterial.js').GroundMaterialMaps | null;
+}
+
+/** Default tiling: one material tile per world unit. */
+export const DEFAULT_GROUND_TILE_SCALE = 1;
+
+export function defaultGroundState(): GroundState {
+  return { material: null, tileScale: DEFAULT_GROUND_TILE_SCALE, maps: null };
+}
+
 export interface WorldDocument {
   kind: 'world';
   docId: string;
@@ -211,6 +230,14 @@ export interface WorldDocument {
    * until computed. In-memory only.
    */
   shProbe: Float32Array | null;
+  /**
+   * User-selected world environment (HDRI in hdri/); null = inherit the
+   * environment from sprite bake provenance (`env`). Overrides `env` for
+   * the ambient probe and the ground. Persisted when user-selected.
+   */
+  userEnv: EnvSource | null;
+  /** Ground plane material state (see `GroundState`). */
+  ground: GroundState;
   /**
    * Active placement tool: '' = pencil with no brush chosen, a brush id
    * (sprite layer id or primitive id), or 'eraser'.

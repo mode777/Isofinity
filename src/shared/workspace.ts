@@ -12,7 +12,7 @@
 
 export const BUNDLE_EXT = '.sprite';
 
-export const WORKSPACE_FOLDERS = ['hdri', 'models', 'sprites', 'worlds', 'presets'] as const;
+export const WORKSPACE_FOLDERS = ['hdri', 'models', 'sprites', 'worlds', 'presets', 'materials'] as const;
 export type WorkspaceFolder = (typeof WORKSPACE_FOLDERS)[number];
 
 export type WorkspaceState =

@@ -20,6 +20,8 @@ import { bakeFloatToHalf, layersToSet, RUNTIME_PPU, type SpriteLayer } from '../
 import { CharacterPlayer, parseCharacterAsset } from '../runtime/meshAsset.js';
 import cesiumManUrl from '../app/assets/CesiumMan.glb?url';
 import { decodeBundle } from '../app/bundleView.js';
+import { parseGroundMaterial } from '../app/groundMaterial.js';
+import { encodePngBytes } from './export.js';
 import {
   strToU8,
   zipSync,
@@ -743,6 +745,133 @@ async function runMeshSpike(): Promise<void> {
   renderer.dispose();
 }
 
+/**
+ * Ground-plane spike: the textured ground program — default flat batch vs
+ * material, tile scale, lighting response, and sprite compositing against
+ * the plane's written depth. Golden hashes for the regression diff.
+ */
+async function runGroundSpike(): Promise<void> {
+  log('test: ground-plane golden hash (runtime compositor)');
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  // One baked-cube sprite (as in the mesh spike) for the occlusion check.
+  const cube = bakePrimitive(getCube());
+  const w = cube.width;
+  const h = cube.height;
+  const layer: SpriteLayer = {
+    id: 'cube',
+    pxPerUnit: cube.pxPerUnit,
+    width: w,
+    height: h,
+    originPx: cube.originPx,
+    gbuffer: bakeFloatToHalf(cube.gbuffer, w, h),
+    render: new Uint8Array(w * h * 4).fill(0).map((_, i) => (i % 4 === 3 ? 255 : 200)),
+  };
+  const set = layersToSet([layer]);
+  const renderer = new WorldRenderer(canvas, set.renderLayers, set.gbufferLayers, set.maxW, set.maxH);
+  renderer.setMeshFrame(300, 500, RUNTIME_PPU);
+  renderer.setLight({ dir: [0.5, 0.7071, 0.5], key: [1.2, 1.1, 0.9], ambient: [0.3, 0.3, 0.35] });
+
+  const px = new Uint8Array(canvas.width * canvas.height * 4);
+  const frame = (): Promise<string> => {
+    renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, []);
+    renderer.readPixels(px);
+    return sha256(px);
+  };
+
+  // Default: the flat batch draws, frame is deterministic.
+  const flat1 = await frame();
+  const flat2 = await frame();
+  ok(flat1 === flat2, `flat ground renders deterministically (${flat1.slice(0, 16)}…)`);
+
+  // Material maps from in-memory pixels: a non-uniform diffuse (so tile
+  // scale matters), a flat normal, and a white arm map.
+  const bitmap = async (data: number[], side: number): Promise<ImageBitmap> => {
+    const img = new ImageData(new Uint8ClampedArray(data), side, side);
+    return createImageBitmap(img);
+  };
+  const diffPx: number[] = [];
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 4; x++) {
+      const c = (x + y) % 2 === 0 ? [200, 60, 40, 255] : [40, 60, 200, 255];
+      for (let sy = 0; sy < 8; sy++) for (let sx = 0; sx < 8; sx++) diffPx.push(...c);
+    }
+  }
+  const flatN: number[] = [];
+  for (let i = 0; i < 8 * 8; i++) flatN.push(128, 128, 255, 255);
+  const white: number[] = [];
+  for (let i = 0; i < 8 * 8; i++) white.push(255, 255, 255, 255);
+  const maps = {
+    diffuse: { kind: 'srgb' as const, image: await bitmap(diffPx, 32) },
+    normal: await bitmap(flatN, 8),
+    arm: await bitmap(white, 8),
+  };
+
+  renderer.setGroundExtent(12);
+  renderer.setGroundMaterial(maps, 1);
+  const mat1 = await frame();
+  ok(mat1 !== flat1, 'a material changes the frame');
+  ok(mat1 !== await sha256(new Uint8Array(px.length)), 'material frame has content');
+
+  // Tile scale: the checker density changes the sampled texels.
+  renderer.setGroundMaterial(maps, 2);
+  const mat2 = await frame();
+  ok(mat2 !== mat1, `tile scale changes the frame (${mat2.slice(0, 16)}…)`);
+
+  // Lighting: the key light re-shades the ground (like the mesh path).
+  renderer.setLight({ dir: [-0.5, 0.7071, 0.5], key: [1.2, 1.1, 0.9], ambient: [0.3, 0.3, 0.35] });
+  const mat3 = await frame();
+  ok(mat3 !== mat2, `key-light azimuth changes the ground (${mat3.slice(0, 16)}…)`);
+  renderer.setLight({ dir: [0.5, 0.7071, 0.5], key: [1.2, 1.1, 0.9], ambient: [0.3, 0.3, 0.35] });
+
+  // Sprite compositing: a cube placed on the plane must change the frame
+  // (depth-tested against the ground's written depth).
+  const spriteScale = RUNTIME_PPU / cube.pxPerUnit;
+  const [u, v] = groundToScreen(2, 2);
+  const instances = new Float32Array(8);
+  instances[0] = 300 + u * RUNTIME_PPU - cube.originPx[0] * spriteScale;
+  instances[1] = 500 - v * RUNTIME_PPU - cube.originPx[1] * spriteScale;
+  instances[2] = 0;
+  instances[3] = VIEW_DIR[0] * 2 + VIEW_DIR[2] * 2;
+  instances[4] = w * spriteScale;
+  instances[5] = h * spriteScale;
+  instances[6] = w;
+  instances[7] = h;
+  const withSprite = (): Promise<string> => {
+    renderer.render(instances, 1, null, null, { zoom: 1, panX: 0, panY: 0 }, []);
+    renderer.readPixels(px);
+    return sha256(px);
+  };
+  const occl = await withSprite();
+  ok(occl !== mat1, `sprite composites against the plane (${occl.slice(0, 16)}…)`);
+
+  // Material zip parsing: a fixture .material zip (pattern-named png maps,
+  // encoded with the bake pipeline's PNG encoder) decodes to three maps
+  // and drives the plane identically to the in-memory maps.
+  {
+    const flatNPng = await encodePngBytes(new Uint8Array(flatN), 8, 8);
+    const whitePng = await encodePngBytes(new Uint8Array(white), 8, 8);
+    const diffPng = await encodePngBytes(new Uint8Array(diffPx), 32, 32);
+    const zipBytes = zipSync({
+      'test_diff_2k.png': diffPng as Uint8Array<ArrayBuffer>,
+      'test_arm_2k.png': whitePng as Uint8Array<ArrayBuffer>,
+      'test_nor_gl_2k.png': flatNPng as Uint8Array<ArrayBuffer>,
+      'notes.txt': new TextEncoder().encode('not a map'),
+    });
+    const parsed = await parseGroundMaterial(zipBytes.buffer as ArrayBuffer, 'test.material');
+    ok(parsed.normal !== null && parsed.arm !== null, 'fixture zip decodes to diffuse + arm + normal');
+    ok(parsed.notes.length === 0, `fixture zip has no load notes (got ${parsed.notes.length})`);
+    renderer.setGroundMaterial(parsed, 1);
+    const matZip = await frame();
+    ok(matZip === mat1, `parsed zip material matches the in-memory maps (${matZip.slice(0, 16)}…)`);
+    renderer.setGroundMaterial(maps, 1);
+  }
+
+  log(`  ground golden hashes: flat ${flat1.slice(0, 16)}… / material ${mat1.slice(0, 16)}…`);
+  renderer.dispose();
+}
+
 async function main(): Promise<void> {
   const { glb, gltfSet } = await buildQuadModel([
     { x0: 0, material: 0, name: 'texred' },
@@ -1143,6 +1272,9 @@ async function main(): Promise<void> {
 
   // 7. Dynamic-mesh spike: skinned character among sprites.
   await runMeshSpike();
+
+  // 7b. Ground-plane spike: textured ground material + compositing.
+  await runGroundSpike();
 
   log(`\n${passed} passed, ${failed} failed`, failed === 0 ? 'pass' : 'fail');
 }

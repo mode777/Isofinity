@@ -88,6 +88,16 @@ list when a change lands (and prune it — history belongs in the archives).
   a re-bake, the anchor rides provenance (omitted at the default, no
   format bump), and placement lands it at the placement point while
   picking/erase stay cell-based.
+- Ground plane + materials (`isoinfinity-world/4`, `/1`–`/3` still load) —
+  a flat material-backed ground plane rendered as real world-space
+  geometry writing the shared depth map (backdrop only, never
+  pickable), lean PBR shading (diffuse + gl normal map + arm.r AO over
+  the SH ambient + key light, ACES; roughness/metal decoded but unused —
+  specular/reflections are follow-ons), `.material` zips in the new
+  `materials/` folder convention, per-world material + tile-scale
+  persistence, and a user-selectable world HDRI (overrides the
+  provenance environment for the dynamic ambient only). Framework
+  decision recorded as ADR 0009 (the compositor stays raw WebGL2).
 
 ## In progress
 

@@ -277,6 +277,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     let uploadedCharacter: unknown = null;
     const ghostYawMat = meshYawMat(0);
     let ghostPalette: Float32Array | null = null;
+    let appliedGroundKey = '';
     let lastFrameTime = performance.now();
 
     // Draws a soft contact-shadow ellipse on the ground under a raised
@@ -397,6 +398,17 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       renderer.setShProbe(live.shProbe);
       const envParams = live.envParams;
       renderer.setEnvDisplay(envParams?.exposure ?? 1, envParams?.saturation ?? 1);
+
+      // Textured ground plane: apply when the material/tile selection or
+      // the decoded maps change; none selected = the flat batch draws.
+      const groundKey = `${live.ground.material ?? ''}|${live.ground.tileScale}|${
+        live.ground.maps ? 'maps' : 'nomaps'
+      }`;
+      if (groundKey !== appliedGroundKey) {
+        appliedGroundKey = groundKey;
+        renderer.setGroundExtent(GRID_N);
+        renderer.setGroundMaterial(live.ground.maps, live.ground.tileScale);
+      }
 
       // Animation playback: advance every live character by the frame
       // delta (clamped so a background tab doesn't teleport the walk).

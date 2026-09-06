@@ -61,6 +61,71 @@ vec3 ACESFilmic(vec3 color) {
 }
 `;
 
+// Ground plane: a unit quad scaled to the world extent in the vertex
+// stage (same iso projection as the mesh path); UVs derive from world xz
+// so the material tiles in world units with REPEAT wrap.
+const GROUND_VERT = `#version 300 es
+precision highp float;
+in vec2 aCorner;  // 0..1 over the world extent
+uniform vec3 uProj;    // world-image origin px (x, y), px per unit
+uniform vec2 uRes;
+uniform vec4 uView;    // view transform: scale.xy, offset.xy (backing px)
+uniform float uExtent; // world extent (the plane spans [0, extent]^2)
+out vec3 vWorldPos;
+${ISO_GLSL}
+void main() {
+  vec3 wp = vec3(aCorner.x * uExtent, 0.0, aCorner.y * uExtent);
+  vWorldPos = wp;
+  vec2 px = vec2(uProj.x + dot(SCREEN_RIGHT, wp) * uProj.z,
+                 uProj.y - dot(SCREEN_UP, wp) * uProj.z);
+  px = px * uView.xy + uView.zw;
+  gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
+}
+`;
+
+// Lean PBR: albedo + tangent-space normal perturbation + arm.r ambient
+// occlusion, env ambient (SH probe) plus the key light exactly as the
+// mesh path applies them, through the shared ACES chain. The arm map's
+// roughness/metal channels are decoded (bound) but not yet applied.
+const GROUND_FRAG = `#version 300 es
+precision highp float;
+uniform sampler2D uDiffuse;
+uniform sampler2D uNormal;
+uniform sampler2D uArm;
+uniform float uTileScale;     // tiles per world unit
+uniform float uDiffuseLinear; // 1.0 = float EXR radiance (already linear)
+uniform float uHasNormal;
+uniform float uHasArm;
+uniform float uDepthA;
+uniform float uDepthB;
+uniform float uSaturation;
+in vec3 vWorldPos;
+out vec4 outColor;
+${SHADE_CHUNK}
+${ACES_GLSL}
+${SH_IRRADIANCE_GLSL}
+${ISO_GLSL}
+void main() {
+  vec2 uv = vWorldPos.xz * uTileScale;
+  vec4 diff = texture(uDiffuse, uv);
+  vec3 albedo = uDiffuseLinear > 0.5 ? diff.rgb : srgbToLinear(diff.rgb);
+  vec3 N = vec3(0.0, 1.0, 0.0);
+  if (uHasNormal > 0.5) {
+    vec3 n = texture(uNormal, uv).xyz * 2.0 - 1.0;
+    // gl tangent convention: xy tangent (+X/+Z world), +Z blue is up ->
+    // world +Y. The plane's tangents are analytic, no per-vertex data.
+    N = normalize(vec3(n.x, n.z, n.y));
+  }
+  float ao = uHasArm > 0.5 ? texture(uArm, uv).r : 1.0;
+  vec3 hdr = albedo * ao * max(shIrradiance(N), vec3(0.0));
+  vec3 texel = linearToSrgb(ACESFilmic(hdr));
+  float lum = dot(texel, vec3(0.2126, 0.7152, 0.0722));
+  texel = mix(vec3(lum), texel, uSaturation);
+  outColor = vec4(shade(texel, N), 1.0);
+  gl_FragDepth = uDepthA * dot(VIEW_DIR, vWorldPos) + uDepthB;
+}
+`;
+
 const FLAT_VERT = `#version 300 es
 in vec2 aPos;
 in vec4 aColor;   // rgb + per-vertex alpha
@@ -366,6 +431,29 @@ export class Renderer {
   private meshIndexCount = 0;
   private meshUniforms: Record<'gpu' | 'cpu', MeshUniformSet>;
   private meshFrame: [number, number, number] = [0, 0, 64];
+  private groundProg: WebGLProgram;
+  private groundTexVao: WebGLVertexArrayObject;
+  private groundTexVbo: WebGLBuffer;
+  private groundDiffuseTex: WebGLTexture | null = null;
+  private groundNormalTex: WebGLTexture | null = null;
+  private groundArmTex: WebGLTexture | null = null;
+  private groundMatTiles = false;
+  /** Display saturation of the env the baked renders were produced with. */
+  private envSaturation = 1;
+  private groundUniforms: {
+    res: WebGLUniformLocation;
+    view: WebGLUniformLocation;
+    proj: WebGLUniformLocation;
+    extent: WebGLUniformLocation;
+    tileScale: WebGLUniformLocation;
+    diffuseLinear: WebGLUniformLocation;
+    hasNormal: WebGLUniformLocation;
+    hasArm: WebGLUniformLocation;
+    saturation: WebGLUniformLocation;
+    depthA: WebGLUniformLocation;
+    depthB: WebGLUniformLocation;
+    light: Uniforms3;
+  };
   private uFlatRes: WebGLUniformLocation;
   private uFlatView: WebGLUniformLocation;
   private uFlatLight: Uniforms3;
@@ -489,6 +577,47 @@ export class Renderer {
     };
     this.meshVao = gl.createVertexArray()!;
     this.setMesh(null, null);
+
+    // Textured ground plane (replaces the flat batch while a material is
+    // set); the shared depth map matches the mesh path exactly.
+    this.groundProg = link(gl, GROUND_VERT, GROUND_FRAG);
+    const gu = (name: string): WebGLUniformLocation => gl.getUniformLocation(this.groundProg, name)!;
+    this.groundUniforms = {
+      res: gu('uRes'),
+      view: gu('uView'),
+      proj: gu('uProj'),
+      extent: gu('uExtent'),
+      tileScale: gu('uTileScale'),
+      diffuseLinear: gu('uDiffuseLinear'),
+      hasNormal: gu('uHasNormal'),
+      hasArm: gu('uHasArm'),
+      saturation: gu('uSaturation'),
+      depthA: gu('uDepthA'),
+      depthB: gu('uDepthB'),
+      light: {
+        dir: gu('uLightDir'),
+        key: gu('uKeyLight'),
+        ambient: gu('uAmbient'),
+      },
+    };
+    gl.useProgram(this.groundProg);
+    gl.uniform1f(this.groundUniforms.depthA, -1 / (2 * DEPTH_LINEAR_RANGE));
+    gl.uniform1f(this.groundUniforms.depthB, 0.5);
+    gl.uniform1i(gu('uDiffuse'), 0);
+    gl.uniform1i(gu('uNormal'), 1);
+    gl.uniform1i(gu('uArm'), 2);
+    this.groundTexVao = gl.createVertexArray()!;
+    this.groundTexVbo = gl.createBuffer()!;
+    gl.bindVertexArray(this.groundTexVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.groundTexVbo);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]),
+      gl.STATIC_DRAW,
+    );
+    const aGroundCorner = gl.getAttribLocation(this.groundProg, 'aCorner');
+    gl.enableVertexAttribArray(aGroundCorner);
+    gl.vertexAttribPointer(aGroundCorner, 2, gl.FLOAT, false, 8, 0);
 
     gl.disable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
@@ -700,6 +829,7 @@ export class Renderer {
 
   /** Display-referred env parameters that shaped the baked render texels. */
   setEnvDisplay(exposure: number, saturation: number): void {
+    this.envSaturation = saturation;
     const gl = this.gl;
     for (const [mode, u] of [
       ['gpu', this.meshUniforms.gpu],
@@ -722,6 +852,9 @@ export class Renderer {
     if (this.gbufferTex) gl.deleteTexture(this.gbufferTex);
     gl.deleteBuffer(this.groundVbo);
     gl.deleteVertexArray(this.groundVao);
+    gl.deleteBuffer(this.groundTexVbo);
+    gl.deleteVertexArray(this.groundTexVao);
+    this.deleteGroundTextures();
     gl.deleteBuffer(this.shadowVbo);
     gl.deleteVertexArray(this.shadowVao);
     gl.deleteBuffer(this.highlightVbo);
@@ -737,6 +870,7 @@ export class Renderer {
     if (this.meshAlbedoTex) gl.deleteTexture(this.meshAlbedoTex);
     gl.deleteVertexArray(this.meshVao);
     gl.deleteProgram(this.flatProg);
+    gl.deleteProgram(this.groundProg);
     gl.deleteProgram(this.meshProgGpu);
     gl.deleteProgram(this.meshProgCpu);
     gl.deleteProgram(this.spriteProg);
@@ -802,6 +936,81 @@ export class Renderer {
     gl.bindVertexArray(null);
   }
 
+  /** World extent for the textured ground plane (world units per side). */
+  setGroundExtent(extent: number): void {
+    this.gl.useProgram(this.groundProg);
+    this.gl.uniform1f(this.groundUniforms.extent, extent);
+  }
+
+  /**
+   * Set the textured ground plane's material maps (null = none: the flat
+   * batch draws instead) and tile scale (tiles per world unit). Structural
+   * counterpart of the app-side `GroundMaterialMaps`.
+   */
+  setGroundMaterial(
+    maps: {
+      diffuse:
+        | { kind: 'srgb'; image: ImageBitmap }
+        | { kind: 'linear'; data: Float32Array; width: number; height: number };
+      normal: ImageBitmap | null;
+      arm: ImageBitmap | null;
+    } | null,
+    tileScale: number,
+  ): void {
+    const gl = this.gl;
+    this.deleteGroundTextures();
+    this.groundMatTiles = maps !== null;
+    gl.useProgram(this.groundProg);
+    gl.uniform1f(this.groundUniforms.tileScale, tileScale);
+    if (!maps) return;
+    const floatLinear = !!gl.getExtension('OES_texture_float_linear');
+    // Ground UVs derive from world xz (REPEAT, no flip): orientation only
+    // mirrors the material, which is irrelevant for a seamless tile.
+    this.groundDiffuseTex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.groundDiffuseTex);
+    if (maps.diffuse.kind === 'srgb') {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, maps.diffuse.image);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.uniform1f(this.groundUniforms.diffuseLinear, 0);
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, maps.diffuse.width, maps.diffuse.height, 0, gl.RGBA, gl.FLOAT, maps.diffuse.data);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, floatLinear ? gl.LINEAR : gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, floatLinear ? gl.LINEAR : gl.NEAREST);
+      gl.uniform1f(this.groundUniforms.diffuseLinear, 1);
+    }
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    const byteMap = (image: ImageBitmap, unit: number): WebGLTexture => {
+      const tex = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      return tex;
+    };
+    this.groundNormalTex = maps.normal ? byteMap(maps.normal, 1) : null;
+    this.groundArmTex = maps.arm ? byteMap(maps.arm, 2) : null;
+    gl.uniform1f(this.groundUniforms.hasNormal, maps.normal ? 1 : 0);
+    gl.uniform1f(this.groundUniforms.hasArm, maps.arm ? 1 : 0);
+  }
+
+  private deleteGroundTextures(): void {
+    const gl = this.gl;
+    if (this.groundDiffuseTex) gl.deleteTexture(this.groundDiffuseTex);
+    if (this.groundNormalTex) gl.deleteTexture(this.groundNormalTex);
+    if (this.groundArmTex) gl.deleteTexture(this.groundArmTex);
+    this.groundDiffuseTex = null;
+    this.groundNormalTex = null;
+    this.groundArmTex = null;
+  }
+
   render(
     instances: Float32Array,
     count: number,
@@ -829,15 +1038,36 @@ export class Renderer {
       gl.uniform3f(u.proj, this.meshFrame[0], this.meshFrame[1], this.meshFrame[2]);
     }
 
-    // 1. Ground: opaque, no depth interaction (writes none, tests none —
-    //    sprites always composite over it).
+    // 1. Ground: opaque. Unlit flat batch by default (no depth
+    //    interaction — sprites always composite over it); with a material
+    //    selected the textured plane draws instead, writing the shared
+    //    linear depth so sprites occlude against it per pixel.
     gl.disable(gl.BLEND);
-    gl.disable(gl.DEPTH_TEST);
-    gl.useProgram(this.flatProg);
-    gl.uniform2f(this.uFlatRes, canvas.width, canvas.height);
-    uploadLight(gl, this.uFlatLight, this.light);
-    gl.bindVertexArray(this.groundVao);
-    gl.drawArrays(gl.TRIANGLES, 0, this.groundVerts);
+    if (this.groundMatTiles) {
+      gl.enable(gl.DEPTH_TEST);
+      gl.useProgram(this.groundProg);
+      gl.uniform2f(this.groundUniforms.res, canvas.width, canvas.height);
+      gl.uniform4f(this.groundUniforms.view, view.zoom, view.zoom, view.panX, view.panY);
+      gl.uniform3f(this.groundUniforms.proj, this.meshFrame[0], this.meshFrame[1], this.meshFrame[2]);
+      gl.uniform1f(this.groundUniforms.saturation, this.envSaturation);
+      uploadLight(gl, this.groundUniforms.light, this.light);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.groundDiffuseTex);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this.groundNormalTex);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, this.groundArmTex);
+      gl.bindVertexArray(this.groundTexVao);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      gl.disable(gl.DEPTH_TEST);
+    } else {
+      gl.disable(gl.DEPTH_TEST);
+      gl.useProgram(this.flatProg);
+      gl.uniform2f(this.uFlatRes, canvas.width, canvas.height);
+      uploadLight(gl, this.uFlatLight, this.light);
+      gl.bindVertexArray(this.groundVao);
+      gl.drawArrays(gl.TRIANGLES, 0, this.groundVerts);
+    }
 
     // 2. Contact shadows: blended, still no depth interaction — they lie
     //    flat on the ground and every sprite composites over them.

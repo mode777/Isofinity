@@ -21,7 +21,7 @@ in the properties panel. See `docs/runtime.md` for the editor shell.
 The editor binds a local folder through the File System Access API
 ("Open workspace…" in the top bar): the picked folder is expected to hold
 (and is created with, if missing) the convention subfolders `hdri/`,
-`models/`, `sprites/`, `worlds/`, `presets/`. The connection is remembered
+`models/`, `sprites/`, `worlds/`, `presets/`, `materials/`. The connection is remembered
 locally
 (IndexedDB), so a reload only needs one permission click ("Reconnect
 workspace…"). While connected, the project browser lists `models/`,

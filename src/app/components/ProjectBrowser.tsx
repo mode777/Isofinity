@@ -1,13 +1,14 @@
 import { useRef } from 'react';
 import { openBundleDoc, openGltfFiles, openModelDoc } from '../store/bake.js';
 import { useProject } from '../store/project.js';
-import { newWorldDoc, openWorldDoc } from '../store/world.js';
+import { newWorldDoc, openWorldDoc, selectGroundMaterial } from '../store/world.js';
 import { useWorkspace } from '../store/workspace.js';
 
 export function ProjectBrowser(): React.JSX.Element {
   const sprites = useProject((s) => s.sprites);
   const models = useProject((s) => s.models);
   const worlds = useProject((s) => s.worlds);
+  const materials = useProject((s) => s.materials);
   const refresh = useProject((s) => s.refresh);
   const connected = useWorkspace((s) => s.state.kind) === 'connected';
   const gltfInput = useRef<HTMLInputElement>(null);
@@ -64,6 +65,15 @@ export function ProjectBrowser(): React.JSX.Element {
           <FileList names={worlds} empty="worlds/ is empty" onOpen={(n) => void openWorldDoc(n)} />
         ) : (
           <p className="hint">Connect a workspace to browse worlds/</p>
+        )}
+      </section>
+
+      <section>
+        <h3>Materials</h3>
+        {connected ? (
+          <FileList names={materials} empty="materials/ is empty" onOpen={(n) => void selectGroundMaterial(n)} />
+        ) : (
+          <p className="hint">Connect a workspace to browse materials/</p>
         )}
       </section>
 

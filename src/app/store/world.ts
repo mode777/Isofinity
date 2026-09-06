@@ -18,6 +18,7 @@ import {
   equirectFromExr,
   equirectFromProcedural,
   projectRadianceSh,
+  type EquirectRadiance,
 } from '../../runtime/shProbe.js';
 import characterAssetUrl from '../assets/CesiumMan.glb?url';
 import type {
@@ -35,13 +36,23 @@ import {
   PRIMITIVE_KINDS,
   type EnvDisplayParams,
 } from '../document.js';
+import {
+  DEFAULT_GROUND_TILE_SCALE,
+  defaultGroundState,
+} from '../document.js';
+import { parseGroundMaterial } from '../groundMaterial.js';
+import { parseHdrFile } from '../hdr.js';
 import { nextDocId, useEditor, type EditorState } from './editor.js';
 import { bakePrimitiveLayer, anyBakeBusy, resultToLayer } from './bake.js';
 import { SPRITE_EXTS, useProject } from './project.js';
 
-const WORLD_FORMAT = 'isoinfinity-world/3';
+const WORLD_FORMAT = 'isoinfinity-world/4';
 /** Older formats the parser still accepts; heights/directions default. */
-const LEGACY_WORLD_FORMATS = ['isoinfinity-world/1', 'isoinfinity-world/2'];
+const LEGACY_WORLD_FORMATS = [
+  'isoinfinity-world/1',
+  'isoinfinity-world/2',
+  'isoinfinity-world/3',
+];
 
 const ed = (): EditorState => useEditor.getState();
 const worldDoc = (docId: string): WorldDocument | null => {
@@ -106,13 +117,22 @@ export async function updateShProbe(docId: string): Promise<void> {
   if (!doc) return;
   const gen = (probeGeneration.get(docId) ?? 0) + 1;
   probeGeneration.set(docId, gen);
-  const env = doc.env;
-  const params = doc.envParams ?? DEFAULT_ENV_PARAMS;
+  // A user-selected world HDRI overrides the provenance-derived one.
+  const env = doc.userEnv ?? doc.env;
+  const params = doc.userEnv
+    ? DEFAULT_ENV_PARAMS
+    : (doc.envParams ?? DEFAULT_ENV_PARAMS);
   try {
     let equirect;
     if (env?.kind === 'hdri') {
-      const file = await readWorkspaceFile('hdri', env.fileName);
-      equirect = equirectFromExr(await file.arrayBuffer());
+      // A file-dialog-loaded HDRI (no workspace) is cached in memory.
+      const cached = fileEnvCache.get(env.fileName);
+      if (cached) {
+        equirect = cached;
+      } else {
+        const file = await readWorkspaceFile('hdri', env.fileName);
+        equirect = equirectFromExr(await file.arrayBuffer());
+      }
     } else {
       equirect = equirectFromProcedural();
     }
@@ -159,6 +179,8 @@ export function newWorldDoc(): string {
     env: null,
     envParams: null,
     shProbe: null,
+    userEnv: null,
+    ground: defaultGroundState(),
     tool: '',
     heightLevel: 0,
     surfaceSnap: false,
@@ -180,6 +202,11 @@ interface WorldFile {
   sprites: { asset: string; x: number; z: number; y: number; dir?: ViewSlot }[];
   light: LightState;
   sun: SunState;
+  /** Ground state (present on /4 files only). */
+  groundMaterial?: string | null;
+  groundTileScale?: number | null;
+  /** User-selected world HDRI (present on /4 files only). */
+  envHdri?: string | null;
 }
 
 const VIEW_SLOT_SET: ReadonlySet<string> = new Set(['n', 'e', 's', 'w']);
@@ -239,11 +266,48 @@ function parseWorldFile(text: string, fileName: string): WorldFile {
   if (!sunRaw || !isFiniteNumber(sunRaw.hour) || !isFiniteNumber(sunRaw.day) || !isFiniteNumber(sunRaw.lat)) {
     throw fail('malformed sun state');
   }
+  // Ground + user-selected environment: optional, /4 and later only.
+  let groundMaterial: string | null = null;
+  let groundTileScale: number | null = null;
+  let envHdri: string | null = null;
+  const groundRaw = obj.ground as Record<string, unknown> | undefined;
+  if (groundRaw !== undefined) {
+    if (typeof groundRaw !== 'object' || groundRaw === null) throw fail('malformed ground state');
+    if (
+      groundRaw.material !== undefined &&
+      groundRaw.material !== null &&
+      typeof groundRaw.material !== 'string'
+    ) {
+      throw fail('malformed ground state — material must be a file name');
+    }
+    groundMaterial = (groundRaw.material as string | null | undefined) ?? null;
+    if (groundRaw.tileScale !== undefined) {
+      if (!isFiniteNumber(groundRaw.tileScale) || groundRaw.tileScale <= 0) {
+        throw fail('malformed ground state — tile scale must be a positive number');
+      }
+      groundTileScale = groundRaw.tileScale;
+    }
+  }
+  const envRaw = obj.env as Record<string, unknown> | undefined;
+  if (envRaw !== undefined) {
+    if (typeof envRaw !== 'object' || envRaw === null) throw fail('malformed env state');
+    if (
+      envRaw.hdri !== undefined &&
+      envRaw.hdri !== null &&
+      typeof envRaw.hdri !== 'string'
+    ) {
+      throw fail('malformed env state — hdri must be a file name');
+    }
+    envHdri = (envRaw.hdri as string | null | undefined) ?? null;
+  }
   return {
     format: WORLD_FORMAT,
     name: typeof obj.name === 'string' ? obj.name : fileName.replace(/\.json$/i, ''),
     savedAt: typeof obj.savedAt === 'string' ? obj.savedAt : undefined,
     sprites,
+    groundMaterial,
+    groundTileScale,
+    envHdri,
     light: {
       azimuthDeg: l.azimuthDeg,
       elevationDeg: l.elevationDeg,
@@ -316,6 +380,8 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       env: null,
       envParams: null,
       shProbe: null,
+      userEnv: null,
+      ground: defaultGroundState(),
       tool: '',
       heightLevel: 0,
       surfaceSnap: false,
@@ -384,8 +450,18 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     }
     doc.tool = doc.layers[0]?.id ?? '';
 
+    // Ground + user-selected environment (/4): names restore immediately,
+    // the material's maps load best-effort after the doc opens.
+    doc.userEnv = data.envHdri ? { kind: 'hdri', fileName: data.envHdri } : null;
+    const groundMaterial = data.groundMaterial ?? null;
+    const groundTileScale = data.groundTileScale ?? DEFAULT_GROUND_TILE_SCALE;
+    doc.ground = { material: groundMaterial, tileScale: groundTileScale, maps: null };
+
     ed().addDoc(doc);
     void updateShProbe(doc.docId);
+    if (groundMaterial) {
+      void applyGroundMaps(doc.docId, groundMaterial);
+    }
     const placed = data.sprites.length - skippedCount(data.sprites, skipped);
     ed().setStatus(
       `Loaded world "${doc.title}" — ${placed} placed` +
@@ -413,6 +489,157 @@ function skippedCount(
   let n = 0;
   for (const s of sprites) if (skipped.some((k) => k.asset === s.asset)) n++;
   return n;
+}
+
+// --- ground & environment ---------------------------------------------------
+
+/**
+ * Load and decode a ground material from materials/ and attach it to the
+ * document. Failures keep the previous material and are reported.
+ */
+async function applyGroundMaps(docId: string, fileName: string): Promise<void> {
+  try {
+    const file = await readWorkspaceFile('materials', fileName);
+    const maps = await parseGroundMaterial(await file.arrayBuffer(), fileName);
+    const note = maps.notes.length > 0 ? ` (${maps.notes.join('; ')})` : '';
+    update(docId, (d) => {
+      if (d.ground.material !== fileName) return;
+      d.ground.maps = maps;
+    });
+    ed().setStatus(`Ground material "${fileName}" applied${note}`);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    update(docId, (d) => {
+      if (d.ground.material === fileName) d.ground.material = null;
+    });
+    ed().setStatus(`Ground material "${fileName}" skipped — ${reason}`);
+  }
+}
+
+/** The target world doc: `docId`, else the active doc, else any open world. */
+function resolveWorldDoc(docId?: string): WorldDocument | null {
+  if (docId) return worldDoc(docId);
+  const state = ed();
+  const active = state.activeDocId ? state.docs[state.activeDocId] : undefined;
+  if (active?.kind === 'world') return active;
+  for (const doc of Object.values(state.docs)) {
+    if (doc.kind === 'world') return doc;
+  }
+  return null;
+}
+
+/**
+ * Select the ground plane's material (a `.material` zip in the workspace's
+ * materials/ folder). The maps load and decode async; the selection is
+ * stored up front and the maps attach when ready.
+ */
+export async function selectGroundMaterial(fileName: string, docId?: string): Promise<void> {
+  const doc = resolveWorldDoc(docId);
+  if (!doc) {
+    ed().setStatus('Ground material: open a world document first');
+    return;
+  }
+  update(doc.docId, (d) => {
+    d.ground.material = fileName;
+    d.ground.maps = null;
+  });
+  ed().markDirty(doc.docId);
+  await applyGroundMaps(doc.docId, fileName);
+}
+
+/** Set the ground material's tiling (tiles per world unit; finite, > 0). */
+export function setGroundTileScale(docId: string, tileScale: number): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  if (!Number.isFinite(tileScale) || tileScale <= 0) return;
+  update(docId, (d) => {
+    d.ground.tileScale = tileScale;
+  });
+  ed().markDirty(docId);
+}
+
+/**
+ * Select the world's environment HDRI (from hdri/); null clears the
+ * selection back to the environment inherited from sprite bake
+ * provenance. Rebuilds the ambient probe.
+ */
+export function setWorldEnv(docId: string, fileName: string | null): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  update(docId, (d) => {
+    d.userEnv = fileName ? { kind: 'hdri', fileName } : null;
+  });
+  ed().markDirty(docId);
+  void updateShProbe(docId);
+}
+
+/** File-dialog-loaded HDRIs (no workspace), keyed by file name. */
+const fileEnvCache = new Map<string, EquirectRadiance>();
+
+/**
+ * Load the world's environment from a raw `.hdr`/`.exr` file (the
+ * no-workspace fallback). The decoded equirect is cached in memory under
+ * the file's name and becomes the user-selected environment.
+ */
+export async function setWorldEnvFile(file: File, docId?: string): Promise<void> {
+  const doc = resolveWorldDoc(docId);
+  if (!doc) {
+    ed().setStatus('World environment: open a world document first');
+    return;
+  }
+  try {
+    const buffer = await file.arrayBuffer();
+    let equirect: EquirectRadiance;
+    if (/\.exr$/i.test(file.name)) {
+      equirect = equirectFromExr(buffer);
+    } else {
+      const { texture } = await parseHdrFile(buffer, file.name);
+      const img = texture.image as { data: Float32Array; width: number; height: number };
+      if (!img?.data) throw new Error('unexpected HDR texture layout');
+      equirect = { rgba: img.data, width: img.width, height: img.height, bottomUp: true };
+    }
+    fileEnvCache.set(file.name, equirect);
+    update(doc.docId, (d) => {
+      d.userEnv = { kind: 'hdri', fileName: file.name };
+    });
+    ed().markDirty(doc.docId);
+    void updateShProbe(doc.docId);
+    ed().setStatus(`World environment: ${file.name}`);
+  } catch (err) {
+    ed().setStatus(
+      `World environment failed to load: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    console.error(err);
+  }
+}
+
+/**
+ * Select the ground plane's material from a raw file (the no-workspace
+ * fallback). The selection is session-only: without materials/ it cannot
+ * restore when the world reloads.
+ */
+export async function selectGroundMaterialFile(file: File, docId?: string): Promise<void> {
+  const doc = resolveWorldDoc(docId);
+  if (!doc) {
+    ed().setStatus('Ground material: open a world document first');
+    return;
+  }
+  try {
+    const maps = await parseGroundMaterial(await file.arrayBuffer(), file.name);
+    update(doc.docId, (d) => {
+      d.ground = { material: file.name, tileScale: d.ground.tileScale, maps };
+    });
+    ed().markDirty(doc.docId);
+    const note = maps.notes.length > 0 ? ` (${maps.notes.join('; ')})` : '';
+    ed().setStatus(
+      `Ground material "${file.name}" applied${note} — with no workspace it will not restore on reload`,
+    );
+  } catch (err) {
+    ed().setStatus(
+      `Ground material "${file.name}" rejected — ${err instanceof Error ? err.message : String(err)}`,
+    );
+    console.error(err);
+  }
 }
 
 // --- save -----------------------------------------------------------------
@@ -470,6 +697,18 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
       })),
       light: doc.light,
       sun: doc.sun,
+      // Ground + user-selected env are additive /4 fields; defaults omit.
+      ...(doc.ground.material || doc.ground.tileScale !== DEFAULT_GROUND_TILE_SCALE
+        ? {
+            ground: {
+              ...(doc.ground.material ? { material: doc.ground.material } : {}),
+              ...(doc.ground.tileScale !== DEFAULT_GROUND_TILE_SCALE
+                ? { tileScale: doc.ground.tileScale }
+                : {}),
+            },
+          }
+        : {}),
+      ...(doc.userEnv?.kind === 'hdri' ? { env: { hdri: doc.userEnv.fileName } } : {}),
     };
     const json = JSON.stringify(worldFile, null, 2);
     await writeWorkspaceFile('worlds', file, new TextEncoder().encode(json));

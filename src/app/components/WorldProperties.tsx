@@ -1,6 +1,17 @@
+import { useRef } from 'react';
 import type { WorldDocument } from '../document.js';
-import { setLight, setSun } from '../store/world.js';
-import { CheckRow, ColorRow, Section, SliderRow } from './controls.js';
+import {
+  selectGroundMaterial,
+  selectGroundMaterialFile,
+  setGroundTileScale,
+  setLight,
+  setSun,
+  setWorldEnv,
+  setWorldEnvFile,
+} from '../store/world.js';
+import { useProject } from '../store/project.js';
+import { useWorkspace } from '../store/workspace.js';
+import { CheckRow, ColorRow, NumberRow, Section, SliderRow } from './controls.js';
 
 function formatHour(v: number): string {
   const h = Math.floor(v);
@@ -10,6 +21,11 @@ function formatHour(v: number): string {
 
 export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Element {
   const { doc } = props;
+  const materials = useProject((s) => s.materials);
+  const hdris = useProject((s) => s.hdris);
+  const connected = useWorkspace((s) => s.state.kind) === 'connected';
+  const materialInput = useRef<HTMLInputElement>(null);
+  const hdriInput = useRef<HTMLInputElement>(null);
 
   const setSunHour = (hour: number): void => {
     setSun(doc.docId, { hour });
@@ -92,6 +108,100 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
         <p className="hint">
           sun now: {Math.round(doc.light.azimuthDeg)}° / {Math.round(doc.light.elevationDeg)}°
         </p>
+      </Section>
+
+      <Section title="Environment">
+        <button onClick={() => hdriInput.current?.click()}>Load HDRI file…</button>
+        <input
+          ref={hdriInput}
+          type="file"
+          accept=".hdr,.exr"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            if (file) void setWorldEnvFile(file, doc.docId);
+          }}
+        />
+        {connected ? (
+          <select
+            title="Workspace hdris"
+            value={doc.userEnv?.kind === 'hdri' ? doc.userEnv.fileName : ''}
+            onChange={(e) => setWorldEnv(doc.docId, e.target.value || null)}
+          >
+            <option value="">(inherit from sprites)</option>
+            {hdris.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        <p className="hint">
+          ambient:{' '}
+          {doc.userEnv
+            ? doc.userEnv.kind === 'hdri'
+              ? doc.userEnv.fileName
+              : 'procedural sky'
+            : doc.env
+              ? doc.env.kind === 'hdri'
+                ? `${doc.env.fileName} (from sprites)`
+                : 'procedural sky (from sprites)'
+              : 'procedural sky'}
+        </p>
+      </Section>
+
+      <Section title="Ground">
+        {connected ? (
+          <select
+            title="Workspace materials"
+            value={doc.ground.material ?? ''}
+            onChange={(e) => {
+              const name = e.target.value;
+              if (name) void selectGroundMaterial(name, doc.docId);
+            }}
+          >
+            <option value="">(checkerboard)</option>
+            {materials.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <>
+            <button onClick={() => materialInput.current?.click()}>
+              Load material file…
+            </button>
+            <input
+              ref={materialInput}
+              type="file"
+              accept=".material,.zip"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (file) void selectGroundMaterialFile(file, doc.docId);
+              }}
+            />
+          </>
+        )}
+        <NumberRow
+          label="Tile scale"
+          value={Number(doc.ground.tileScale.toFixed(4))}
+          min={0.01}
+          max={100}
+          onChange={(v) => setGroundTileScale(doc.docId, v)}
+          disabled={!doc.ground.maps}
+        />
+        {doc.ground.material ? (
+          <p className="hint">material: {doc.ground.material}</p>
+        ) : (
+          <p className="hint">
+            pick a .material zip from materials/ — diffuse required, normal
+            and AO optional
+          </p>
+        )}
       </Section>
     </>
   );

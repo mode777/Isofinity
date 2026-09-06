@@ -12,6 +12,7 @@ export const HDRI_EXTS = ['.hdr', '.exr'];
 export const WORLD_EXTS = ['.json'];
 export const SPRITE_EXTS = [BUNDLE_EXT, '.zip'];
 export const PRESET_EXTS = ['.json'];
+export const MATERIAL_EXTS = ['.material', '.zip'];
 
 export interface ProjectListings {
   sprites: string[];
@@ -19,9 +20,17 @@ export interface ProjectListings {
   worlds: string[];
   hdris: string[];
   presets: string[];
+  materials: string[];
 }
 
-const EMPTY: ProjectListings = { sprites: [], models: [], worlds: [], hdris: [], presets: [] };
+const EMPTY: ProjectListings = {
+  sprites: [],
+  models: [],
+  worlds: [],
+  hdris: [],
+  presets: [],
+  materials: [],
+};
 
 export interface ProjectStore extends ProjectListings {
   /** Re-read every convention folder; clears listings when disconnected. */
@@ -39,14 +48,15 @@ export const useProject = create<ProjectStore>((set) => ({
       return;
     }
     try {
-      const [sprites, models, worlds, hdris, presets] = await Promise.all([
+      const [sprites, models, worlds, hdris, presets, materials] = await Promise.all([
         listWorkspaceFiles('sprites', SPRITE_EXTS),
         listWorkspaceFiles('models', MODEL_EXTS),
         listWorkspaceFiles('worlds', WORLD_EXTS),
         listWorkspaceFiles('hdri', HDRI_EXTS),
         listWorkspaceFiles('presets', PRESET_EXTS),
+        listWorkspaceFiles('materials', MATERIAL_EXTS),
       ]);
-      set({ sprites, models, worlds, hdris, presets });
+      set({ sprites, models, worlds, hdris, presets, materials });
     } catch (err) {
       useEditor.getState().setStatus(`Workspace: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -60,9 +70,11 @@ export const useProject = create<ProjectStore>((set) => ({
           ? MODEL_EXTS
           : folder === 'worlds'
             ? WORLD_EXTS
-            : folder === 'presets'
-              ? PRESET_EXTS
-              : HDRI_EXTS;
+        : folder === 'presets'
+          ? PRESET_EXTS
+          : folder === 'materials'
+            ? MATERIAL_EXTS
+            : HDRI_EXTS;
     return listWorkspaceFiles(folder, exts);
   },
 }));

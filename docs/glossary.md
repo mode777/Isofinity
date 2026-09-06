@@ -54,13 +54,18 @@ the pointer for the real semantics.
   Texture size deliberately excluded.
 - **Workspace** — a local folder bound via the File System Access API
   (`src/shared/workspace.ts`) with convention subfolders `hdri/`,
-  `models/`, `sprites/`, `worlds/`, `presets/`.
+  `models/`, `sprites/`, `worlds/`, `presets/`, `materials/`.
 
 ## World
 
-- **World** — placements + light state, saved as `isoinfinity-world/3`
-  JSON in `worlds/` (`/1`+`/2` still load; missing heights = ground
-  level, missing directions = north).
+- **World** — placements + light state, saved as `isoinfinity-world/4`
+  JSON in `worlds/` (`/1`+`/2`+`/3` still load; missing heights = ground
+  level, missing directions = north, missing ground/env fields = defaults).
+- **Ground material** — a zip file with a `.material` extension in
+  `materials/` holding diffuse (`diff`), AO/Roughness/Metal (`arm`,
+  channels in rgb) and gl-convention normal (`nor_gl`) maps, identified
+  by `<name>_<slot>_*.(exr|png|jpg)`; the ground plane tiles it in world
+  units (`tileScale` = tiles per world unit).
 - **Sprite layer** — a world's loaded sprite asset: padded passes in two
   texture arrays (render RGBA8 + g-buffer RGBA16F) plus per-layer size/
   origin (`src/runtime/assets.ts`). A multi-view asset loads one layer

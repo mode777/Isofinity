@@ -213,15 +213,21 @@ workspace control explains its absence and dialogs/downloads keep working.
 ### Worlds
 
 **Save world** writes `worlds/<name>.json` (name defaults to the first
-free `world-<n>`): the format marker `isoinfinity-world/3`, every placement
+free `world-<n>`): the format marker `isoinfinity-world/4`, every placement
 (asset id + continuous ground position + height, always written; facing
 direction, written only when not north) and the
 full light state — manual azimuth/elevation, intensity, key and ambient
-colors, dynamic-light switch, plus the sun-position values. Saving an
+colors, dynamic-light switch, plus the sun-position values. A `/4` file
+also records additive optional ground state — the ground material's file
+name in `materials/` (omitted when none) and the ground tile scale
+(omitted at the default one tile per world unit) — and a user-selected
+world environment HDRI (`env.hdri`, omitted when the environment is
+inherited from sprite bake provenance). Saving an
 existing name overwrites it. Loading a world validates the file completely
-first (format marker `isoinfinity-world/3` or the older `/1`+`/2`,
+first (format marker `isoinfinity-world/4` or the older `/1`+`/2`+`/3`,
 placements with optional finite height and optional direction
-(`n`/`e`/`s`/`w`), light/sun fields) so a corrupt file fails with
+(`n`/`e`/`s`/`w`), light/sun fields, optional ground/env state) so a corrupt
+file fails with
 a named error and opens nothing; `/1` placements and `/2` placements
 without a height restore at ground level, and placements without a
 direction restore facing north. A valid file then restores the
@@ -230,9 +236,11 @@ hand-tweaked directions round-trip), loads every referenced sprite bundle
 from `sprites/` (each stored view slot with a render pass loads as a
 placeable direction of that asset; views without a render pass are
 skipped with a note, and a placement whose saved direction has no loaded
-view restores facing north), and places the sprites whose asset ids
+view restores facing north), places the sprites whose asset ids
 loaded — placements referencing missing bundles are skipped and named in
-the status line.
+the status line — and resolves the saved ground material against
+`materials/` (a material that is missing or fails to parse is skipped
+with a notice while the rest of the scene loads).
 
 ### Loading sprite bundles
 
@@ -327,6 +335,30 @@ leave a declared shader varying unwritten**, and keep mesh attribute
 buffers plain and separate — an undefined `vUv` varying plus an
 interleaved dynamic VBO once shredded every mesh (even unskinned ones)
 on one driver while all diagnostics showed the data exact.
+
+## Ground plane
+
+The world spans a flat ground plane (`y = 0`, world extent = the grid).
+Without a material it is the flat checkerboard batch (below); with a
+ground material selected it becomes a real world-space quad drawn by its
+own program: lean PBR shading — linearized diffuse albedo, tangent-space
+normal-map perturbation (gl convention, analytic plane tangents), arm-map
+red channel as ambient occlusion — over the same SH ambient probe and
+key+ambient factor, ACES fit and display saturation as the mesh path.
+Roughness/metal are decoded but not applied yet; specular and reflections
+are later work. Ground materials are zip files with a `.material`
+extension in the workspace's `materials/` folder; maps are identified by
+`<name>_(diff|arm|nor_gl)_*.(exr|png|jpg)` (diffuse required, the rest
+degrade with a notice; module `src/app/groundMaterial.ts`). The plane
+writes the shared linear depth (`gl_FragDepth`, same mapping as meshes),
+so sprites occlude against it per pixel; it is backdrop only — never
+pickable or erasable. Tiling is in world units (tiles per world unit,
+REPEAT wrap), adjustable in the properties panel. The world environment
+(pickers in the properties panel: workspace `hdri/` or a raw `.hdr`/
+`.exr` file) sets the ambient probe for meshes and ground; note the
+one-way relationship: baked sprite texels keep the environment they were
+baked with — a user-selected HDRI changes the dynamic ambient only
+(re-baking a sprite re-captures its provenance environment).
 
 ## Renderer
 
