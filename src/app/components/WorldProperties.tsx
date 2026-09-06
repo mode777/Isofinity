@@ -198,8 +198,8 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
           <p className="hint">material: {doc.ground.material}</p>
         ) : (
           <p className="hint">
-            pick a .material zip from materials/ — diffuse required, normal
-            and AO optional
+            pick a .material zip from materials/ — diffuse required (diff or
+            diffuse), normal and AO optional
           </p>
         )}
       </Section>

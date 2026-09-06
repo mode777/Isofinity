@@ -1,9 +1,11 @@
 /**
  * Ground material zips: a `.material` (or `.zip`) file in the workspace's
  * materials/ folder containing three maps identified by file-name pattern
- * `<material_name>_(diff|arm|nor_gl)_*.(exr|png|jpg)` — Diffuse,
- * AO/Roughness/Metal (channels encoded in rgb), and a gl-convention normal
- * map. The diffuse map is required; the others degrade with a notice.
+ * `<material_name>_(diff|diffuse|arm|nor_gl)_*.(exr|png|jpg)` — Diffuse
+ * (`diff`, with `diffuse` accepted as an alias; `diff` wins when both
+ * spellings are present), AO/Roughness/Metal (channels encoded in rgb),
+ * and a gl-convention normal map. The diffuse map is required; the
+ * others degrade with a notice.
  */
 
 import { unzipSync } from 'three/examples/jsm/libs/fflate.module.js';
@@ -23,10 +25,11 @@ export interface GroundMaterialMaps {
   notes: string[];
 }
 
-/** Slot keys as they appear in map file names. */
+/** Slot keys as they appear in map file names (`diffuse` normalizes to `diff`). */
 export type MaterialSlot = 'diff' | 'arm' | 'nor_gl';
 
-const SLOT_RE = /(?:^|_)(diff|arm|nor_gl)_[^/]*\.(exr|png|jpe?g)$/i;
+const SLOT_RE = /(?:^|_)(diffuse|diff|arm|nor_gl)_[^/]*\.(exr|png|jpe?g)$/i;
+const EXACT_DIFF_RE = /(?:^|_)diff_[^/]*\.(exr|png|jpe?g)$/i;
 
 export interface MaterialSlotFiles {
   diff: string;
@@ -36,7 +39,8 @@ export interface MaterialSlotFiles {
 
 /**
  * Match zip entry names to material slots (pure; Node-verifiable). The
- * first match per slot wins; the material is invalid (null) without a
+ * first match per slot wins (`diff` spelling before the `diffuse` alias
+ * for the diffuse slot); the material is invalid (null) without a
  * diffuse map.
  */
 export function matchMaterialMaps(entryNames: string[]): MaterialSlotFiles | null {
@@ -44,13 +48,14 @@ export function matchMaterialMaps(entryNames: string[]): MaterialSlotFiles | nul
   for (const name of entryNames) {
     const m = SLOT_RE.exec(name);
     if (!m) continue;
-    const slot = m[1].toLowerCase() as MaterialSlot;
+    const slot = (m[1].toLowerCase() === 'diffuse' ? 'diff' : m[1].toLowerCase()) as MaterialSlot;
     const list = bySlot.get(slot) ?? [];
     list.push(name);
     bySlot.set(slot, list);
   }
   const diff = bySlot.get('diff');
   if (!diff || diff.length === 0) return null;
+  diff.sort((a, b) => Number(EXACT_DIFF_RE.test(b)) - Number(EXACT_DIFF_RE.test(a)));
   const first = (slot: MaterialSlot): string | null => bySlot.get(slot)?.[0] ?? null;
   return { diff: diff[0], arm: first('arm'), nor_gl: first('nor_gl') };
 }
@@ -99,7 +104,7 @@ export async function parseGroundMaterial(
   const slots = matchMaterialMaps(names);
   if (!slots) {
     throw new Error(
-      `${fileName}: no diffuse map — expected <name>_diff_*.(exr|png|jpg) inside the material zip`,
+      `${fileName}: no diffuse map — expected <name>_diff_* or <name>_diffuse_*.(exr|png|jpg) inside the material zip`,
     );
   }
   const notes: string[] = [];

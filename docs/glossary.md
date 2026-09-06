@@ -62,7 +62,8 @@ the pointer for the real semantics.
   JSON in `worlds/` (`/1`+`/2`+`/3` still load; missing heights = ground
   level, missing directions = north, missing ground/env fields = defaults).
 - **Ground material** — a zip file with a `.material` extension in
-  `materials/` holding diffuse (`diff`), AO/Roughness/Metal (`arm`,
+  `materials/` holding diffuse (`diff`, with `diffuse` accepted as an
+  alias; `diff` wins when both are present), AO/Roughness/Metal (`arm`,
   channels in rgb) and gl-convention normal (`nor_gl`) maps, identified
   by `<name>_<slot>_*.(exr|png|jpg)`; the ground plane tiles it in world
   units (`tileScale` = tiles per world unit).

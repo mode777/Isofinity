@@ -868,6 +868,36 @@ async function runGroundSpike(): Promise<void> {
     renderer.setGroundMaterial(maps, 1);
   }
 
+  // Diffuse-slot alias: `diffuse` spelling accepted, `diff` takes
+  // precedence when both spellings are present (in either zip order),
+  // and a zip with neither spelling is rejected.
+  {
+    const { matchMaterialMaps } = await import('../app/groundMaterial.js');
+    const diffName = 'test_diff_2k.png';
+    const aliasName = 'test_diffuse_2k.png';
+    const armName = 'test_arm_2k.png';
+    const norName = 'test_nor_gl_2k.png';
+
+    ok(matchMaterialMaps([aliasName, armName, norName])?.diff === aliasName,
+      'a diffuse-spelled map satisfies the diffuse slot');
+    ok(matchMaterialMaps([armName, norName]) === null,
+      'a zip with neither diffuse spelling is rejected');
+    ok(matchMaterialMaps([aliasName, diffName, armName, norName])?.diff === diffName &&
+       matchMaterialMaps([diffName, aliasName, armName, norName])?.diff === diffName,
+      'the diff spelling wins over the diffuse alias in both entry orders');
+
+    // End-to-end: an alias-only zip drives the plane identically.
+    const diffPng = await encodePngBytes(new Uint8Array(diffPx), 32, 32);
+    const aliasZip = zipSync({ [aliasName]: diffPng as Uint8Array<ArrayBuffer> });
+    const aliasParsed = await parseGroundMaterial(aliasZip.buffer as ArrayBuffer, 'alias.material');
+    ok(aliasParsed.diffuse.kind === 'srgb' && aliasParsed.notes.length === 0,
+      `alias-only zip decodes with no notes (got ${aliasParsed.notes.length})`);
+    renderer.setGroundMaterial(aliasParsed, 1);
+    const aliasFrame = await frame();
+    ok(aliasFrame === mat1, `alias zip material matches the diff zip material (${aliasFrame.slice(0, 16)}…)`);
+    renderer.setGroundMaterial(maps, 1);
+  }
+
   log(`  ground golden hashes: flat ${flat1.slice(0, 16)}… / material ${mat1.slice(0, 16)}…`);
   renderer.dispose();
 }

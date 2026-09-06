@@ -348,7 +348,8 @@ key+ambient factor, ACES fit and display saturation as the mesh path.
 Roughness/metal are decoded but not applied yet; specular and reflections
 are later work. Ground materials are zip files with a `.material`
 extension in the workspace's `materials/` folder; maps are identified by
-`<name>_(diff|arm|nor_gl)_*.(exr|png|jpg)` (diffuse required, the rest
+`<name>_(diff|diffuse|arm|nor_gl)_*.(exr|png|jpg)` (diffuse required —
+`diffuse` is an alias for `diff`, which takes precedence; the rest
 degrade with a notice; module `src/app/groundMaterial.ts`). The plane
 writes the shared linear depth (`gl_FragDepth`, same mapping as meshes),
 so sprites occlude against it per pixel; it is backdrop only — never
