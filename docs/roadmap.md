@@ -107,7 +107,10 @@ list when a change lands (and prune it — history belongs in the archives).
   sprite pixel class blends it unshaded and writes its true ground-plane
   depth, so the existing LEQUAL batch resolves every shadow/sprite
   interleaving; raised placements suppress it (contact ellipses remain).
-  The transparent-pixel depth rule is ADR 0010.
+  The transparent-pixel depth rule is ADR 0010. Per-placement shadow
+  strength (`isoinfinity-world/5`, `/1`–`/4` still load): a toolbar shadow
+  field like the height field — set before placing, carried by each
+  placement (0 = off), persisted per placement (omitted at full strength).
 
 ## In progress
 

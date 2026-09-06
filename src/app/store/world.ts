@@ -45,12 +45,13 @@ import { nextDocId, useEditor, type EditorState } from './editor.js';
 import { bakePrimitiveLayer, anyBakeBusy, resultToLayer } from './bake.js';
 import { SPRITE_EXTS, useProject } from './project.js';
 
-const WORLD_FORMAT = 'isoinfinity-world/4';
-/** Older formats the parser still accepts; heights/directions default. */
+const WORLD_FORMAT = 'isoinfinity-world/5';
+/** Older formats the parser still accepts; heights/directions/shadows default. */
 const LEGACY_WORLD_FORMATS = [
   'isoinfinity-world/1',
   'isoinfinity-world/2',
   'isoinfinity-world/3',
+  'isoinfinity-world/4',
 ];
 
 const ed = (): EditorState => useEditor.getState();
@@ -185,7 +186,7 @@ export function newWorldDoc(): string {
     heightLevel: 0,
     surfaceSnap: false,
     brushDir: 'n',
-    shadowStrength: {},
+    shadowLevel: 1,
     viewTransform: null,
   };
   ed().addDoc(doc);
@@ -200,7 +201,7 @@ interface WorldFile {
   format: string;
   name?: string;
   savedAt?: string;
-  sprites: { asset: string; x: number; z: number; y: number; dir?: ViewSlot }[];
+  sprites: { asset: string; x: number; z: number; y: number; dir?: ViewSlot; shadow?: number }[];
   light: LightState;
   sun: SunState;
   /** Ground state (present on /4 files only). */
@@ -243,12 +244,16 @@ function parseWorldFile(text: string, fileName: string): WorldFile {
     if (s.dir !== undefined && (typeof s.dir !== 'string' || !VIEW_SLOT_SET.has(s.dir))) {
       throw fail('malformed sprite placement — direction must be a view slot (n/e/s/w)');
     }
+    if (s.shadow !== undefined && (!isFiniteNumber(s.shadow) || s.shadow < 0 || s.shadow > 1)) {
+      throw fail('malformed sprite placement — shadow strength must be a number in [0, 1]');
+    }
     sprites.push({
       asset: s.asset,
       x: s.x,
       z: s.z,
       y: s.y === undefined ? 0 : s.y,
       dir: (s.dir as ViewSlot | undefined) ?? 'n',
+      shadow: s.shadow === undefined ? 1 : s.shadow,
     });
   }
   const l = obj.light as Record<string, unknown> | undefined;
@@ -387,7 +392,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       heightLevel: 0,
       surfaceSnap: false,
       brushDir: 'n',
-    shadowStrength: {},
+    shadowLevel: 1,
       viewTransform: null,
     };
 
@@ -448,7 +453,14 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       // pass missing) still restores, facing north.
       const savedDir = s.dir ?? 'n';
       const dirs = brushDirections(doc, s.asset);
-      doc.world.place(s.x, s.z, s.asset, s.y, dirs.includes(savedDir) ? savedDir : 'n');
+      doc.world.place(
+        s.x,
+        s.z,
+        s.asset,
+        s.y,
+        dirs.includes(savedDir) ? savedDir : 'n',
+        s.shadow,
+      );
     }
     doc.tool = doc.layers[0]?.id ?? '';
 
@@ -688,6 +700,8 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
         y: p.y,
         // North is the default; a north-facing placement may omit dir.
         ...(p.dir !== 'n' ? { dir: p.dir } : {}),
+        // Full strength is the default; omitted keeps /4 files identical.
+        ...(p.shadow !== 1 ? { shadow: p.shadow } : {}),
       })),
       light: doc.light,
       sun: doc.sun,
@@ -783,7 +797,7 @@ export function placeAt(docId: string, gx: number, gz: number, y = 0): void {
     ed().setStatus(`brush "${doc.tool}" is not loaded — pick a brush from the toolbar`);
     return;
   }
-  doc.world.place(gx - 0.5, gz - 0.5, doc.tool, y, dir);
+  doc.world.place(gx - 0.5, gz - 0.5, doc.tool, y, dir, doc.shadowLevel);
   ed().markDirty(docId);
 }
 
@@ -798,6 +812,23 @@ export function setHeightLevel(docId: string, y: number): void {
   if (!Number.isFinite(y) || y === doc.heightLevel) return;
   update(docId, (d) => {
     d.heightLevel = y;
+  });
+}
+
+/**
+ * Set the grounding-shadow strength new placements carry (0 = off, 1 =
+ * full), like the brush height level. Clamped into [0, 1]; non-finite
+ * input is ignored. Editor state only — the value persists with each
+ * placement in the world file, not as document state.
+ */
+export function setShadowLevel(docId: string, strength: number): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  if (!Number.isFinite(strength)) return;
+  const clamped = Math.min(1, Math.max(0, strength));
+  if (clamped === doc.shadowLevel) return;
+  update(docId, (d) => {
+    d.shadowLevel = clamped;
   });
 }
 
@@ -846,26 +877,6 @@ export function cycleBrushDir(docId: string): void {
   const next = dirs[(dirs.indexOf(doc.brushDir) + 1) % dirs.length];
   update(docId, (d) => {
     d.brushDir = next;
-  });
-}
-
-/**
- * Set a sprite layer's grounding-shadow strength (0 = off, 1 = full;
- * per-document in-memory editor state, never saved). Clamps into [0, 1];
- * non-finite input is ignored.
- */
-export function setLayerShadowStrength(
-  docId: string,
-  layerId: string,
-  strength: number,
-): void {
-  const doc = worldDoc(docId);
-  if (!doc) return;
-  if (!Number.isFinite(strength)) return;
-  const clamped = Math.min(1, Math.max(0, strength));
-  update(docId, (d) => {
-    if (d.shadowStrength[layerId] === clamped) return;
-    d.shadowStrength = { ...d.shadowStrength, [layerId]: clamped };
   });
 }
 

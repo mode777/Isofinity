@@ -25,6 +25,7 @@ import {
   selectBrush,
   setBrushDir,
   setHeightLevel,
+  setShadowLevel,
   setSurfaceSnap,
   setTool,
   setWorldViewTransform,
@@ -451,7 +452,13 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         instances = new Float32Array(total * 10);
       }
       let count = 0;
-      const emit = (layerIndex: number, x: number, y: number, z: number): void => {
+      const emit = (
+        layerIndex: number,
+        x: number,
+        y: number,
+        z: number,
+        shadow: number,
+      ): void => {
         const scale = PPU / spriteSet.ppus[layerIndex];
         const [ox, oy] = spriteSet.origins[layerIndex];
         const [w, h] = spriteSet.sizes[layerIndex];
@@ -468,8 +475,9 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         // Placement height: the shader suppresses the baked grounding
         // shadow for anything off the ground plane.
         instances[count * 10 + 8] = y;
-        // Per-layer grounding-shadow strength (0 = off, in-memory state).
-        instances[count * 10 + 9] = live.shadowStrength[spriteSet.ids[layerIndex]] ?? 1;
+        // Per-placement grounding-shadow strength (0 = off; persisted in
+        // isoinfinity-world/5, omitted at the default 1).
+        instances[count * 10 + 9] = shadow;
         count++;
       };
       // Placements arrive far → near; the ghost slots in at its depth key
@@ -477,16 +485,16 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       let ghostDone = false;
       for (const p of placed) {
         if (ghost && !ghostDone && p.key >= ghost.key) {
-          emit(ghost.layer, ghost.x, ghost.y, ghost.z);
+          emit(ghost.layer, ghost.x, ghost.y, ghost.z, live.shadowLevel);
           ghostDone = true;
         }
         const layerIndex = live.layers.findIndex(
           (l) => l.id === viewLayerId(p.primId, p.dir),
         );
         if (layerIndex < 0) continue;
-        emit(layerIndex, p.x, p.y, p.z);
+        emit(layerIndex, p.x, p.y, p.z, p.shadow);
       }
-      if (ghost && !ghostDone) emit(ghost.layer, ghost.x, ghost.y, ghost.z);
+      if (ghost && !ghostDone) emit(ghost.layer, ghost.x, ghost.y, ghost.z, live.shadowLevel);
 
       // Character placements: sync players with the live placement set,
       // advance animation, and emit one opaque draw per character.
@@ -996,6 +1004,16 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         <label className="hint">
           h
           <HeightInput value={doc.heightLevel} onCommit={(v) => setHeightLevel(doc.docId, v)} />
+        </label>
+        <label
+          className="hint"
+          title="Grounding shadow — strength new placements carry (0 = off, 1 = full); persisted per placement in the world file"
+        >
+          shadow
+          <HeightInput
+            value={doc.shadowLevel}
+            onCommit={(v) => setShadowLevel(doc.docId, v)}
+          />
         </label>
         <span className="hint">
           {activeTool === 'eraser'

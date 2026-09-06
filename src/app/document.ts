@@ -270,11 +270,12 @@ export interface WorldDocument {
    */
   brushDir: ViewSlot;
   /**
-   * Per-sprite-layer grounding-shadow strength (0 = off, 1 = full).
-   * Missing entries default to 1. In-memory editor state only — never
-   * written into world files.
+   * Grounding-shadow strength for new placements (0 = off, 1 = full),
+   * like the brush height level: set before placing, carried by each
+   * placement, persisted per placement in `isoinfinity-world/5` (omitted
+   * at the default 1). The value itself is in-memory editor state.
    */
-  shadowStrength: Record<string, number>;
+  shadowLevel: number;
   /**
    * Viewport zoom/pan over the fixed projected world image; null = fit
    * (the whole grid letterboxed in the panel). In-memory editor state

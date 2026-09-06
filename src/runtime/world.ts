@@ -15,6 +15,12 @@ export interface Placement {
    * slot is rendered from the same fixed camera.
    */
   dir: ViewSlot;
+  /**
+   * Grounding-shadow strength of this placement (0 = off, 1 = full).
+   * Persisted per placement in `isoinfinity-world/5` (omitted at the
+   * default 1).
+   */
+  shadow: number;
   key: number;
 }
 
@@ -52,8 +58,8 @@ export class World {
   private meshItems: MeshPlacement[] = [];
   private nextMeshId = 1;
 
-  place(x: number, z: number, primId: string, y = 0, dir: ViewSlot = 'n'): void {
-    this.items.push({ x, z, y, primId, dir, key: depthOf(x, y, z) });
+  place(x: number, z: number, primId: string, y = 0, dir: ViewSlot = 'n', shadow = 1): void {
+    this.items.push({ x, z, y, primId, dir, shadow, key: depthOf(x, y, z) });
   }
 
   /** Place a dynamic mesh; returns its stable placement id. */

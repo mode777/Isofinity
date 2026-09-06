@@ -4,7 +4,6 @@ import {
   selectGroundMaterial,
   selectGroundMaterialFile,
   setGroundTileScale,
-  setLayerShadowStrength,
   setLight,
   setSun,
   setWorldEnv,
@@ -204,27 +203,6 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
           </p>
         )}
       </Section>
-
-      {doc.layers.length > 0 ? (
-        <Section title="Grounding shadows">
-          {doc.layers.map((layer) => (
-            <SliderRow
-              key={layer.id}
-              label={layer.id}
-              value={doc.shadowStrength[layer.id] ?? 1}
-              min={0}
-              max={1}
-              step={0.05}
-              format={(v) => (v === 0 ? 'off' : `${Math.round(v * 100)}%`)}
-              onChange={(v) => setLayerShadowStrength(doc.docId, layer.id, v)}
-            />
-          ))}
-          <p className="hint">
-            per-sprite strength of the baked grounding shadow — 0 turns it
-            off; per-document, not saved
-          </p>
-        </Section>
-      ) : null}
     </>
   );
 }

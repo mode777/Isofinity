@@ -213,24 +213,32 @@ workspace control explains its absence and dialogs/downloads keep working.
 ### Worlds
 
 **Save world** writes `worlds/<name>.json` (name defaults to the first
-free `world-<n>`): the format marker `isoinfinity-world/4`, every placement
+free `world-<n>`): the format marker `isoinfinity-world/5`, every placement
 (asset id + continuous ground position + height, always written; facing
-direction, written only when not north) and the
+direction and grounding-shadow strength, each written only when not the
+default — north and full strength) and the
 full light state — manual azimuth/elevation, intensity, key and ambient
 colors, dynamic-light switch, plus the sun-position values. A `/4` file
 also records additive optional ground state — the ground material's file
 name in `materials/` (omitted when none) and the ground tile scale
 (omitted at the default one tile per world unit) — and a user-selected
 world environment HDRI (`env.hdri`, omitted when the environment is
-inherited from sprite bake provenance). Saving an
+inherited from sprite bake provenance). The strength rides the same
+optional-field pattern: placements added in `/5` record `shadow` only
+when the placement differs from full strength, and the per-placement
+value is set from the toolbar's shadow field before placing (like the
+height field). Saving an
 existing name overwrites it. Loading a world validates the file completely
-first (format marker `isoinfinity-world/4` or the older `/1`+`/2`+`/3`,
-placements with optional finite height and optional direction
-(`n`/`e`/`s`/`w`), light/sun fields, optional ground/env state) so a corrupt
+first (format marker `isoinfinity-world/5` or the older
+`/1`+`/2`+`/3`+`/4`,
+placements with optional finite height, optional direction
+(`n`/`e`/`s`/`w`), optional shadow strength in [0, 1], light/sun fields,
+optional ground/env state) so a corrupt
 file fails with
 a named error and opens nothing; `/1` placements and `/2` placements
-without a height restore at ground level, and placements without a
-direction restore facing north. A valid file then restores the
+without a height restore at ground level, placements without a
+direction restore facing north, and placements without a shadow value
+restore at full strength. A valid file then restores the
 sun values, recomputes the sun, re-applies the saved manual angles (so
 hand-tweaked directions round-trip), loads every referenced sprite bundle
 from `sprites/` (each stored view slot with a render pass loads as a
