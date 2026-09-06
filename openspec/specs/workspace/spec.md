@@ -14,8 +14,8 @@ Each tool SHALL offer a workspace control that opens a local folder through
 the browser's directory picker on an explicit user action. Connecting SHALL
 be allowed to any folder the user picks; on connect the tool SHALL ensure
 the convention subfolders exist — `hdri/`, `models/`, `sprites/`, `worlds/`,
-`presets/`, creating any that are missing — and SHALL show the connected
-state with the folder's name. Canceling the picker SHALL leave the
+`presets/`, `materials/`, creating any that are missing — and SHALL show the
+connected state with the folder's name. Canceling the picker SHALL leave the
 connection state unchanged.
 
 #### Scenario: Connecting creates the folder convention
@@ -23,7 +23,7 @@ connection state unchanged.
 - **WHEN** the user picks an empty folder in the directory picker
 - **THEN** the tool reports the workspace as connected, shows the folder
   name, and the folder now contains `hdri/`, `models/`, `sprites/`,
-  `worlds/`, and `presets/`
+  `worlds/`, `presets/`, and `materials/`
 
 #### Scenario: Existing assets are usable immediately
 
@@ -71,15 +71,20 @@ attempt.
 When connected, the integrated editor SHALL list the contents of the
 convention folders through its project browser, filtered to the accepted
 file types per folder (`models/`: glTF files; `hdri/`: `.hdr`/`.exr`;
-`sprites/`: `.sprite`/`.zip` bundles; `worlds/`: `.json`). Listings SHALL be
-re-read on demand — a refresh action SHALL be available in the project
-browser, and opening a listing SHALL not serve a stale cache after external
-changes.
+`sprites/`: `.sprite`/`.zip` bundles; `worlds/`: `.json`; `materials/`:
+`.material`/`.zip` files). Listings SHALL be re-read on demand — a refresh
+action SHALL be available in the project browser, and opening a listing
+SHALL not serve a stale cache after external changes.
 
 #### Scenario: Listings filter by accepted types
 
 - **WHEN** `models/` contains `.glb`, `.gltf`, and `.txt` files
 - **THEN** the project browser lists only the `.glb` and `.gltf` files
+
+#### Scenario: Materials folder is listed
+
+- **WHEN** `materials/` contains `stone.material` and `notes.txt`
+- **THEN** the project browser lists only `stone.material`
 
 #### Scenario: Refresh picks up external changes
 
