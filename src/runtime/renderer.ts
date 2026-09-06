@@ -32,6 +32,18 @@ const vec3 SCREEN_RIGHT = vec3(${isoFloat(SCREEN_RIGHT[0])}, ${isoFloat(SCREEN_R
 const vec3 SCREEN_UP = vec3(${isoFloat(SCREEN_UP[0])}, ${isoFloat(SCREEN_UP[1])}, ${isoFloat(SCREEN_UP[2])});
 `;
 
+// Inverse of the 2x2 right/up ground basis (the x/z columns of
+// SCREEN_RIGHT/SCREEN_UP): screen coords -> ground (x, z). Generated from
+// the same shared constants as ISO_GLSL; the CPU twin is
+// `screenToGround`/`groundFromWorldImagePx` in src/shared/iso.ts.
+const GROUND_UNPROJ_GLSL = `
+const float SH_A11 = ${isoFloat(SCREEN_RIGHT[0])};
+const float SH_A12 = ${isoFloat(SCREEN_RIGHT[2])};
+const float SH_A21 = ${isoFloat(SCREEN_UP[0])};
+const float SH_A22 = ${isoFloat(SCREEN_UP[2])};
+const float SH_DET = ${isoFloat(SCREEN_RIGHT[0] * SCREEN_UP[2] - SCREEN_RIGHT[2] * SCREEN_UP[0])};
+`;
+
 // Three's ACES filmic fit (the bake tonemap's `tonemapping_fragment`),
 // with exposure folded in as uExposure — the mesh path produces the same
 // tonemapped texel the path-traced render pass stores.
@@ -154,19 +166,24 @@ const SPRITE_VERT = `#version 300 es
 in vec2 aCorner;
 in vec4 aInst;   // px.xy, layer, depthOff
 in vec4 aInst2;  // quadSize px, sprite texel size
+in float aHeight; // placement height (grounding-shadow suppression)
 uniform vec2 uRes;
 uniform vec2 uMaxSize;
 uniform vec4 uView;  // view transform: scale.xy, offset.xy (backing-store px)
 out vec2 vUv;
+out vec2 vWorldPx;  // fragment position in world-image pixels
 flat out float vLayer;
 flat out float vDepthOff;
+flat out float vHeight;
 void main() {
-  vec2 px = aInst.xy + aCorner * aInst2.xy;
-  px = px * uView.xy + uView.zw;
+  vec2 quadPx = aInst.xy + aCorner * aInst2.xy;
+  vWorldPx = quadPx;
+  vec2 px = quadPx * uView.xy + uView.zw;
   gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
   vUv = mix(vec2(0.5), aInst2.zw - 0.5, aCorner) / uMaxSize;
   vLayer = aInst.z;
   vDepthOff = aInst.w;
+  vHeight = aHeight;
 }
 `;
 
@@ -177,19 +194,45 @@ uniform sampler2DArray uRender;
 uniform sampler2DArray uGbuffer;
 uniform float uDepthA;
 uniform float uDepthB;
+uniform vec3 uProj;  // world-image origin px (x, y), px per unit
 in vec2 vUv;
+in vec2 vWorldPx;
 flat in float vLayer;
 flat in float vDepthOff;
+flat in float vHeight;
 out vec4 outColor;
 ${SHADE_CHUNK}
+${ISO_GLSL}
+${GROUND_UNPROJ_GLSL}
 void main() {
   vec4 g = texture(uGbuffer, vec3(vUv, vLayer));
-  // G-buffer emptiness is the hard raster coverage: background pixels are
-  // all-zero. The render pass's antialiased alpha never drops fragments.
-  if (dot(g.rgb, g.rgb) == 0.0) discard;
+  vec4 r = texture(uRender, vec3(vUv, vLayer));
+  if (dot(g.rgb, g.rgb) == 0.0) {
+    // G-buffer-empty render pixels: historically pure background, now also
+    // the baked grounding shadow — a blue-dominant, near-black tint with
+    // mid alpha (r < b). Object-colored AA fringe (r >= b) keeps the
+    // historical discard, so legacy sprites composite unchanged.
+    if (r.a <= 0.0 || r.b <= r.r) discard;
+    // Raised placements would carry the patch into the air: suppress it
+    // (the contact-shadow ellipses cover the raised case).
+    if (vHeight != 0.0) discard;
+    // True ground-plane depth: unproject the fragment's world-image pixel
+    // onto the y = 0 plane (CPU twin: groundFromWorldImagePx) and write
+    // that depth. A shader-written depth drives both the LEQUAL test and
+    // the write, and being physically true for the shadow, both are
+    // correct: farther sprites are darkened, nearer sprites overwrite,
+    // overlapping shadows resolve to the nearer ground point. The tiny
+    // bias settles coplanar comparisons against the ground plane's own
+    // depth in the shadow's favor.
+    vec2 s = (vWorldPx - uProj.xy) / uProj.z;
+    float gx = (SH_A22 * s.x - SH_A12 * s.y) / SH_DET;
+    float gz = (SH_A11 * s.y - SH_A21 * s.x) / SH_DET;
+    gl_FragDepth = uDepthA * (dot(VIEW_DIR, vec3(gx, 0.0, gz)) - 1e-3) + uDepthB;
+    outColor = vec4(r.rgb, r.a);
+    return;
+  }
   float d = g.a + vDepthOff;
   gl_FragDepth = uDepthA * d + uDepthB;
-  vec4 r = texture(uRender, vec3(vUv, vLayer));
   outColor = vec4(shade(r.rgb, g.rgb), r.a);
 }
 `;
@@ -465,6 +508,7 @@ export class Renderer {
   private uSpriteRes: WebGLUniformLocation;
   private uSpriteMaxSize: WebGLUniformLocation;
   private uSpriteView: WebGLUniformLocation;
+  private uSpriteProj: WebGLUniformLocation;
   private uSpriteLight: Uniforms3;
   private uDepthA: WebGLUniformLocation;
   private uDepthB: WebGLUniformLocation;
@@ -503,6 +547,7 @@ export class Renderer {
     this.uSpriteRes = gl.getUniformLocation(this.spriteProg, 'uRes')!;
     this.uSpriteMaxSize = gl.getUniformLocation(this.spriteProg, 'uMaxSize')!;
     this.uSpriteView = gl.getUniformLocation(this.spriteProg, 'uView')!;
+    this.uSpriteProj = gl.getUniformLocation(this.spriteProg, 'uProj')!;
     this.uSpriteLight = {
       dir: gl.getUniformLocation(this.spriteProg, 'uLightDir')!,
       key: gl.getUniformLocation(this.spriteProg, 'uKeyLight')!,
@@ -561,12 +606,16 @@ export class Renderer {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instVbo);
     const aInst = gl.getAttribLocation(this.spriteProg, 'aInst');
     gl.enableVertexAttribArray(aInst);
-    gl.vertexAttribPointer(aInst, 4, gl.FLOAT, false, 32, 0);
+    gl.vertexAttribPointer(aInst, 4, gl.FLOAT, false, 36, 0);
     gl.vertexAttribDivisor(aInst, 1);
     const aInst2 = gl.getAttribLocation(this.spriteProg, 'aInst2');
     gl.enableVertexAttribArray(aInst2);
-    gl.vertexAttribPointer(aInst2, 4, gl.FLOAT, false, 32, 16);
+    gl.vertexAttribPointer(aInst2, 4, gl.FLOAT, false, 36, 16);
     gl.vertexAttribDivisor(aInst2, 1);
+    const aHeight = gl.getAttribLocation(this.spriteProg, 'aHeight');
+    gl.enableVertexAttribArray(aHeight);
+    gl.vertexAttribPointer(aHeight, 1, gl.FLOAT, false, 36, 32);
+    gl.vertexAttribDivisor(aHeight, 1);
 
     gl.bindVertexArray(null);
     gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uRender')!, 0);
@@ -1042,6 +1091,10 @@ export class Renderer {
     gl.useProgram(this.spriteProg);
     gl.uniform2f(this.uSpriteRes, canvas.width, canvas.height);
     gl.uniform4f(this.uSpriteView, view.zoom, view.zoom, view.panX, view.panY);
+    // World-image px origin + px per unit: the grounding shadow's
+    // ground-plane unprojection runs in the same projection the meshes
+    // and the textured ground use.
+    gl.uniform3f(this.uSpriteProj, this.meshFrame[0], this.meshFrame[1], this.meshFrame[2]);
     for (const mode of ['gpu', 'cpu'] as const) {
       const u = this.meshUniforms[mode];
       gl.useProgram(mode === 'gpu' ? this.meshProgGpu : this.meshProgCpu);

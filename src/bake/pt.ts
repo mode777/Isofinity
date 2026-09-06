@@ -277,6 +277,7 @@ export class PtBaker {
     prim: Primitive,
     pxPerUnit: number = this.pxPerUnit,
     azimuthDeg: number = ISO_AZIMUTH_DEG,
+    groundPadPx: number = 0,
   ): void {
     const yawDeg = azimuthDeg - ISO_AZIMUTH_DEG;
     const boxSize = yawRotatedBoxSize(prim.size, yawDeg);
@@ -301,7 +302,9 @@ export class PtBaker {
     normalizeTextures(this.scene);
 
     this.pxPerUnit = pxPerUnit;
-    this.frame = frameIsoBox(boxSize, pxPerUnit, PAD_PX);
+    // The pad must match the raster bake's framing exactly (the grounding
+    // shadow's grown rect) so both passes stay pixel-aligned.
+    this.frame = frameIsoBox(boxSize, pxPerUnit, PAD_PX, ISO_AZIMUTH_DEG, [0, 0, 0], groundPadPx);
     // A new camera (slot change) or scene (source change) must be handed to
     // the tracer again before the next pass.
     this.sceneDirty = true;

@@ -22,6 +22,15 @@ import {
   type ViewSlot,
 } from '../shared/iso.js';
 import { orderedViewSlots, parseViewLayerId, viewLayerId } from '../runtime/assets.js';
+import {
+  boxBlur,
+  composeGroundShadow,
+  groundShadowFrame,
+  groundShadowMask,
+  groundShadowPadPx,
+  GROUND_SHADOW_TINT,
+} from './shadow.js';
+import { frameIsoBox } from './iso.js';
 
 declare const process: { exit(code?: number): void };
 
@@ -397,6 +406,230 @@ async function main(): Promise<void> {
       'parseViewLayerId round-trips tagged ids');
     ok(parseViewLayerId('tree@mail').slot === 'n' && parseViewLayerId('tree@mail').asset === 'tree@mail',
       'non-slot @ suffixes stay part of the asset id');
+  }
+
+  // 6. Grounding shadow: provenance flag round trip + default omission.
+  {
+    console.log('test: grounding-shadow provenance flag round trips');
+    const prov: BakeProvenance = {
+      source: { kind: 'primitive', primitive: 'cube' },
+      bake: { samples: 16, bounces: 2, textureSize: 256 },
+      environment: { procedural: true },
+    };
+    const off = await buildBundle(north, undefined, { ...prov, groundShadow: false });
+    const parsedOff = parseBake(off.buffer as ArrayBuffer);
+    ok(
+      parsedOff.manifest.provenance?.groundShadow === false,
+      'disabled toggle records groundShadow: false',
+    );
+    const on = await buildBundle(north, undefined, prov);
+    const parsedOn = parseBake(on.buffer as ArrayBuffer);
+    ok(
+      parsedOn.manifest.provenance !== undefined &&
+        parsedOn.manifest.provenance!.groundShadow === undefined,
+      'on default omits the field (byte-stable with older saves)',
+    );
+    // Unknown-field tolerance: a /6 manifest with an unexpected provenance
+    // field still parses (readers ignore what they do not consume).
+    const makeZip = (manifest: Record<string, unknown>): Uint8Array =>
+      zipSync({
+        'manifest.json': strToU8(JSON.stringify(manifest)),
+        'x-gbuffer.exr': new Uint8Array(4),
+      });
+    const manifest = {
+      format: 'isoinfinity-bake/6',
+      id: 'x',
+      pxPerUnit: 128,
+      sprite: { width: 2, height: 2, originPx: [0, 0] },
+      passes: {
+        gbuffer: { file: 'x-gbuffer.exr', encoding: 'exr-f32-linear', channels: 'rgb=world-normal a=ray-depth' },
+      },
+      provenance: {
+        source: { kind: 'primitive', primitive: 'cube' },
+        bake: { samples: 16, bounces: 2, textureSize: 256 },
+        environment: { procedural: true },
+        futureField: { anything: true },
+      },
+    };
+    const parsedUnknown = parseBake(makeZip(manifest).buffer as ArrayBuffer);
+    ok(parsedUnknown.provenance !== null, 'manifest with unknown provenance fields still parses');
+  }
+
+  // 7. Grounding shadow: mask math (blur, splat determinism, composition).
+  {
+    console.log('test: grounding-shadow mask math');
+    // Blur: a centered impulse stays a centered blob, symmetric,
+    // deterministic, fading past the kernel radius.
+    const g = new Float32Array(25 * 25);
+    g[12 * 25 + 12] = 1;
+    boxBlur(g, 25, 25, 3);
+    ok(g[12 * 25 + 11] === g[12 * 25 + 13] && g[11 * 25 + 12] === g[13 * 25 + 12],
+      'blur is symmetric');
+    ok(g[12 * 25 + 8] > 0 && g[12 * 25 + 6] < 0.01, 'blur fades past the kernel radius');
+    const g2 = new Float32Array(25 * 25);
+    g2[12 * 25 + 12] = 1;
+    boxBlur(g2, 25, 25, 3);
+    ok(g.every((v, i) => v === g2[i]), 'blur is deterministic');
+
+    // Splat + composition over a synthetic unit-cube bake: the ground
+    // footprint (a top face at y = 1) splats to a solid core and the
+    // composition tints only fully empty pixels.
+    const ppu = 128;
+    const size: Vec3 = [1, 1, 1];
+    const frame = frameIsoBox(size, ppu, 2, ISO_AZIMUTH_DEG, [0, 0, 0], groundShadowPadPx(ppu));
+    const { width: w, height: h } = frame;
+    const gbuffer = new Float32Array(w * h * 4);
+    const vd = frame.viewDir;
+    const project = (p: [number, number, number]): [number, number] | null => {
+      const cam = frame.camera;
+      const e = cam.matrixWorldInverse.elements;
+      const px = p[0] * e[0] + p[1] * e[4] + p[2] * e[8] + e[12];
+      const py = p[0] * e[1] + p[1] * e[5] + p[2] * e[9] + e[13];
+      const sx = (px - cam.left) / (cam.right - cam.left);
+      const sy = (py - cam.bottom) / (cam.top - cam.bottom);
+      const pixX = Math.floor(sx * w);
+      const pixY = Math.floor((1 - sy) * h);
+      if (pixX < 0 || pixX >= w || pixY < 0 || pixY >= h) return null;
+      return [pixX, pixY];
+    };
+    const seen = new Set<string>();
+    for (let i = 0; i <= 64; i++) {
+      for (let j = 0; j <= 64; j++) {
+        const p: [number, number, number] = [i / 64, 1, j / 64];
+        const pix = project(p);
+        if (!pix) continue;
+        // GL readback rows are bottom-up.
+        const idx = ((h - 1 - pix[1]) * w + pix[0]) * 4;
+        gbuffer[idx + 1] = 1; // normal (0,1,0)
+        gbuffer[idx + 3] = vd.x * p[0] + vd.y * p[1] + vd.z * p[2];
+        seen.add(`${pix[0]},${pix[1]}`);
+      }
+    }
+    const result: BakeResult = {
+      id: 'shadowcheck',
+      label: 'shadowcheck',
+      size,
+      width: w,
+      height: h,
+      pxPerUnit: ppu,
+      originPx: frame.originPx,
+      camera: { azimuthDeg: 45, elevationDeg: 30, viewDir: [vd.x, vd.y, vd.z] },
+      gbuffer,
+    };
+    const m1 = groundShadowMask(result, frame);
+    const m2 = groundShadowMask(result, frame);
+    ok(m1.mask.every((v, i) => v === m2.mask[i]), 'splat + blur is deterministic');
+    ok(m1.mask.filter((v) => v > 0.9).length > 0, 'mask has a solid core over the footprint');
+    ok(m1.mask[0] < 0.1, 'mask fades toward the grid corner');
+
+    const rgba = new Uint8Array(w * h * 4);
+    const [oxp, oyp] = [...seen][Math.floor(seen.size / 2)].split(',').map(Number);
+    const oiGL = ((h - 1 - oyp) * w + oxp) * 4;
+    rgba[oiGL] = 200;
+    rgba[oiGL + 1] = 120;
+    rgba[oiGL + 2] = 60;
+    rgba[oiGL + 3] = 255;
+    const composed = composeGroundShadow({ width: w, height: h, rgba }, result, frame);
+    ok(
+      composed.rgba[oiGL] === 200 && composed.rgba[oiGL + 3] === 255,
+      'composition leaves object pixels byte-identical',
+    );
+    let tinted = 0;
+    for (let i = 0; i < w * h; i++) {
+      const o = i * 4;
+      if (
+        o !== oiGL &&
+        composed.rgba[o + 3] > 0 &&
+        composed.rgba[o] === GROUND_SHADOW_TINT[0] &&
+        composed.rgba[o + 2] === GROUND_SHADOW_TINT[2]
+      ) {
+        tinted++;
+      }
+    }
+    ok(tinted > 0, `grounding tint composited into empty pixels (${tinted})`);
+    ok(tinted < (w * h) / 2, 'the patch stays local to the footprint + reach');
+    // Rect growth: shadow frame is the grown frame, matching bake framing.
+    const plain = frameIsoBox(size, ppu, 2);
+    ok(groundShadowFrame(result).width > plain.width, 'shadow frame grows the rect');
+  }
+
+  // 8. Per-slot shadow derivation: each slot's mask comes from its own
+  //    (rotated) presentation — a 2x0.5x1 slab's E slot footprint is the
+  //    quarter-turned 0.5x1x2 box, and its mask core follows it.
+  {
+    console.log('test: per-slot grounding-shadow derivation follows the rotated asset');
+    const ppu = 64;
+    const buildSlot = (size: Vec3, azimuthDeg: number) => {
+      const frame = frameIsoBox(size, ppu, 2, ISO_AZIMUTH_DEG, [0, 0, 0], groundShadowPadPx(ppu));
+      const { width: w, height: h } = frame;
+      const gbuffer = new Float32Array(w * h * 4);
+      const vd = frame.viewDir;
+      const e = frame.camera.matrixWorldInverse.elements;
+      for (let i = 0; i <= 96; i++) {
+        for (let j = 0; j <= 96; j++) {
+          // top face of the box at y = size[1]
+          const p: [number, number, number] = [
+            (i / 96) * size[0],
+            size[1],
+            (j / 96) * size[2],
+          ];
+          const px = p[0] * e[0] + p[1] * e[4] + p[2] * e[8] + e[12];
+          const py = p[0] * e[1] + p[1] * e[5] + p[2] * e[9] + e[13];
+          const sx = (px - frame.camera.left) / (frame.camera.right - frame.camera.left);
+          const sy = (py - frame.camera.bottom) / (frame.camera.top - frame.camera.bottom);
+          const pixX = Math.floor(sx * w);
+          const pixY = Math.floor((1 - sy) * h);
+          if (pixX < 0 || pixX >= w || pixY < 0 || pixY >= h) continue;
+          const idx = ((h - 1 - pixY) * w + pixX) * 4;
+          gbuffer[idx + 1] = 1;
+          gbuffer[idx + 3] = vd.x * p[0] + vd.y * p[1] + vd.z * p[2];
+        }
+      }
+      const result: BakeResult = {
+        id: `slot${size[0]}x${size[2]}`,
+        label: 'slot',
+        size,
+        width: w,
+        height: h,
+        pxPerUnit: ppu,
+        originPx: frame.originPx,
+        camera: { azimuthDeg, elevationDeg: 30, viewDir: [vd.x, vd.y, vd.z] },
+        gbuffer,
+      };
+      return { result, frame };
+    };
+    const north = buildSlot([2, 0.5, 1], 45);
+    const east = buildSlot([1, 0.5, 2], 135);
+    const mn = groundShadowMask(north.result, north.frame);
+    const me = groundShadowMask(east.result, east.frame);
+    // Solid-core centroid in ground space: N over x∈[0,2], z∈[0,1];
+    // E over x∈[0,1], z∈[0,2].
+    const centroid = (m: { mask: Float32Array; width: number; height: number }): [number, number] => {
+      let sx = 0;
+      let sz = 0;
+      let sw = 0;
+      for (let z = 0; z < m.height; z++) {
+        for (let x = 0; x < m.width; x++) {
+          const v = m.mask[z * m.width + x];
+          if (v < 0.9) continue;
+          sx += x;
+          sz += z;
+          sw += v;
+        }
+      }
+      return [sx / sw, sz / sw];
+    };
+    const cell = 1 / 32;
+    const [nx, nz] = centroid(mn);
+        const [ex, ez] = centroid(me);
+    ok(
+      Math.abs(nx * cell - 0.25 - 1) < 0.15 && Math.abs(nz * cell - 0.25 - 0.5) < 0.15,
+      `N mask core centers on the 2x1 footprint (got ${nx * cell},${nz * cell})`,
+    );
+    ok(
+      Math.abs(ex * cell - 0.25 - 0.5) < 0.15 && Math.abs(ez * cell - 0.25 - 1) < 0.15,
+      `E mask core centers on the rotated 1x2 footprint (got ${ex * cell},${ez * cell})`,
+    );
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

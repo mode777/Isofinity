@@ -13,6 +13,7 @@ import {
   savePreset,
   setBakeOrigin,
   setEnvParams,
+  setGroundShadow,
   setModelHeight,
   setModelScale,
   setSettings,
@@ -20,7 +21,8 @@ import {
 } from '../store/bake.js';
 import { useProject } from '../store/project.js';
 import { useWorkspace } from '../store/workspace.js';
-import { NumberRow, Section, SliderRow } from './controls.js';
+import { groundShadowPadPx } from '../../bake/shadow.js';
+import { CheckRow, NumberRow, Section, SliderRow } from './controls.js';
 
 function PresetsSection(props: { doc: BakeDocument }): React.JSX.Element {
   const { doc } = props;
@@ -194,6 +196,9 @@ export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Elemen
         ),
         PX_PER_UNIT,
         PAD_PX,
+        undefined,
+        undefined,
+        doc.groundShadow ? groundShadowPadPx(PX_PER_UNIT) : 0,
       )
     : null;
   const overCap =
@@ -254,6 +259,15 @@ export function SpriteProperties(props: { doc: BakeDocument }): React.JSX.Elemen
       <OriginSection doc={doc} />
 
       <Section title="Path tracing">
+        <CheckRow
+          label="Grounding shadow"
+          checked={doc.groundShadow}
+          onChange={(v) => setGroundShadow(doc.docId, v)}
+        />
+        <p className="hint">
+          bakes a soft ground darkening into the render pass's transparent pixels —
+          takes effect on the next render
+        </p>
         <SliderRow
           label="Samples"
           value={doc.settings.samples}

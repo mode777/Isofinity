@@ -109,6 +109,12 @@ export interface BakeDocument {
   /** Live environment (texture + params) used by the path tracer. */
   ptEnv: PtEnvironment;
   settings: PtSettings;
+  /**
+   * Grounding-shadow toggle: bakes a soft ground darkening into the render
+   * pass's empty pixels (default on). Persisted state — provenance records
+   * `groundShadow: false` when disabled (omitted at the on default).
+   */
+  groundShadow: boolean;
   /** North view's g-buffer — the default slot, and what worlds consume. */
   result: BakeResult | null;
   /** North view's path-traced lit render. */

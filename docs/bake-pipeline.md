@@ -163,6 +163,18 @@ planned KTX2/UASTC delivery would carry.
   empty pixels are detected as `length(normal) == 0`. Testing `a == 0`
   alone would be wrong — depth 0 is a real value at the cube's `(0,0,0)`
   corner.
+- Grounding shadow (optional, per-document toggle, default on): a soft
+  ground darkening derived purely from the g-buffer — covered pixels'
+  unprojected world positions splat onto a ground-plane footprint grid,
+  blur into an occlusion patch, and composite into the render pass's fully
+  empty pixels as a dark blue-tinted (`rgb = 2, 6, 14`), mid-alpha
+  grounding patch. Blue dominance (`r < b`) doubles as the runtime's
+  pixel classifier; object pixels and their AA fringe stay byte-untouched.
+  The patch extends the sprite rect (projected box ∪ projected ground
+  reach); disabling the toggle restores the box-only framing. Composited
+  after tonemapping (black + alpha is ACES-invariant) — a pure post-step,
+  deterministic, and derived per slot so a rotated slot bakes its rotated
+  asset's shadow. No new pass, no path-tracer involvement, no format bump.
 - Per-pixel color ships exclusively through the path-traced `render` pass
   (the runtime requires it before a sprite can be placed). The g-buffer EXR
   is linear float32.
@@ -319,10 +331,12 @@ passes data so the table is the authoritative view list). Each entry holds
 `passes` table; extra views' zip entries are named
 `<id>-<slot>-gbuffer.exr` / `<id>-<slot>-render.png`. Top-level fields stay
 the N view's data, so a `/5`-era reader can still consume the N view of a
-`/6` bundle. The provenance block later gained one more optional field —
-the origin anchor (`origin`) — without a format bump (the `bake.tiles`
-precedent: optional provenance fields don't bump; readers that don't know
-the field ignore it, and bundles omit it at the default).
+`/6` bundle. The provenance block later gained two more optional fields —
+the origin anchor (`origin`) and the grounding-shadow toggle
+(`groundShadow: false`, recorded only when disabled) — without a format
+bump (the `bake.tiles` precedent: optional provenance fields don't bump;
+readers that don't know the field ignore it, and bundles omit it at the
+default).
 
 ### Bundle (`<id>.sprite`)
 

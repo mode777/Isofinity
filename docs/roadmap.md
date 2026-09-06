@@ -98,6 +98,16 @@ list when a change lands (and prune it — history belongs in the archives).
   persistence, and a user-selectable world HDRI (overrides the
   provenance environment for the dynamic ambient only). Framework
   decision recorded as ADR 0009 (the compositor stays raw WebGL2).
+- Baked grounding shadow — an optional per-document bake feature
+  (default on): a soft, direction-agnostic ground darkening derived from
+  the g-buffer footprint (unproject + splat + blur — no new renderer, no
+  format bump) composited into the render pass's empty pixels as a
+  blue-tinted mid-alpha patch; provenance records the toggle only when
+  disabled; the sprite rect grows to the shadow reach. At runtime a third
+  sprite pixel class blends it unshaded and writes its true ground-plane
+  depth, so the existing LEQUAL batch resolves every shadow/sprite
+  interleaving; raised placements suppress it (contact ellipses remain).
+  The transparent-pixel depth rule is ADR 0010.
 
 ## In progress
 

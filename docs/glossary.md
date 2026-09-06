@@ -112,6 +112,12 @@ the pointer for the real semantics.
 - **Contact shadow** — editor chrome: a soft ground ellipse under every
   raised placement (and raised ghost), larger and fainter with height;
   never saved, never dirtying.
+- **Grounding shadow** — an optional baked ground darkening (per-document
+  toggle, default on) derived from the g-buffer and composited into the
+  render pass's empty pixels as a blue-tinted mid-alpha patch; the
+  runtime classifies it by the tint (`r < b`), blends it unshaded, writes
+  its true ground-plane depth, and suppresses it for placements off the
+  ground (`src/bake/shadow.ts`, ADR 0010).
 - **Height gizmo** — editor chrome: landing diamond at a raised ghost's
   footprint plus a plumb line down to the ground cell; hidden at ground
   level.

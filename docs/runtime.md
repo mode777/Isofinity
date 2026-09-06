@@ -272,9 +272,19 @@ image shaded by the dynamic key + ambient lights (multiplicatively, over
 the baked g-buffer normal; see Lighting). Blending uses the render pass's
 antialiased alpha; fragment discard uses g-buffer emptiness
 (`normal == 0`, the hard raster coverage of the bake draw), never the
-render pass's soft edges. The **Dynamic light** checkbox pins shading to
-identity: sprites show the pure prerendered image and the ground its flat
-vertex color.
+render pass's soft edges — with one addition: g-buffer-empty render pixels
+carrying the baked **grounding shadow** (blue-dominant near-black tint,
+`r < b`) composite as the shadow, while empty pixels of any other color
+(the object's AA fringe) keep the historical discard, so sprites without
+the feature are pixel-unchanged. The shadow blends without key/ambient
+shading (it is part of the prerendered image, so it stays visible with the
+**Dynamic light** switch off) and is suppressed for placements off the
+ground plane, where the contact-shadow ellipses still apply. Shadow
+fragments write their true ground-plane depth, not the object's and not
+none — the z-buffer resolves every shadow/sprite interleaving
+   pixel-accurately (`docs/decisions/0010`). The **Dynamic light**
+   checkbox pins shading to identity: sprites show the pure prerendered
+   image and the ground its flat vertex color.
 
 ## Lighting
 
@@ -393,7 +403,8 @@ carry per-vertex RGBA (`[x, y, r, g, b, a]`, 6 floats per vertex):
    pixel-accurately. With no character placed the batch is skipped and
    the frame is unchanged.
 4. **Sprites** — one instanced quad per placed object (per-instance quad
-   size + sprite texel size, 8 floats per instance), painter-sorted by
+   size + sprite texel size, 8 floats per instance; a ninth float carries
+   the placement height for grounding-shadow suppression), painter-sorted by
    the 3D depth key `dot(cell-center, viewDir)` (far → near) for blend
    correctness, alpha-blended using the render pass's (antialiased)
    alpha, with **per-pixel occlusion**: each fragment samples the baked
@@ -406,6 +417,13 @@ carry per-vertex RGBA (`[x, y, r, g, b, a]`, 6 floats per vertex):
    pixel-accurately, regardless of draw order — stacking and sinking
    included, at any height. The linear map keeps the whole reachable
    placement range inside [0,1] with ample 24-bit precision.
+   Grounding-shadow fragments (g-buffer-empty, blue-tinted render pixels)
+   instead write the analytic ground-plane depth of their screen position
+   — the GLSL twin of the shared `groundFromWorldImagePx`/`groundDepth`
+   helpers, biased a hair toward the camera to settle coplanar
+   comparisons against the ground plane's own depth — so the single
+   batch's LEQUAL test resolves shadow-vs-sprite interleaving for free
+   (`docs/decisions/0010`).
 5. **Overlay** — hovered footprint (eraser) and the height gizmo
    (landing diamond at a raised ghost + plumb line down to the ground
    cell), as a per-frame vertex batch. No depth interaction. Editor

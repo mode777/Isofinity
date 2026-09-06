@@ -266,7 +266,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     }
     renderer.setGround(GROUND);
 
-    let instances = new Float32Array(256 * 8);
+    let instances = new Float32Array(256 * 9);
     const shadowBatch = new FlatBatchBuilder();
     const overlayBatch = new FlatBatchBuilder();
 
@@ -447,8 +447,8 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           : null;
 
       const total = placed.length + (ghost ? 1 : 0);
-      if (instances.length < total * 8) {
-        instances = new Float32Array(total * 8);
+      if (instances.length < total * 9) {
+        instances = new Float32Array(total * 9);
       }
       let count = 0;
       const emit = (layerIndex: number, x: number, y: number, z: number): void => {
@@ -456,15 +456,18 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         const [ox, oy] = spriteSet.origins[layerIndex];
         const [w, h] = spriteSet.sizes[layerIndex];
         const [cx, cy] = toPx(x, z, y);
-        instances[count * 8] = cx - ox * scale;
-        instances[count * 8 + 1] = cy - oy * scale;
-        instances[count * 8 + 2] = layerIndex;
-        instances[count * 8 + 3] =
+        instances[count * 9] = cx - ox * scale;
+        instances[count * 9 + 1] = cy - oy * scale;
+        instances[count * 9 + 2] = layerIndex;
+        instances[count * 9 + 3] =
           VIEW_DIR[0] * x + VIEW_DIR[1] * y + VIEW_DIR[2] * z;
-        instances[count * 8 + 4] = w * scale;
-        instances[count * 8 + 5] = h * scale;
-        instances[count * 8 + 6] = w;
-        instances[count * 8 + 7] = h;
+        instances[count * 9 + 4] = w * scale;
+        instances[count * 9 + 5] = h * scale;
+        instances[count * 9 + 6] = w;
+        instances[count * 9 + 7] = h;
+        // Placement height: the shader suppresses the baked grounding
+        // shadow for anything off the ground plane.
+        instances[count * 9 + 8] = y;
         count++;
       };
       // Placements arrive far → near; the ghost slots in at its depth key

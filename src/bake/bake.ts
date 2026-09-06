@@ -21,6 +21,7 @@ import {
   isoDirection,
 } from './iso.js';
 import { yawRotatedBoxSize, slotAnchorPoint, type Vec3 } from '../shared/iso.js';
+import { groundShadowPadPx } from './shadow.js';
 import type { MaterialGroup, Primitive } from './primitives.js';
 
 export const PX_PER_UNIT = 128;
@@ -213,12 +214,20 @@ export function bakePrimitive(
   pxPerUnit: number = PX_PER_UNIT,
   azimuthDeg: number = ISO_AZIMUTH_DEG,
   origin: Vec3 = [0, 0, 0],
+  groundShadow: boolean = false,
 ): BakeResult {
   const r = getRenderer();
   const yawDeg = azimuthDeg - ISO_AZIMUTH_DEG;
   const boxSize = yawRotatedBoxSize(prim.size, yawDeg);
   const anchor = slotAnchorPoint(origin, prim.size, yawDeg);
-  const frame = frameIsoBox(boxSize, pxPerUnit, PAD_PX, ISO_AZIMUTH_DEG, anchor);
+  const frame = frameIsoBox(
+    boxSize,
+    pxPerUnit,
+    PAD_PX,
+    ISO_AZIMUTH_DEG,
+    anchor,
+    groundShadow ? groundShadowPadPx(pxPerUnit) : 0,
+  );
   const viewDir = isoDirection(ISO_AZIMUTH_DEG, ISO_ELEVATION_DEG);
   const { width, height } = frame;
   if (width > MAX_SPRITE_PX || height > MAX_SPRITE_PX) {

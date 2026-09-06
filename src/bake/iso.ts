@@ -64,6 +64,7 @@ export function frameIsoBox(
   padPx: number,
   azimuthDeg: number = ISO_AZIMUTH_DEG,
   origin: Vec3 = [0, 0, 0],
+  groundPadPx: number = 0,
 ): IsoFrame {
   const dir = isoDirection(azimuthDeg, ISO_ELEVATION_DEG);
   const center = new Vector3(size[0] / 2, size[1] / 2, size[2] / 2);
@@ -84,18 +85,40 @@ export function frameIsoBox(
   camera.lookAt(center);
   camera.updateMatrixWorld(true);
 
+  // The grounding shadow spreads past the box footprint on the y = 0
+  // ground plane; when a pad is requested, the framing unions the
+  // projected box with the projected ground rect (footprint + pad) so the
+  // shadow fits inside the sprite. Zero (the default) reproduces the
+  // historical box-only framing byte-for-byte.
+  const g = groundPadPx / pxPerUnit;
+  const corners: Vector3[] = [];
+  for (let i = 0; i < 8; i++) {
+    corners.push(
+      new Vector3(
+        (i & 1) * size[0],
+        ((i >> 1) & 1) * size[1],
+        ((i >> 2) & 1) * size[2],
+      ),
+    );
+  }
+  if (g > 0) {
+    for (const [cx, cz] of [
+      [-g, -g],
+      [size[0] + g, -g],
+      [-g, size[2] + g],
+      [size[0] + g, size[2] + g],
+    ]) {
+      corners.push(new Vector3(cx, 0, cz));
+    }
+  }
+
   let minX = Infinity;
   let maxX = -Infinity;
   let minY = Infinity;
   let maxY = -Infinity;
   let minZ = Infinity;
   let maxZ = -Infinity;
-  for (let i = 0; i < 8; i++) {
-    const corner = new Vector3(
-      (i & 1) * size[0],
-      ((i >> 1) & 1) * size[1],
-      ((i >> 2) & 1) * size[2],
-    );
+  for (const corner of corners) {
     corner.applyMatrix4(camera.matrixWorldInverse);
     minX = Math.min(minX, corner.x);
     maxX = Math.max(maxX, corner.x);
@@ -181,8 +204,9 @@ export function projectBoxFrame(
   padPx: number,
   azimuthDeg: number = ISO_AZIMUTH_DEG,
   origin: Vec3 = [0, 0, 0],
+  groundPadPx: number = 0,
 ): BoxFrameProjection {
-  const frame = frameIsoBox(size, pxPerUnit, padPx, azimuthDeg, origin);
+  const frame = frameIsoBox(size, pxPerUnit, padPx, azimuthDeg, origin, groundPadPx);
   const pixels: PxPoint[] = [];
   for (let i = 0; i < 8; i++) {
     const corner = new Vector3(

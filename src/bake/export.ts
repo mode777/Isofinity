@@ -126,6 +126,11 @@ export interface BakeProvenance {
    * older bundles.
    */
   origin?: [number, number, number];
+  /**
+   * The grounding-shadow toggle, recorded only when disabled (absent =
+   * the on default, keeping bundles without the field byte-stable).
+   */
+  groundShadow?: boolean;
 }
 
 export interface BakeManifest {

@@ -6,6 +6,7 @@ import {
   type BundleExtraView,
 } from '../../bake/bundle.js';
 import { debugPositionCanvas, download } from '../../bake/export.js';
+import { composeGroundShadow, groundShadowFrame, groundShadowPadPx } from '../../bake/shadow.js';
 import { loadGltf, detectSpecGloss, readGlbJsonSlice, type GltfSource } from '../../bake/gltf.js';
 import { convertSpecGlossToMR } from '../../bake/specgloss.js';
 import {
@@ -133,6 +134,7 @@ function baseBakeDoc(title: string): BakeDocument {
     env: { kind: 'procedural' },
     ptEnv: proceduralEnvironment(),
     settings: { ...DEFAULT_PT_SETTINGS },
+    groundShadow: true,
     result: null,
     render: null,
     extraViews: {},
@@ -331,6 +333,7 @@ export async function openBundleDoc(fileName: string): Promise<void> {
         denoise: false,
       };
       doc.origin = finiteOrigin(prov.origin);
+      doc.groundShadow = prov.groundShadow !== false;
       if (prov.source.kind === 'primitive') {
         doc.source = { kind: 'primitive', primitive: prov.source.primitive as PrimitiveKind };
       } else {
@@ -466,8 +469,13 @@ function finiteOrigin(value: unknown): Vec3 {
 }
 
 /** Re-project an anchor into a baked slot's stored frame (pure math). */
-function anchorOriginPx(anchor: Vec3, size: Vec3, pxPerUnit: number): [number, number] {
-  return projectBoxFrame(size, pxPerUnit, PAD_PX, ISO_AZIMUTH_DEG, anchor).origin;
+function anchorOriginPx(
+  anchor: Vec3,
+  size: Vec3,
+  pxPerUnit: number,
+  groundPadPx = 0,
+): [number, number] {
+  return projectBoxFrame(size, pxPerUnit, PAD_PX, ISO_AZIMUTH_DEG, anchor, groundPadPx).origin;
 }
 
 /**
@@ -488,7 +496,15 @@ export function setBakeOrigin(docId: string, origin: Vec3): void {
     d.origin = next;
     if (d.result) {
       const r = d.result;
-      d.result = { ...r, originPx: anchorOriginPx(next, r.size, r.pxPerUnit) };
+      d.result = {
+        ...r,
+        originPx: anchorOriginPx(
+          next,
+          r.size,
+          r.pxPerUnit,
+          d.groundShadow ? groundShadowPadPx(r.pxPerUnit) : 0,
+        ),
+      };
     }
     for (const slot of EXTRA_VIEW_SLOTS) {
       const passes = d.extraViews[slot];
@@ -500,7 +516,12 @@ export function setBakeOrigin(docId: string, origin: Vec3): void {
           ...passes,
           result: {
             ...passes.result,
-            originPx: anchorOriginPx(anchor, passes.result.size, passes.result.pxPerUnit),
+            originPx: anchorOriginPx(
+              anchor,
+              passes.result.size,
+              passes.result.pxPerUnit,
+              d.groundShadow ? groundShadowPadPx(passes.result.pxPerUnit) : 0,
+            ),
           },
         },
       };
@@ -529,7 +550,13 @@ function bakeRaster(docId: string, slot: ViewSlot = 'n'): void {
     // changed extent since the origin was authored.
     const extent = sourceExtent(doc);
     const origin = extent ? (clampOrigin(doc.origin, extent) ?? DEFAULT_ORIGIN) : DEFAULT_ORIGIN;
-    const result = bakePrimitive(primitiveFor(doc), undefined, slotAzimuthDeg(slot), origin);
+    const result = bakePrimitive(
+      primitiveFor(doc),
+      undefined,
+      slotAzimuthDeg(slot),
+      origin,
+      doc.groundShadow,
+    );
     update(docId, (d) => {
       if (slot === 'n') {
         d.result = result;
@@ -602,7 +629,12 @@ async function renderSlot(
     const b = getBaker(baked);
     b.applySettings(baked.settings);
     b.setEnvironment(baked.ptEnv);
-    b.setPrimitive(primitiveFor(baked), passes.result.pxPerUnit, slotAzimuthDeg(slot));
+    b.setPrimitive(
+      primitiveFor(baked),
+      passes.result.pxPerUnit,
+      slotAzimuthDeg(slot),
+      baked.groundShadow ? groundShadowPadPx(passes.result.pxPerUnit) : 0,
+    );
     const label = prefix ? `${prefix}${slotLabel(slot) || ' N:'}` : `${baked.title}${slotLabel(slot)}:`;
     const image = await b.renderPass({
       onProgress: (samples, total, compiling) => {
@@ -624,16 +656,28 @@ async function renderSlot(
       isCancelled: () => gen !== renderGen,
     });
     if (gen !== renderGen || !image) return 'cancelled';
+    // Grounding shadow: composited into the finished pass's empty pixels
+    // when the document's toggle is on. Pure array math over the g-buffer
+    // + render bytes; the stored pair stays pixel-aligned (both passes
+    // share the grown rect).
+    const shadowed =
+      baked.groundShadow
+        ? composeGroundShadow(
+            image,
+            passes.result,
+            groundShadowFrame(passes.result),
+          )
+        : image;
     update(docId, (d) => {
       // Mirror the derived tile grid into the settings so provenance
       // records the grid this pass actually used.
       if (b.tileGrid !== null) d.settings = { ...d.settings, tiles: b.tileGrid };
       if (slot === 'n') {
-        d.render = image;
+        d.render = shadowed;
       } else {
         const current = d.extraViews[slot];
         if (current) {
-          d.extraViews = { ...d.extraViews, [slot]: { ...current, render: image } };
+          d.extraViews = { ...d.extraViews, [slot]: { ...current, render: shadowed } };
         }
       }
       // A finished render pass is the freshest thing to look at — stay on
@@ -642,7 +686,8 @@ async function renderSlot(
     });
     ed().markDirty(docId);
     ed().setStatus(
-      `${baked.title}${slotLabel(slot)}: render pass ${image.width}x${image.height} px, ${doc.settings.samples} samples`,
+      `${baked.title}${slotLabel(slot)}: render pass ${shadowed.width}x${shadowed.height} px, ${doc.settings.samples} samples` +
+        (baked.groundShadow ? ' — grounding shadow baked' : ''),
     );
     return 'done';
   } catch (err) {
@@ -809,8 +854,23 @@ const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.m
 const num = (v: unknown, fallback: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 
-export function setSettings(docId: string, patch: Partial<PtSettings>): void {
+/**
+ * Toggle the grounding shadow (baked into the render pass's empty pixels).
+ * Takes effect on the next bake — like every properties-panel input it
+ * never starts a pass; an in-flight accumulation is discarded so the pair
+ * stays consistent with the flag.
+ */
+export function setGroundShadow(docId: string, on: boolean): void {
   const doc = bakeDoc(docId);
+  if (!doc || doc.viewOnly || doc.groundShadow === on) return;
+  invalidateRunningRender();
+  update(docId, (d) => {
+    d.groundShadow = on;
+  });
+  ed().markDirty(docId);
+}
+
+export function setSettings(docId: string, patch: Partial<PtSettings>): void {  const doc = bakeDoc(docId);
   if (!doc || doc.viewOnly) return;
   invalidateRunningRender();
   update(docId, (d) => {
@@ -989,6 +1049,11 @@ function provenanceOf(doc: BakeDocument): BakeProvenance | null {
   // default-anchored bundles stay byte-identical).
   if (doc.origin.some((v) => v !== 0)) {
     provenance.origin = [doc.origin[0], doc.origin[1], doc.origin[2]];
+  }
+  // The grounding-shadow toggle rides too — recorded only when disabled,
+  // so bundles with the on default stay byte-identical to older saves.
+  if (!doc.groundShadow) {
+    provenance.groundShadow = false;
   }
   return provenance;
 }
@@ -1189,19 +1254,24 @@ export function resultToLayer(doc: BakeDocument, id: string): SpriteLayer | null
  */
 export async function bakePrimitiveLayer(primitive: PrimitiveKind): Promise<SpriteLayer> {
   const prim = PRIMITIVES[primitive]();
-  const result = bakePrimitive(prim);
+  const result = bakePrimitive(prim, undefined, undefined, undefined, true);
   const settings = { ...DEFAULT_PT_SETTINGS };
   const baker = new PtBaker(settings, result.pxPerUnit);
   try {
     baker.applySettings(settings);
     baker.setEnvironment(proceduralEnvironment());
-    baker.setPrimitive(prim, result.pxPerUnit);
+    baker.setPrimitive(prim, result.pxPerUnit, undefined, groundShadowPadPx(result.pxPerUnit));
     const render = await baker.renderPass({
       onProgress: (samples, total) => {
         ed().setStatus(`Baking ${primitive} brush: ${samples}/${total} samples…`);
       },
     });
     if (!render) throw new Error('primitive brush bake was cancelled');
+    const shadowed = composeGroundShadow(
+      render,
+      result,
+      groundShadowFrame(result),
+    );
     return {
       id: result.id,
       pxPerUnit: result.pxPerUnit,
@@ -1209,7 +1279,7 @@ export async function bakePrimitiveLayer(primitive: PrimitiveKind): Promise<Spri
       height: result.height,
       originPx: result.originPx,
       gbuffer: bakeFloatToHalf(result.gbuffer, result.width, result.height),
-      render: ptImageToLayerBytes(render),
+      render: ptImageToLayerBytes(shadowed),
     };
   } finally {
     baker.dispose();

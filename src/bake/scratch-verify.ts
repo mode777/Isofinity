@@ -688,7 +688,7 @@ async function runMeshSpike(): Promise<void> {
 
   const spriteScale = PPU / cube.pxPerUnit;
   const [cx, cy] = toPx(2, 2, 0);
-  const instances = new Float32Array(8);
+  const instances = new Float32Array(9);
   instances[0] = cx - cube.originPx[0] * spriteScale;
   instances[1] = cy - cube.originPx[1] * spriteScale;
   instances[2] = 0;
@@ -697,6 +697,7 @@ async function runMeshSpike(): Promise<void> {
   instances[5] = h * spriteScale;
   instances[6] = w;
   instances[7] = h;
+  instances[8] = 0;
 
   // The character stands inside the cube's cell at a fixed animation time
   // (GPU skinning — the shipped mode).
@@ -829,7 +830,7 @@ async function runGroundSpike(): Promise<void> {
   // (depth-tested against the ground's written depth).
   const spriteScale = RUNTIME_PPU / cube.pxPerUnit;
   const [u, v] = groundToScreen(2, 2);
-  const instances = new Float32Array(8);
+  const instances = new Float32Array(9);
   instances[0] = 300 + u * RUNTIME_PPU - cube.originPx[0] * spriteScale;
   instances[1] = 500 - v * RUNTIME_PPU - cube.originPx[1] * spriteScale;
   instances[2] = 0;
@@ -838,6 +839,7 @@ async function runGroundSpike(): Promise<void> {
   instances[5] = h * spriteScale;
   instances[6] = w;
   instances[7] = h;
+  instances[8] = 0;
   const withSprite = (): Promise<string> => {
     renderer.render(instances, 1, null, null, { zoom: 1, panX: 0, panY: 0 }, []);
     renderer.readPixels(px);
@@ -899,6 +901,264 @@ async function runGroundSpike(): Promise<void> {
   }
 
   log(`  ground golden hashes: flat ${flat1.slice(0, 16)}… / material ${mat1.slice(0, 16)}…`);
+  renderer.dispose();
+}
+
+/**
+ * Grounding-shadow interleaving spike: synthetic sprites whose render
+ * bytes carry the blue grounding tint in g-buffer-empty pixels, run
+ * through the runtime compositor's shadow pixel class — depth-true
+ * compositing against bare ground, a farther sprite, a nearer sprite,
+ * legacy AA-fringe pixels, and raised-height suppression.
+ * Screen convention of the fixed camera: larger x+z is down-screen
+ * (farther); object bodies rise up-screen from their base.
+ */
+async function runGroundingShadowSpike(): Promise<void> {
+  log('test: grounding-shadow interleaving (runtime compositor)');
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const OX = 96;
+  const OY = 140;
+  const SIDE = 64;
+  const TINT: [number, number, number, number] = [2, 6, 14, 200];
+
+  /** Projected ground-point px (world-image pixels). */
+  const gpx = (x: number, z: number): [number, number] => {
+    const [u, v] = groundToScreen(x, z);
+    return [OX + u * RUNTIME_PPU, OY - v * RUNTIME_PPU];
+  };
+
+  const mkLayer = (
+    id: string,
+    paint: (rgba: Uint8Array, gbuf: Float32Array) => void,
+  ): SpriteLayer => {
+    const rgba = new Uint8Array(SIDE * SIDE * 4);
+    const gbufF = new Float32Array(SIDE * SIDE * 4);
+    paint(rgba, gbufF);
+    // Both arrays are painted top-down (row 0 = sprite top). The render
+    // bytes upload as-is; the g-buffer goes through bakeFloatToHalf,
+    // which flips rows — so flip the painted g-buffer here first and the
+    // flipped result is top-down again, matching the render bytes.
+    for (let y = 0; y < SIDE / 2; y++) {
+      const a = y * SIDE * 4;
+      const b = (SIDE - 1 - y) * SIDE * 4;
+      for (let k = 0; k < SIDE * 4; k++) {
+        const t = gbufF[a + k];
+        gbufF[a + k] = gbufF[b + k];
+        gbufF[b + k] = t;
+      }
+    }
+    return {
+      id,
+      pxPerUnit: RUNTIME_PPU,
+      width: SIDE,
+      height: SIDE,
+      originPx: [0, 0],
+      gbuffer: bakeFloatToHalf(gbufF, SIDE, SIDE),
+      render: rgba,
+    };
+  };
+
+  // Object normal for the wall/cover cards; g-buffer alpha = 0.5 * height
+  // so their written depth grows up-screen coherently with the card.
+  const N_CARD: [number, number, number] = [0, 0, 1];
+  const N_TOP: [number, number, number] = [0, 1, 0];
+
+  // Wall (farther): fully opaque card rising up-screen from its anchor —
+  // originPx (0, SIDE) puts the quad above the projected base.
+  const wall = mkLayer('wall', (rgba, gbuf) => {
+    for (let row = 0; row < SIDE; row++) {
+      for (let col = 0; col < SIDE; col++) {
+        const o = (row * SIDE + col) * 4;
+        rgba[o] = 90;
+        rgba[o + 1] = 110;
+        rgba[o + 2] = 130;
+        rgba[o + 3] = 255;
+        gbuf[o] = N_CARD[0];
+        gbuf[o + 1] = N_CARD[1];
+        gbuf[o + 2] = N_CARD[2];
+        // paint rows top-down; world height falls as the row index grows
+        gbuf[o + 3] = 0.5 * ((SIDE - 1 - row) / SIDE);
+      }
+    }
+  });
+  wall.originPx = [0, SIDE];
+
+  // Cover (nearer): opaque card anchored at its projected base (quad
+  // extends down-screen from it — synthetic, only the depth interplay
+  // matters here).
+  const cover = mkLayer('cover', (rgba, gbuf) => {
+    for (let i = 0; i < SIDE * SIDE; i++) {
+      const o = i * 4;
+      rgba[o] = 190;
+      rgba[o + 1] = 60;
+      rgba[o + 2] = 40;
+      rgba[o + 3] = 255;
+      gbuf[o] = N_CARD[0];
+      gbuf[o + 1] = N_CARD[1];
+      gbuf[o + 2] = N_CARD[2];
+      gbuf[o + 3] = 0.5 * ((SIDE - 1 - Math.floor(i / SIDE)) / SIDE);
+    }
+  });
+
+  // Grounded sprite: object texels in the top half (a top face, normal
+  // (0,1,0)); the rest empty. The caller writes the shadow / fringe texel.
+  const mkGrounded = (
+    shadow: 'tint' | 'fringe' | 'none',
+    texel: [number, number],
+  ): SpriteLayer =>
+    mkLayer('grounded', (rgba, gbuf) => {
+      for (let row = 0; row < SIDE / 2; row++) {
+        for (let col = 0; col < SIDE; col++) {
+          const o = (row * SIDE + col) * 4;
+          rgba[o] = 200;
+          rgba[o + 1] = 200;
+          rgba[o + 2] = 210;
+          rgba[o + 3] = 255;
+          gbuf[o] = N_TOP[0];
+          gbuf[o + 1] = N_TOP[1];
+          gbuf[o + 2] = N_TOP[2];
+          gbuf[o + 3] = 0.4;
+        }
+      }
+      const [tx, ty] = texel;
+      const o = (ty * SIDE + tx) * 4; // below the object half: empty region
+      if (shadow === 'tint') {
+        rgba[o] = TINT[0];
+        rgba[o + 1] = TINT[1];
+        rgba[o + 2] = TINT[2];
+        rgba[o + 3] = TINT[3];
+      } else if (shadow === 'fringe') {
+        rgba[o] = 120;
+        rgba[o + 1] = 90;
+        rgba[o + 2] = 40;
+        rgba[o + 3] = 200;
+      }
+    });
+
+  const set = layersToSet([wall, cover, mkGrounded('none', [0, 0])]);
+  const renderer = new WorldRenderer(canvas, set.renderLayers, set.gbufferLayers, set.maxW, set.maxH);
+  renderer.setMeshFrame(OX, OY, RUNTIME_PPU);
+  renderer.setLight({ dir: [0.5, 0.7071, 0.5], key: [1.2, 1.1, 0.9], ambient: [0.3, 0.3, 0.35] });
+
+  // Ground batch: one big quad in world-image px under everything.
+  {
+    const c0 = gpx(-3, -3);
+    const c1 = gpx(6, -3);
+    const c2 = gpx(6, 6);
+    const c3 = gpx(-3, 6);
+    const v = (p: [number, number]): number[] => [p[0], p[1], 130, 130, 135, 1];
+    const quad = [...v(c0), ...v(c1), ...v(c2), ...v(c0), ...v(c2), ...v(c3)];
+    renderer.setGround(new Float32Array(quad));
+  }
+
+  interface Inst {
+    layer: number;
+    x: number;
+    z: number;
+    y: number;
+  }
+  const instance = (inst: Inst, layerOrigins: [number, number][]): Float32Array => {
+    const scale = RUNTIME_PPU / RUNTIME_PPU;
+    const [ox, oy] = layerOrigins[inst.layer];
+    const [cx, cy] = gpx(inst.x, inst.z);
+    const out = new Float32Array(9);
+    out[0] = cx - ox * scale;
+    out[1] = cy - oy * scale;
+    out[2] = inst.layer;
+    out[3] = VIEW_DIR[0] * inst.x + VIEW_DIR[1] * inst.y + VIEW_DIR[2] * inst.z;
+    out[4] = SIDE * scale;
+    out[5] = SIDE * scale;
+    out[6] = SIDE;
+    out[7] = SIDE;
+    out[8] = inst.y;
+    return out;
+  };
+
+  const px = new Uint8Array(canvas.width * canvas.height * 4);
+  const frame = (list: Inst[], layers: SpriteLayer[]): Promise<string> => {
+    // Re-upload layers for this frame (cheap at 64px; keeps the layer set
+    // per frame so tint/fringe/none variants swap cleanly).
+    const s = layersToSet(layers);
+    renderer.setSprites(s.renderLayers, s.gbufferLayers, s.maxW, s.maxH);
+    const origins = layers.map((l) => l.originPx);
+    const all = new Float32Array(list.length * 9);
+    list.forEach((inst, i) => all.set(instance(inst, origins), i * 9));
+    renderer.render(all, list.length, null, null, { zoom: 1, panX: 0, panY: 0 }, []);
+    renderer.readPixels(px);
+    return sha256(px);
+  };
+  const read = (sx: number, sy: number): [number, number, number] => {
+    const gy = canvas.height - 1 - Math.round(sy);
+    const o = (gy * canvas.width + Math.round(sx)) * 4;
+    return [px[o], px[o + 1], px[o + 2]];
+  };
+  const sum = (c: [number, number, number]): number => c[0] + c[1] + c[2];
+
+  // The shadow texel's screen spot: inside the grounded sprite's empty
+  // region AND inside the wall's up-screen card.
+  const aPos = gpx(0.3, 0.3); // grounded sprite anchor (quad top-left)
+  const S: [number, number] = [100, 165];
+  const texel: [number, number] = [Math.round(S[0] - aPos[0]), Math.round(S[1] - aPos[1])];
+  ok(texel[0] > 0 && texel[0] < SIDE && texel[1] > SIDE / 2 && texel[1] < SIDE,
+    `shadow texel sits in the empty region (${texel[0]},${texel[1]})`);
+
+  const A = (): Inst[] => [
+    { layer: 0, x: 0.3, z: 1.5, y: 0 }, // wall, farther
+    { layer: 2, x: 0.3, z: 0.3, y: 0 }, // grounded sprite, nearer
+  ];
+  const mkSet = (shadow: 'tint' | 'fringe' | 'none'): SpriteLayer[] => [
+    wall,
+    cover,
+    mkGrounded(shadow, texel),
+  ];
+
+  // 1. Bare ground: the tint darkens the ground under it.
+  await frame([{ layer: 2, x: 0.3, z: 0.3, y: 0 }], mkSet('none'));
+  const groundNone = read(S[0], S[1]);
+  await frame([{ layer: 2, x: 0.3, z: 0.3, y: 0 }], mkSet('tint'));
+  const groundTint = read(S[0], S[1]);
+  ok(sum(groundTint) < sum(groundNone),
+    `shadow darkens the bare ground (${sum(groundTint)} < ${sum(groundNone)})`);
+
+  // 2. Farther wall: the tint darkens it; a fringe texel keeps the legacy
+  //    discard; a raised placement suppresses the shadow.
+  await frame([{ layer: 0, x: 0.3, z: 1.5, y: 0 }], mkSet('none'));
+  const wallOnly = read(S[0], S[1]);
+  await frame(A(), mkSet('tint'));
+  const wallShadowed = read(S[0], S[1]);
+  ok(sum(wallShadowed) < sum(wallOnly), `shadow darkens the farther wall (${sum(wallShadowed)} < ${sum(wallOnly)})`);
+  await frame(A(), mkSet('fringe'));
+  const wallFringe = read(S[0], S[1]);
+  ok(sum(wallFringe) === sum(wallOnly), 'legacy AA-fringe texel keeps the discard');
+  {
+    const raised: Inst[] = [
+      { layer: 0, x: 0.3, z: 1.5, y: 0 },
+      { layer: 2, x: 0.3, z: 0.3, y: 1 },
+    ];
+    await frame(raised, mkSet('tint'));
+    const wallRaised = read(S[0], S[1]);
+    ok(sum(wallRaised) === sum(wallOnly), 'raised placement suppresses the baked shadow');
+  }
+
+  // 3. Nearer sprite: its pixels win over the shadow.
+  {
+    const list: Inst[] = [
+      { layer: 0, x: 0.3, z: 1.5, y: 0 },
+      { layer: 2, x: 0.3, z: 0.3, y: 0 },
+      { layer: 1, x: 0.15, z: 0.15, y: 0 },
+    ];
+    await frame(list, mkSet('tint'));
+    const covered = read(S[0], S[1]);
+    const isRed = covered[0] > 120 && covered[1] < 100 && covered[2] < 90;
+    ok(isRed, `nearer sprite composites over the shadow (${covered.join(',')})`);
+  }
+
+  // Golden hashes for the regression diff.
+  const goldTint = await frame(A(), mkSet('tint'));
+  log(`  grounding-shadow golden hash: sha256 ${goldTint}`);
+
   renderer.dispose();
 }
 
@@ -1305,6 +1565,9 @@ async function main(): Promise<void> {
 
   // 7b. Ground-plane spike: textured ground material + compositing.
   await runGroundSpike();
+
+  // 7c. Grounding-shadow spike: shadow pixel class + depth interleaving.
+  await runGroundingShadowSpike();
 
   log(`\n${passed} passed, ${failed} failed`, failed === 0 ? 'pass' : 'fail');
 }

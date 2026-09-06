@@ -100,3 +100,31 @@ export function screenToGround(sx: number, sy: number): [number, number] {
   const z = (-a21 * sx + a11 * sy) / det;
   return [x, z];
 }
+
+/** Linear ray depth of a world ground point (the y = 0 plane). */
+export function groundDepth(x: number, z: number): number {
+  return VIEW_DIR[0] * x + VIEW_DIR[2] * z;
+}
+
+/**
+ * Ground (x/z) point under a world-image pixel — the pixel's view ray hit
+ * with the y = 0 plane. CPU reference twin of the runtime sprite shader's
+ * grounding-shadow depth path (`src/runtime/renderer.ts`):
+ *
+ * ```glsl
+ * vec2 s = (vWorldPx - uProj.xy) / uProj.z;      // groundToScreen coords
+ * float x = ( A22 * s.x - A12 * s.y) / DET;      // inverse of the
+ * float z = (-A21 * s.x + A11 * s.y) / DET;      //   2x2 right/up basis
+ * float d = dot(VIEW_DIR, vec3(x, 0.0, z));      // groundDepth
+ * ```
+ * with `uProj` the world-image origin px + px-per-unit and the A11..A22 /
+ * DET constants generated from SCREEN_RIGHT/SCREEN_UP like ISO_GLSL.
+ */
+export function groundFromWorldImagePx(
+  px: readonly [number, number],
+  originXpx: number,
+  originYpx: number,
+  ppu: number,
+): [number, number] {
+  return screenToGround((px[0] - originXpx) / ppu, (originYpx - px[1]) / ppu);
+}
