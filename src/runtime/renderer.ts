@@ -221,13 +221,15 @@ void main() {
     // that depth. A shader-written depth drives both the LEQUAL test and
     // the write, and being physically true for the shadow, both are
     // correct: farther sprites are darkened, nearer sprites overwrite,
-    // overlapping shadows resolve to the nearer ground point. The tiny
-    // bias settles coplanar comparisons against the ground plane's own
-    // depth in the shadow's favor.
+    // overlapping shadows resolve to the nearer ground point. The engine's
+    // depth map is reversed (z = 0.5 - d/128: nearer = smaller z), so the
+    // coplanar bias ADDS to d — pulling the shadow a hair toward the
+    // camera so comparisons against the ground plane's own written depth
+    // (same plane, same d) pass LEQUAL instead of flickering away.
     vec2 s = (vWorldPx - uProj.xy) / uProj.z;
     float gx = (SH_A22 * s.x - SH_A12 * s.y) / SH_DET;
     float gz = (SH_A11 * s.y - SH_A21 * s.x) / SH_DET;
-    gl_FragDepth = uDepthA * (dot(VIEW_DIR, vec3(gx, 0.0, gz)) - 1e-3) + uDepthB;
+    gl_FragDepth = uDepthA * (dot(VIEW_DIR, vec3(gx, 0.0, gz)) + 1e-3) + uDepthB;
     outColor = vec4(r.rgb, r.a);
     return;
   }

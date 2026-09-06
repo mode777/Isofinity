@@ -965,8 +965,10 @@ async function runGroundingShadowSpike(): Promise<void> {
   const N_CARD: [number, number, number] = [0, 0, 1];
   const N_TOP: [number, number, number] = [0, 1, 0];
 
-  // Wall (farther): fully opaque card rising up-screen from its anchor —
-  // originPx (0, SIDE) puts the quad above the projected base.
+  // Wall (farther than the shadow's ground point — SMALLER x+z, up-screen
+  // in this engine's convention): an opaque synthetic card anchored at its
+  // projected base with the quad extending down-screen over the shadow
+  // spot, so its pixels sit behind the patch and must be darkened by it.
   const wall = mkLayer('wall', (rgba, gbuf) => {
     for (let row = 0; row < SIDE; row++) {
       for (let col = 0; col < SIDE; col++) {
@@ -978,16 +980,13 @@ async function runGroundingShadowSpike(): Promise<void> {
         gbuf[o] = N_CARD[0];
         gbuf[o + 1] = N_CARD[1];
         gbuf[o + 2] = N_CARD[2];
-        // paint rows top-down; world height falls as the row index grows
         gbuf[o + 3] = 0.5 * ((SIDE - 1 - row) / SIDE);
       }
     }
   });
-  wall.originPx = [0, SIDE];
 
-  // Cover (nearer): opaque card anchored at its projected base (quad
-  // extends down-screen from it — synthetic, only the depth interplay
-  // matters here).
+  // Cover (nearer): opaque synthetic card, quad extending down-screen from
+  // its projected base so it covers the shadow spot from in front.
   const cover = mkLayer('cover', (rgba, gbuf) => {
     for (let i = 0; i < SIDE * SIDE; i++) {
       const o = i * 4;
@@ -1097,7 +1096,7 @@ async function runGroundingShadowSpike(): Promise<void> {
   const sum = (c: [number, number, number]): number => c[0] + c[1] + c[2];
 
   // The shadow texel's screen spot: inside the grounded sprite's empty
-  // region AND inside the wall's up-screen card.
+  // region AND inside the wall's card (which extends down-screen over it).
   const aPos = gpx(0.3, 0.3); // grounded sprite anchor (quad top-left)
   const S: [number, number] = [100, 165];
   const texel: [number, number] = [Math.round(S[0] - aPos[0]), Math.round(S[1] - aPos[1])];
@@ -1105,7 +1104,7 @@ async function runGroundingShadowSpike(): Promise<void> {
     `shadow texel sits in the empty region (${texel[0]},${texel[1]})`);
 
   const A = (): Inst[] => [
-    { layer: 0, x: 0.3, z: 1.5, y: 0 }, // wall, farther
+    { layer: 0, x: 0.2, z: 0.3, y: 0 }, // wall, farther than the patch point
     { layer: 2, x: 0.3, z: 0.3, y: 0 }, // grounded sprite, nearer
   ];
   const mkSet = (shadow: 'tint' | 'fringe' | 'none'): SpriteLayer[] => [
@@ -1124,7 +1123,7 @@ async function runGroundingShadowSpike(): Promise<void> {
 
   // 2. Farther wall: the tint darkens it; a fringe texel keeps the legacy
   //    discard; a raised placement suppresses the shadow.
-  await frame([{ layer: 0, x: 0.3, z: 1.5, y: 0 }], mkSet('none'));
+  await frame([{ layer: 0, x: 0.2, z: 0.3, y: 0 }], mkSet('none'));
   const wallOnly = read(S[0], S[1]);
   await frame(A(), mkSet('tint'));
   const wallShadowed = read(S[0], S[1]);
@@ -1134,7 +1133,7 @@ async function runGroundingShadowSpike(): Promise<void> {
   ok(sum(wallFringe) === sum(wallOnly), 'legacy AA-fringe texel keeps the discard');
   {
     const raised: Inst[] = [
-      { layer: 0, x: 0.3, z: 1.5, y: 0 },
+      { layer: 0, x: 0.2, z: 0.3, y: 0 },
       { layer: 2, x: 0.3, z: 0.3, y: 1 },
     ];
     await frame(raised, mkSet('tint'));
@@ -1145,7 +1144,7 @@ async function runGroundingShadowSpike(): Promise<void> {
   // 3. Nearer sprite: its pixels win over the shadow.
   {
     const list: Inst[] = [
-      { layer: 0, x: 0.3, z: 1.5, y: 0 },
+      { layer: 0, x: 0.2, z: 0.3, y: 0 },
       { layer: 2, x: 0.3, z: 0.3, y: 0 },
       { layer: 1, x: 0.15, z: 0.15, y: 0 },
     ];
