@@ -440,6 +440,8 @@ export class Renderer {
   private groundMatTiles = false;
   /** Display saturation of the env the baked renders were produced with. */
   private envSaturation = 1;
+  /** Display exposure of the env the baked renders were produced with. */
+  private envExposure = 1;
   private groundUniforms: {
     res: WebGLUniformLocation;
     view: WebGLUniformLocation;
@@ -449,6 +451,7 @@ export class Renderer {
     diffuseLinear: WebGLUniformLocation;
     hasNormal: WebGLUniformLocation;
     hasArm: WebGLUniformLocation;
+    exposure: WebGLUniformLocation;
     saturation: WebGLUniformLocation;
     depthA: WebGLUniformLocation;
     depthB: WebGLUniformLocation;
@@ -592,6 +595,7 @@ export class Renderer {
       diffuseLinear: gu('uDiffuseLinear'),
       hasNormal: gu('uHasNormal'),
       hasArm: gu('uHasArm'),
+      exposure: gu('uExposure'),
       saturation: gu('uSaturation'),
       depthA: gu('uDepthA'),
       depthB: gu('uDepthB'),
@@ -836,6 +840,7 @@ export class Renderer {
   /** Display-referred env parameters that shaped the baked render texels. */
   setEnvDisplay(exposure: number, saturation: number): void {
     this.envSaturation = saturation;
+    this.envExposure = exposure;
     const gl = this.gl;
     for (const [mode, u] of [
       ['gpu', this.meshUniforms.gpu],
@@ -1056,6 +1061,7 @@ export class Renderer {
       gl.uniform4f(this.groundUniforms.view, view.zoom, view.zoom, view.panX, view.panY);
       gl.uniform3f(this.groundUniforms.proj, this.meshFrame[0], this.meshFrame[1], this.meshFrame[2]);
       gl.uniform1f(this.groundUniforms.saturation, this.envSaturation);
+      gl.uniform1f(this.groundUniforms.exposure, this.envExposure);
       uploadLight(gl, this.groundUniforms.light, this.light);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.groundDiffuseTex);
