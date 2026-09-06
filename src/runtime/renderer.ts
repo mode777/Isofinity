@@ -452,6 +452,7 @@ export class Renderer {
     saturation: WebGLUniformLocation;
     depthA: WebGLUniformLocation;
     depthB: WebGLUniformLocation;
+    sh: WebGLUniformLocation;
     light: Uniforms3;
   };
   private uFlatRes: WebGLUniformLocation;
@@ -594,6 +595,7 @@ export class Renderer {
       saturation: gu('uSaturation'),
       depthA: gu('uDepthA'),
       depthB: gu('uDepthB'),
+      sh: gu('uSh'),
       light: {
         dir: gu('uLightDir'),
         key: gu('uKeyLight'),
@@ -821,10 +823,14 @@ export class Renderer {
   /** SH irradiance probe coefficients (27 floats; null = black ambient). */
   setShProbe(coeffs: Float32Array | null): void {
     const gl = this.gl;
+    const zeros = new Float32Array(27);
     for (const u of [this.meshUniforms.gpu, this.meshUniforms.cpu]) {
       gl.useProgram(u === this.meshUniforms.gpu ? this.meshProgGpu : this.meshProgCpu);
-      gl.uniform3fv(u.sh, coeffs ?? new Float32Array(27));
+      gl.uniform3fv(u.sh, coeffs ?? zeros);
     }
+    // The ground program shares the ambient probe (SHADE/irradiance chunk).
+    gl.useProgram(this.groundProg);
+    gl.uniform3fv(this.groundUniforms.sh, coeffs ?? zeros);
   }
 
   /** Display-referred env parameters that shaped the baked render texels. */

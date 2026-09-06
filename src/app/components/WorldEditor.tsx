@@ -391,8 +391,10 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         uploadedCharacter = live.character;
         renderer.setSkinningMode('gpu');
         renderer.setMesh(live.character?.geometry ?? null, live.character?.surface ?? null);
-        renderer.setMeshFrame(ORIGIN_X, ORIGIN_Y, PPU);
       }
+      // The world-image frame is shared by meshes and the ground plane;
+      // set it unconditionally (it must be right even with no character).
+      renderer.setMeshFrame(ORIGIN_X, ORIGIN_Y, PPU);
       // Environment-derived ambient + its display parameters: meshes shade
       // with the same probe the sprites' bake environment implies.
       renderer.setShProbe(live.shProbe);
