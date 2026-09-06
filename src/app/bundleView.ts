@@ -6,7 +6,7 @@ import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import type { PtImage } from '../bake/pt.js';
 import type { BakeResult } from '../bake/bake.js';
 import { decodePng } from '../runtime/assets.js';
-import type { ExtraViewSlot } from '../shared/iso.js';
+import { slotYawDeg, yawRotatedBoxSize, type ExtraViewSlot } from '../shared/iso.js';
 
 /**
  * Decode an opened bundle into the same in-memory shapes a live bake
@@ -105,12 +105,19 @@ export async function decodeBundle(buffer: ArrayBuffer): Promise<DecodedBundle> 
     const vw = view.width;
     const vh = view.height;
     const viewGbufferGl = decodeExrGbufferGl(await view.gbuffer.arrayBuffer(), vw, vh);
+    // The manifest's top-level cube.size is the N view's (unrotated) box;
+    // each extra view bakes the yaw-rotated box, so derive it per slot —
+    // the sprite rect (width/height) alone does not carry the world size.
+    const rotatedSize = yawRotatedBoxSize(
+      [m.cube.size[0], m.cube.size[1], m.cube.size[2]],
+      slotYawDeg(view.slot),
+    );
     extraViews.push({
       slot: view.slot,
       result: {
         id: m.id,
         label: m.id,
-        size: [m.cube.size[0], m.cube.size[1], m.cube.size[2]],
+        size: rotatedSize,
         width: vw,
         height: vh,
         pxPerUnit: m.pxPerUnit,

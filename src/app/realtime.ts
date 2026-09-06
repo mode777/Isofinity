@@ -31,7 +31,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { PAD_PX, applySlotModelRotation } from '../bake/bake.js';
 import { ISO_AZIMUTH_DEG, frameIsoBox } from '../bake/iso.js';
 import type { Primitive } from '../bake/primitives.js';
-import { slotAnchorPoint, yawRotatedBoxSize, type Vec3 } from '../shared/iso.js';
+import { yawRotatedBoxSize, type Vec3 } from '../shared/iso.js';
 import type { ViewTransform } from './document.js';
 import humanMeshUrl from './assets/free_base_mesh.glb?url';
 
@@ -237,8 +237,6 @@ export class RealtimeMeshView {
   private overlay: Group;
   /** The overlay's origin marker; repositioned by `setOrigin`. */
   private overlayMarker: Points;
-  private readonly primSize: Vec3;
-  private readonly yawDeg: number;
   private human: Group;
   /** Last rendered transform, for repaints from outside the React flow. */
   private lastTransform: ViewTransform | null = null;
@@ -255,8 +253,6 @@ export class RealtimeMeshView {
     // vertical axis while the camera stays in the fixed iso frame, so the
     // preview shows the asset exactly as its non-north views bake it.
     const yawDeg = azimuthDeg - ISO_AZIMUTH_DEG;
-    this.primSize = prim.size;
-    this.yawDeg = yawDeg;
     const boxSize = yawRotatedBoxSize(prim.size, yawDeg);
     const frame = frameIsoBox(boxSize, 128, PAD_PX);
     this.camera = frame.camera;
@@ -378,12 +374,13 @@ export class RealtimeMeshView {
   /**
    * Move the overlay's origin marker to the authored anchor point (asset
    * space, from the box min corner). The overlay group carries the slot
-   * rotation, so the marker's local position is the anchor mapped into the
-   * slot's rotated frame — the same spot the slot's bake anchors.
+   * rotation (`applySlotModelRotation`), so the marker's local position is
+   * the raw authored anchor — the group maps it into the slot frame exactly
+   * like the model, landing it on the same physical point every view
+   * anchors. Pre-transforming here would apply the rotation twice.
    */
   setOrigin(origin: Vec3): void {
-    const a = slotAnchorPoint(origin, this.primSize, this.yawDeg);
-    this.overlayMarker.position.set(a[0], a[1], a[2]);
+    this.overlayMarker.position.set(origin[0], origin[1], origin[2]);
     this.rerender();
   }
 

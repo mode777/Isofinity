@@ -4,7 +4,16 @@
  * server. Not part of the production build.
  */
 import { bakePrimitive, PAD_PX, applySlotModelRotation, type BakeResult } from './bake.js';
-import { groundToScreen, SCREEN_UP, slotAzimuthDeg, VIEW_DIR, VIEW_SLOTS, yawRotatedBoxSize } from '../shared/iso.js';
+import {
+  groundToScreen,
+  SCREEN_UP,
+  slotAnchorPoint,
+  slotAzimuthDeg,
+  slotYawDeg,
+  VIEW_DIR,
+  VIEW_SLOTS,
+  yawRotatedBoxSize,
+} from '../shared/iso.js';
 import { buildBundle, parseBake } from './bundle.js';
 import { Renderer as WorldRenderer, meshYawMat, type MeshDraw } from '../runtime/renderer.js';
 import { bakeFloatToHalf, layersToSet, RUNTIME_PPU, type SpriteLayer } from '../runtime/assets.js';
@@ -843,12 +852,19 @@ async function main(): Promise<void> {
       'removed view is omitted from the next save');
   }
 
-  // 3d. Open-path decode: a saved /6 bundle restores both views.
+  // 3d. Open-path decode: a saved /6 bundle restores both views, with each
+  // extra view's box derived per slot (the manifest's cube.size is the
+  // north view's unrotated box) so per-slot anchors re-derive correctly.
+  // A non-cube (the slab) is essential: a 1×1×1 cube is swap-invariant and
+  // would not catch a wrong x/z box.
   {
     log('test: decodeBundle restores extra views');
-    const cube = getCube();
-    const north = bakePrimitive(cube);
-    const east = bakePrimitive(cube, undefined, 135);
+    const slab = getSlab();
+    const origin: Vec3 = [1.5, 0, 0.25];
+    const yaw = slotYawDeg('e');
+    const anchorE = slotAnchorPoint(origin, slab.size, yaw);
+    const north = bakePrimitive(slab, undefined, undefined, origin);
+    const east = bakePrimitive(slab, undefined, 135, origin);
     const bytes = await buildBundle(north, undefined, undefined, [
       { slot: 'e', result: east },
     ]);
@@ -860,6 +876,22 @@ async function main(): Promise<void> {
     ok(ev.result.width === east.width && ev.result.height === east.height,
       'e view restores its sprite rect');
     ok(ev.result.gbuffer.length === east.width * east.height * 4, 'e g-buffer decodes to the full rect');
+    ok(
+      JSON.stringify(ev.result.size) === JSON.stringify(yawRotatedBoxSize(slab.size, yaw)),
+      `e view restores its rotated box (got ${JSON.stringify(ev.result.size)})`,
+    );
+    ok(
+      ev.result.originPx[0] === east.originPx[0] && ev.result.originPx[1] === east.originPx[1],
+      'e view keeps its anchored originPx',
+    );
+    // The anchor re-derived from the restored data must reproject onto the
+    // stored originPx — what the overlay cross and origin edits rely on.
+    const proj = projectBoxFrame(ev.result.size, ev.result.pxPerUnit, PAD_PX, undefined, anchorE).origin;
+    ok(
+      Math.abs(proj[0] - ev.result.originPx[0]) < 5e-4 &&
+        Math.abs(proj[1] - ev.result.originPx[1]) < 5e-4,
+      `restored e view re-projects its slot anchor onto the stored originPx (got ${JSON.stringify(proj)} vs ${JSON.stringify(ev.result.originPx)})`,
+    );
   }
 
   // 3b. Hand-built fixtures: legacy passes ignored, minimal v5, unknown format.
