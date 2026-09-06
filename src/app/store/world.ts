@@ -15,7 +15,6 @@ import {
 import { World } from '../../runtime/world.js';
 import { parseCharacterAsset } from '../../runtime/meshAsset.js';
 import {
-  equirectFromExr,
   equirectFromProcedural,
   projectRadianceSh,
   type EquirectRadiance,
@@ -41,7 +40,7 @@ import {
   defaultGroundState,
 } from '../document.js';
 import { parseGroundMaterial } from '../groundMaterial.js';
-import { parseHdrFile } from '../hdr.js';
+import { equirectFromHdrBuffer } from '../hdr.js';
 import { nextDocId, useEditor, type EditorState } from './editor.js';
 import { bakePrimitiveLayer, anyBakeBusy, resultToLayer } from './bake.js';
 import { SPRITE_EXTS, useProject } from './project.js';
@@ -131,7 +130,7 @@ export async function updateShProbe(docId: string): Promise<void> {
         equirect = cached;
       } else {
         const file = await readWorkspaceFile('hdri', env.fileName);
-        equirect = equirectFromExr(await file.arrayBuffer());
+        equirect = await equirectFromHdrBuffer(await file.arrayBuffer(), env.fileName);
       }
     } else {
       equirect = equirectFromProcedural();
@@ -589,15 +588,7 @@ export async function setWorldEnvFile(file: File, docId?: string): Promise<void>
   }
   try {
     const buffer = await file.arrayBuffer();
-    let equirect: EquirectRadiance;
-    if (/\.exr$/i.test(file.name)) {
-      equirect = equirectFromExr(buffer);
-    } else {
-      const { texture } = await parseHdrFile(buffer, file.name);
-      const img = texture.image as { data: Float32Array; width: number; height: number };
-      if (!img?.data) throw new Error('unexpected HDR texture layout');
-      equirect = { rgba: img.data, width: img.width, height: img.height, bottomUp: true };
-    }
+    const equirect = await equirectFromHdrBuffer(buffer, file.name);
     fileEnvCache.set(file.name, equirect);
     update(doc.docId, (d) => {
       d.userEnv = { kind: 'hdri', fileName: file.name };

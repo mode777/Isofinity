@@ -1,4 +1,20 @@
 import type { DataTextureLoaderTexData } from 'three';
+import { equirectFromExr, type EquirectRadiance } from '../runtime/shProbe.js';
+
+/**
+ * Decode an equirectangular HDRI file (.hdr RGBE or float .exr) into the
+ * raw CPU-side radiance the SH probe consumes. Dispatches by extension.
+ */
+export async function equirectFromHdrBuffer(
+  buffer: ArrayBuffer,
+  fileName: string,
+): Promise<EquirectRadiance> {
+  if (/\.exr$/i.test(fileName)) return equirectFromExr(buffer);
+  const { texture } = await parseHdrFile(buffer, fileName);
+  const img = texture.image as { data: Float32Array; width: number; height: number };
+  if (!img?.data) throw new Error(`${fileName}: unexpected HDR texture layout`);
+  return { rgba: img.data, width: img.width, height: img.height, bottomUp: true };
+}
 
 /**
  * Parse an equirectangular HDRI file (.hdr RGBE or float .exr) into a
