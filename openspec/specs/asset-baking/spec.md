@@ -358,9 +358,12 @@ the optional render passes (sample count, bounce count, texture size, tile
 grid), and the environment used for them (the `.hdr`/`.exr` file name within the
 workspace's `hdri/` folder, or a marker for the built-in procedural
 environment, plus rotation, intensity, exposure, and saturation). The
-manifest SHALL additionally record the stored views: for each, its slot
-(N/E/S/W) and its view azimuth. The provenance SHALL be written on every
-sprite save and updated on re-bake.
+provenance SHALL additionally record the sprite's origin anchor point — a
+3D coordinate in the N view's asset space relative to the box min corner —
+whenever it differs from the default box min corner; a sprite anchored at
+the default MAY omit it. The manifest SHALL additionally record the stored
+views: for each, its slot (N/E/S/W) and its view azimuth. The provenance
+SHALL be written on every sprite save and updated on re-bake.
 
 #### Scenario: Model sprite records its source
 
@@ -385,23 +388,37 @@ sprite save and updated on re-bake.
   field
 - **THEN** the sprite opens editable with its recorded settings restored
   and re-baking derives the tile grid from the frame size
+
+#### Scenario: Custom anchor persists in the manifest
+
+- **WHEN** the user sets a custom origin, bakes, and saves the sprite
+- **THEN** the saved manifest's provenance records the origin point as a 3D
+  coordinate in the N view's asset space
+
+#### Scenario: Default anchor omits the field
+
+- **WHEN** the user saves a sprite whose origin is the box min corner
+- **THEN** the manifest's provenance carries no origin field and the bundle
+  is byte-compatible with a pre-existing save of the same passes
 ### Requirement: Sprites re-bake from recorded provenance
 
 Opening an `isoinfinity-bake/6` sprite SHALL restore its recorded source,
-bake settings, environment, and stored views (each with its passes) into a
-sprite document so the user can edit them and re-bake in place.
-Re-baking SHALL re-read the referenced model from the connected workspace's
-`models/` folder (at the recorded scale) and the referenced environment
-from `hdri/`, re-run the selected passes for the selected view with the
-recorded (or edited) settings, and replace that view's passes; saving
-SHALL write an updated `/6` bundle. A `/5` bundle SHALL open editable as a
-single-view (N) sprite. Provenance recorded by older manifests MAY carry
-settings the pass set no longer has (for example AO samples and radius);
-the editor SHALL ignore those fields. When a referenced model or
-environment file is missing — or the workspace is not connected — the
-sprite SHALL open view-only (the passes of every stored view visible,
-save/export available) with a named status message naming the missing
-reference.
+bake settings, environment, origin anchor, and stored views (each with its
+passes) into a sprite document so the user can edit them and re-bake in
+place. Re-baking SHALL re-read the referenced model from the connected
+workspace's `models/` folder (at the recorded scale) and the referenced
+environment from `hdri/`, re-run the selected passes for the selected view
+with the recorded (or edited) settings, and replace that view's passes;
+saving SHALL write an updated `/6` bundle. A restored custom origin SHALL
+apply to re-bakes: every re-baked view anchors at the derived point for its
+slot. A `/5` bundle SHALL open editable as a single-view (N) sprite.
+Provenance recorded by older manifests MAY carry settings the pass set no
+longer has (for example AO samples and radius); the editor SHALL ignore
+those fields. Provenance without an origin field SHALL restore the default
+box-min-corner anchor. When a referenced model or environment file is
+missing — or the workspace is not connected — the sprite SHALL open
+view-only (the passes of every stored view visible, save/export available)
+with a named status message naming the missing reference.
 
 #### Scenario: Re-bake applies edited settings
 
@@ -417,6 +434,14 @@ reference.
   samples and radius
 - **THEN** the sprite opens editable with the remaining settings restored
   and the legacy AO fields ignored
+
+#### Scenario: Custom origin survives open and re-bake
+
+- **WHEN** the user opens a sprite whose provenance records a custom origin
+  and re-bakes a view
+- **THEN** the origin is restored into the editor, the re-baked view
+  anchors at that point (rotated for its slot), and the panel shows the
+  restored value
 
 #### Scenario: Missing model degrades to view-only
 
@@ -515,15 +540,20 @@ S, W. N SHALL be the default slot and SHALL show the asset unrotated. E, S
 and W SHALL present the asset rotated about the world's vertical axis
 through the asset box in successive 90° yaw steps in one fixed direction.
 Every slot SHALL render from the existing fixed isometric camera:
-elevation, orthographic projection, framing rules (padded projected box at
-the bake's pixels-per-unit) and the origin anchor stay unchanged, with each
-slot's sprite rect derived from its rotated box and MAY therefore differ in
-pixel dimensions between slots. The passes of every slot SHALL store the
-rotated asset's world-space data — g-buffer normals and depth as if the
-asset stood rotated in the world, and the render pass lit by the
-environment as placed — so a view can be used facing its direction without
-per-placement rotation. A slot's g-buffer and render pass SHALL be baked
-against the same slot presentation and stay pixel-aligned with each other.
+elevation, orthographic projection and framing rules (padded projected box
+at the bake's pixels-per-unit) stay unchanged, with each slot's sprite rect
+derived from its rotated box and MAY therefore differ in pixel dimensions
+between slots. Each slot's origin anchor SHALL be the document's origin
+point expressed in that slot's rotated asset frame: the N slot anchors at
+the authored origin point, and every other slot SHALL derive its anchor
+automatically as the same physical point of the asset rotated by the slot's
+yaw — so all slots anchor the same spot of the asset and none is authored
+directly. The passes of every slot SHALL store the rotated asset's
+world-space data — g-buffer normals and depth as if the asset stood rotated
+in the world, and the render pass lit by the environment as placed — so a
+view can be used facing its direction without per-placement rotation. A
+slot's g-buffer and render pass SHALL be baked against the same slot
+presentation and stay pixel-aligned with each other.
 
 #### Scenario: East view presents the model rotated a quarter turn
 
@@ -544,6 +574,73 @@ against the same slot presentation and stay pixel-aligned with each other.
 - **WHEN** a slot is baked with both the g-buffer and the render pass
 - **THEN** both passes have the slot's pixel dimensions and object pixels
   land at the same coordinates in both
+
+#### Scenario: Derived slots anchor the same asset point
+
+- **WHEN** the user authors a custom origin in the N view and bakes the N
+  and E slots
+- **THEN** each slot's recorded origin marks the same physical point of the
+  asset — the E slot's anchor being the authored point rotated by the
+  slot's yaw into the rotated asset's frame — without the user setting
+  anything for E
+
+### Requirement: The sprite origin anchor is settable in the north view
+
+The sprite editor's properties panel SHALL offer an origin control for the
+document: three numeric inputs (X/Y/Z, in asset-space world units measured
+from the box min corner of the source's unrotated box) and a convenience
+button that sets the origin to the center of the ground plane — half the
+box's X and Z extent at ground level (Y = 0). The inputs SHALL be editable
+only while the N slot is active; other slots SHALL present the value
+non-editably with a hint that the origin is set in the north view.
+Non-finite input SHALL be rejected and values SHALL clamp into the box
+extent per axis, so the anchor stays on the asset. Editing the origin SHALL
+update every baked view's recorded origin immediately — without requiring a
+re-bake, since the passes do not depend on the anchor — and SHALL mark the
+document dirty. A new document SHALL default to the box min corner, and
+changing the uniform scale of a model source SHALL rescale the origin
+proportionally so it keeps marking the same relative spot of the asset. The
+viewport's bounding-box overlay SHALL mark the current origin point with
+its origin cross.
+
+#### Scenario: Ground-center button
+
+- **WHEN** the user presses the ground-center button on a document whose
+  source box is 2×1×0.5 (after scale)
+- **THEN** the origin inputs show (1, 0, 0.25)
+
+#### Scenario: Inputs clamp into the box
+
+- **WHEN** the user enters an X beyond the box extent, or non-numeric text
+- **THEN** the value clamps to the box extent in that axis, or is rejected,
+  and the stored origin stays finite and inside the box
+
+#### Scenario: Origin edit takes effect without a re-bake
+
+- **WHEN** the user edits the origin on a fully baked document and saves
+  the bundle without re-baking
+- **THEN** the saved bundle's per-view origins reflect the new anchor and
+  the stored passes are pixel-identical to before the edit
+
+#### Scenario: Origin editing is north-only
+
+- **WHEN** the user selects the E slot
+- **THEN** the origin inputs are not editable and point to the north view
+  for editing
+
+#### Scenario: Scale change keeps the relative anchor
+
+- **WHEN** the user doubles the uniform scale of a model document that has
+  a custom origin
+- **THEN** the origin doubles with the box so it keeps marking the same
+  relative spot of the asset
+
+#### Scenario: Overlay cross marks the anchor
+
+- **WHEN** the bounding-box overlay is shown for a document with a custom
+  origin
+- **THEN** the overlay's origin cross sits at the projected origin point
+  rather than at the box corner
 ### Requirement: Each view slot bakes individually
 
 The sprite document's bake action SHALL apply to the currently selected
