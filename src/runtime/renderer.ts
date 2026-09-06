@@ -226,7 +226,9 @@ void main() {
     // coplanar bias ADDS to d — pulling the shadow a hair toward the
     // camera so comparisons against the ground plane's own written depth
     // (same plane, same d) pass LEQUAL instead of flickering away.
-    vec2 s = (vWorldPx - uProj.xy) / uProj.z;
+    // Note the y negation: world-image py grows down-screen, the ground
+    // basis' v coordinate up-screen (groundFromWorldImagePx negates too).
+    vec2 s = vec2(vWorldPx.x - uProj.x, uProj.y - vWorldPx.y) / uProj.z;
     float gx = (SH_A22 * s.x - SH_A12 * s.y) / SH_DET;
     float gz = (SH_A11 * s.y - SH_A21 * s.x) / SH_DET;
     gl_FragDepth = uDepthA * (dot(VIEW_DIR, vec3(gx, 0.0, gz)) + 1e-3) + uDepthB;
