@@ -83,10 +83,11 @@ void main() {
 }
 `;
 
-// Lean PBR: albedo + tangent-space normal perturbation + arm.r ambient
-// occlusion, env ambient (SH probe) plus the key light exactly as the
-// mesh path applies them, through the shared ACES chain. The arm map's
-// roughness/metal channels are decoded (bound) but not yet applied.
+// Lean PBR, single-pass: HDRI ambient (SH irradiance) plus the key light
+// are applied once, pre-tonemap — the same place the bake applies them —
+// so the ground matches the sprites' brightness instead of double-shading
+// (the mesh path's post-tonemap `shade()` re-application is its own
+// accepted trade, ADR 0003; the ground has no baked image to re-shade).
 const GROUND_FRAG = `#version 300 es
 precision highp float;
 uniform sampler2D uDiffuse;
@@ -117,11 +118,11 @@ void main() {
     N = normalize(vec3(n.x, n.z, n.y));
   }
   float ao = uHasArm > 0.5 ? texture(uArm, uv).r : 1.0;
-  vec3 hdr = albedo * ao * max(shIrradiance(N), vec3(0.0));
+  vec3 key = srgbToLinear(clamp(uKeyLight, 0.0, 1.0)) * max(dot(N, uLightDir), 0.0);
+  vec3 hdr = albedo * ao * (max(shIrradiance(N), vec3(0.0)) + key);
   vec3 texel = linearToSrgb(ACESFilmic(hdr));
   float lum = dot(texel, vec3(0.2126, 0.7152, 0.0722));
-  texel = mix(vec3(lum), texel, uSaturation);
-  outColor = vec4(shade(texel, N), 1.0);
+  outColor = vec4(mix(vec3(lum), texel, uSaturation), 1.0);
   gl_FragDepth = uDepthA * dot(VIEW_DIR, vWorldPos) + uDepthB;
 }
 `;

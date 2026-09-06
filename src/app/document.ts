@@ -194,8 +194,8 @@ export interface GroundState {
   maps: import('./groundMaterial.js').GroundMaterialMaps | null;
 }
 
-/** Default tiling: one material tile per world unit. */
-export const DEFAULT_GROUND_TILE_SCALE = 1;
+/** Default tiling: one material tile per 10 world units. */
+export const DEFAULT_GROUND_TILE_SCALE = 0.1;
 
 export function defaultGroundState(): GroundState {
   return { material: null, tileScale: DEFAULT_GROUND_TILE_SCALE, maps: null };
