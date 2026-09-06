@@ -167,7 +167,7 @@ async function main(): Promise<void> {
         renderer.setSkinningMode('cpu');
         renderer.setMesh(cube.geometry, { image: null, factor: [0.9, 0.9, 0.9] });
         const off = cube.worldOffset;
-        renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
+        renderer.render(new Float32Array(10), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
             positions: cube.geometry.positions,
             normals: cube.geometry.normals,
@@ -185,7 +185,7 @@ async function main(): Promise<void> {
         renderer.setSkinningMode('cpu');
         renderer.setMesh(asset.geometry, { image: null, factor: [0.85, 0.85, 0.85] });
         const off = asset.worldOffset;
-        renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
+        renderer.render(new Float32Array(10), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
             positions: asset.geometry.positions,
             normals: asset.geometry.normals,
@@ -203,7 +203,7 @@ async function main(): Promise<void> {
         renderer.setMesh(asset.geometry, { image: null, factor: [0.85, 0.85, 0.85] });
         const off = asset.worldOffset;
         player.skinInto(frozenPos, frozenNrm);
-        renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
+        renderer.render(new Float32Array(10), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
             positions: frozenPos,
             normals: frozenNrm,
@@ -222,7 +222,7 @@ async function main(): Promise<void> {
         const off = asset.worldOffset;
         if (dt !== null) player.update(dt);
         player.skinInto(player.skinnedPositions(), player.skinnedNormals());
-        renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
+        renderer.render(new Float32Array(10), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
             positions: player.skinnedPositions(),
             normals: player.skinnedNormals(),
@@ -241,7 +241,7 @@ async function main(): Promise<void> {
         const off = asset.worldOffset;
         if (dt !== null) player.update(dt);
         player.skinInto(player.skinnedPositions(), player.skinnedNormals());
-        renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
+        renderer.render(new Float32Array(10), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
             positions: player.skinnedPositions(),
             normals: player.skinnedNormals(),
@@ -258,7 +258,7 @@ async function main(): Promise<void> {
         renderer.setSkinningMode('gpu');
         renderer.setMesh(asset.geometry, { image: null, factor: [0.85, 0.85, 0.85] });
         const off = asset.worldOffset;
-        renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
+        renderer.render(new Float32Array(10), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
             palette: bindPosePalette(asset.geometry.jointCount),
             origin: [off[0], off[1], off[2]],
@@ -275,7 +275,7 @@ async function main(): Promise<void> {
         renderer.setMesh(asset.geometry, { image: null, factor: [0.85, 0.85, 0.85] });
         const off = asset.worldOffset;
         if (dt !== null) player.update(dt);
-        renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
+        renderer.render(new Float32Array(10), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, [
           {
             palette: player.palette,
             origin: [off[0], off[1], off[2]],

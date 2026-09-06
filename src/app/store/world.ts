@@ -185,6 +185,7 @@ export function newWorldDoc(): string {
     heightLevel: 0,
     surfaceSnap: false,
     brushDir: 'n',
+    shadowStrength: {},
     viewTransform: null,
   };
   ed().addDoc(doc);
@@ -386,6 +387,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       heightLevel: 0,
       surfaceSnap: false,
       brushDir: 'n',
+    shadowStrength: {},
       viewTransform: null,
     };
 
@@ -844,6 +846,26 @@ export function cycleBrushDir(docId: string): void {
   const next = dirs[(dirs.indexOf(doc.brushDir) + 1) % dirs.length];
   update(docId, (d) => {
     d.brushDir = next;
+  });
+}
+
+/**
+ * Set a sprite layer's grounding-shadow strength (0 = off, 1 = full;
+ * per-document in-memory editor state, never saved). Clamps into [0, 1];
+ * non-finite input is ignored.
+ */
+export function setLayerShadowStrength(
+  docId: string,
+  layerId: string,
+  strength: number,
+): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  if (!Number.isFinite(strength)) return;
+  const clamped = Math.min(1, Math.max(0, strength));
+  update(docId, (d) => {
+    if (d.shadowStrength[layerId] === clamped) return;
+    d.shadowStrength = { ...d.shadowStrength, [layerId]: clamped };
   });
 }
 

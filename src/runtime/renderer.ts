@@ -166,24 +166,40 @@ const SPRITE_VERT = `#version 300 es
 in vec2 aCorner;
 in vec4 aInst;   // px.xy, layer, depthOff
 in vec4 aInst2;  // quadSize px, sprite texel size
-in float aHeight; // placement height (grounding-shadow suppression)
+in float aHeight;  // placement height (grounding-shadow suppression)
+in float aStrength; // grounding-shadow strength multiplier (0 = off)
 uniform vec2 uRes;
 uniform vec2 uMaxSize;
+uniform vec3 uProj;  // world-image origin px (x, y), px per unit
 uniform vec4 uView;  // view transform: scale.xy, offset.xy (backing-store px)
 out vec2 vUv;
 out vec2 vWorldPx;  // fragment position in world-image pixels
+out float vGroundDepth; // corner's ground-plane linear depth (see frag)
 flat out float vLayer;
 flat out float vDepthOff;
 flat out float vHeight;
+flat out float vStrength;
+${ISO_GLSL}
+${GROUND_UNPROJ_GLSL}
 void main() {
   vec2 quadPx = aInst.xy + aCorner * aInst2.xy;
   vWorldPx = quadPx;
+  // Ground-plane depth per corner: the ground basis inverse is affine in
+  // world-image px, so interpolating the corner depths across the quad
+  // matches the material ground plane's own interpolated depth exactly
+  // (both linear in screen space) — per-fragment unprojection sampled the
+  // plane too coarsely at low zoom and straddled its depth (z-fighting).
+  vec2 s = vec2(quadPx.x - uProj.x, uProj.y - quadPx.y) / uProj.z;
+  float gx = (SH_A22 * s.x - SH_A12 * s.y) / SH_DET;
+  float gz = (SH_A11 * s.y - SH_A21 * s.x) / SH_DET;
+  vGroundDepth = dot(VIEW_DIR, vec3(gx, 0.0, gz));
   vec2 px = quadPx * uView.xy + uView.zw;
   gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
   vUv = mix(vec2(0.5), aInst2.zw - 0.5, aCorner) / uMaxSize;
   vLayer = aInst.z;
   vDepthOff = aInst.w;
   vHeight = aHeight;
+  vStrength = aStrength;
 }
 `;
 
@@ -194,16 +210,15 @@ uniform sampler2DArray uRender;
 uniform sampler2DArray uGbuffer;
 uniform float uDepthA;
 uniform float uDepthB;
-uniform vec3 uProj;  // world-image origin px (x, y), px per unit
 in vec2 vUv;
 in vec2 vWorldPx;
+in float vGroundDepth;
 flat in float vLayer;
 flat in float vDepthOff;
 flat in float vHeight;
+flat in float vStrength;
 out vec4 outColor;
 ${SHADE_CHUNK}
-${ISO_GLSL}
-${GROUND_UNPROJ_GLSL}
 void main() {
   vec4 g = texture(uGbuffer, vec3(vUv, vLayer));
   vec4 r = texture(uRender, vec3(vUv, vLayer));
@@ -214,25 +229,12 @@ void main() {
     // historical discard, so legacy sprites composite unchanged.
     if (r.a <= 0.0 || r.b <= r.r) discard;
     // Raised placements would carry the patch into the air: suppress it
-    // (the contact-shadow ellipses cover the raised case).
-    if (vHeight != 0.0) discard;
-    // True ground-plane depth: unproject the fragment's world-image pixel
-    // onto the y = 0 plane (CPU twin: groundFromWorldImagePx) and write
-    // that depth. A shader-written depth drives both the LEQUAL test and
-    // the write, and being physically true for the shadow, both are
-    // correct: farther sprites are darkened, nearer sprites overwrite,
-    // overlapping shadows resolve to the nearer ground point. The engine's
-    // depth map is reversed (z = 0.5 - d/128: nearer = smaller z), so the
-    // coplanar bias ADDS to d — pulling the shadow a hair toward the
-    // camera so comparisons against the ground plane's own written depth
-    // (same plane, same d) pass LEQUAL instead of flickering away.
-    // Note the y negation: world-image py grows down-screen, the ground
-    // basis' v coordinate up-screen (groundFromWorldImagePx negates too).
-    vec2 s = vec2(vWorldPx.x - uProj.x, uProj.y - vWorldPx.y) / uProj.z;
-    float gx = (SH_A22 * s.x - SH_A12 * s.y) / SH_DET;
-    float gz = (SH_A11 * s.y - SH_A21 * s.x) / SH_DET;
-    gl_FragDepth = uDepthA * (dot(VIEW_DIR, vec3(gx, 0.0, gz)) + 1e-3) + uDepthB;
-    outColor = vec4(r.rgb, r.a);
+    // (the contact-shadow ellipses cover the raised case). A per-layer
+    // strength of 0 turns the shadow off entirely.
+    float a = r.a * vStrength;
+    if (vHeight != 0.0 || a <= 0.0) discard;
+    gl_FragDepth = uDepthA * (vGroundDepth + 1e-3) + uDepthB;
+    outColor = vec4(r.rgb, a);
     return;
   }
   float d = g.a + vDepthOff;
@@ -610,16 +612,20 @@ export class Renderer {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instVbo);
     const aInst = gl.getAttribLocation(this.spriteProg, 'aInst');
     gl.enableVertexAttribArray(aInst);
-    gl.vertexAttribPointer(aInst, 4, gl.FLOAT, false, 36, 0);
+    gl.vertexAttribPointer(aInst, 4, gl.FLOAT, false, 40, 0);
     gl.vertexAttribDivisor(aInst, 1);
     const aInst2 = gl.getAttribLocation(this.spriteProg, 'aInst2');
     gl.enableVertexAttribArray(aInst2);
-    gl.vertexAttribPointer(aInst2, 4, gl.FLOAT, false, 36, 16);
+    gl.vertexAttribPointer(aInst2, 4, gl.FLOAT, false, 40, 16);
     gl.vertexAttribDivisor(aInst2, 1);
     const aHeight = gl.getAttribLocation(this.spriteProg, 'aHeight');
     gl.enableVertexAttribArray(aHeight);
-    gl.vertexAttribPointer(aHeight, 1, gl.FLOAT, false, 36, 32);
+    gl.vertexAttribPointer(aHeight, 1, gl.FLOAT, false, 40, 32);
     gl.vertexAttribDivisor(aHeight, 1);
+    const aStrength = gl.getAttribLocation(this.spriteProg, 'aStrength');
+    gl.enableVertexAttribArray(aStrength);
+    gl.vertexAttribPointer(aStrength, 1, gl.FLOAT, false, 40, 36);
+    gl.vertexAttribDivisor(aStrength, 1);
 
     gl.bindVertexArray(null);
     gl.uniform1i(gl.getUniformLocation(this.spriteProg, 'uRender')!, 0);

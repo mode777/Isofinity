@@ -270,6 +270,12 @@ export interface WorldDocument {
    */
   brushDir: ViewSlot;
   /**
+   * Per-sprite-layer grounding-shadow strength (0 = off, 1 = full).
+   * Missing entries default to 1. In-memory editor state only — never
+   * written into world files.
+   */
+  shadowStrength: Record<string, number>;
+  /**
    * Viewport zoom/pan over the fixed projected world image; null = fit
    * (the whole grid letterboxed in the panel). In-memory editor state
    * only — never written into world files.

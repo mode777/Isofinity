@@ -266,7 +266,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     }
     renderer.setGround(GROUND);
 
-    let instances = new Float32Array(256 * 9);
+    let instances = new Float32Array(256 * 10);
     const shadowBatch = new FlatBatchBuilder();
     const overlayBatch = new FlatBatchBuilder();
 
@@ -447,8 +447,8 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           : null;
 
       const total = placed.length + (ghost ? 1 : 0);
-      if (instances.length < total * 9) {
-        instances = new Float32Array(total * 9);
+      if (instances.length < total * 10) {
+        instances = new Float32Array(total * 10);
       }
       let count = 0;
       const emit = (layerIndex: number, x: number, y: number, z: number): void => {
@@ -456,18 +456,20 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         const [ox, oy] = spriteSet.origins[layerIndex];
         const [w, h] = spriteSet.sizes[layerIndex];
         const [cx, cy] = toPx(x, z, y);
-        instances[count * 9] = cx - ox * scale;
-        instances[count * 9 + 1] = cy - oy * scale;
-        instances[count * 9 + 2] = layerIndex;
-        instances[count * 9 + 3] =
+        instances[count * 10] = cx - ox * scale;
+        instances[count * 10 + 1] = cy - oy * scale;
+        instances[count * 10 + 2] = layerIndex;
+        instances[count * 10 + 3] =
           VIEW_DIR[0] * x + VIEW_DIR[1] * y + VIEW_DIR[2] * z;
-        instances[count * 9 + 4] = w * scale;
-        instances[count * 9 + 5] = h * scale;
-        instances[count * 9 + 6] = w;
-        instances[count * 9 + 7] = h;
+        instances[count * 10 + 4] = w * scale;
+        instances[count * 10 + 5] = h * scale;
+        instances[count * 10 + 6] = w;
+        instances[count * 10 + 7] = h;
         // Placement height: the shader suppresses the baked grounding
         // shadow for anything off the ground plane.
-        instances[count * 9 + 8] = y;
+        instances[count * 10 + 8] = y;
+        // Per-layer grounding-shadow strength (0 = off, in-memory state).
+        instances[count * 10 + 9] = live.shadowStrength[spriteSet.ids[layerIndex]] ?? 1;
         count++;
       };
       // Placements arrive far → near; the ghost slots in at its depth key

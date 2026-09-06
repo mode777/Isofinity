@@ -688,7 +688,7 @@ async function runMeshSpike(): Promise<void> {
 
   const spriteScale = PPU / cube.pxPerUnit;
   const [cx, cy] = toPx(2, 2, 0);
-  const instances = new Float32Array(9);
+  const instances = new Float32Array(10);
   instances[0] = cx - cube.originPx[0] * spriteScale;
   instances[1] = cy - cube.originPx[1] * spriteScale;
   instances[2] = 0;
@@ -698,6 +698,7 @@ async function runMeshSpike(): Promise<void> {
   instances[6] = w;
   instances[7] = h;
   instances[8] = 0;
+  instances[9] = 1;
 
   // The character stands inside the cube's cell at a fixed animation time
   // (GPU skinning — the shipped mode).
@@ -830,7 +831,7 @@ async function runGroundSpike(): Promise<void> {
   // (depth-tested against the ground's written depth).
   const spriteScale = RUNTIME_PPU / cube.pxPerUnit;
   const [u, v] = groundToScreen(2, 2);
-  const instances = new Float32Array(9);
+  const instances = new Float32Array(10);
   instances[0] = 300 + u * RUNTIME_PPU - cube.originPx[0] * spriteScale;
   instances[1] = 500 - v * RUNTIME_PPU - cube.originPx[1] * spriteScale;
   instances[2] = 0;
@@ -840,6 +841,7 @@ async function runGroundSpike(): Promise<void> {
   instances[6] = w;
   instances[7] = h;
   instances[8] = 0;
+  instances[9] = 1;
   const withSprite = (): Promise<string> => {
     renderer.render(instances, 1, null, null, { zoom: 1, panX: 0, panY: 0 }, []);
     renderer.readPixels(px);
@@ -1062,7 +1064,7 @@ async function runGroundingShadowSpike(): Promise<void> {
     const scale = RUNTIME_PPU / RUNTIME_PPU;
     const [ox, oy] = layerOrigins[inst.layer];
     const [cx, cy] = gpx(inst.x, inst.z);
-    const out = new Float32Array(9);
+    const out = new Float32Array(10);
     out[0] = cx - ox * scale;
     out[1] = cy - oy * scale;
     out[2] = inst.layer;
@@ -1072,6 +1074,7 @@ async function runGroundingShadowSpike(): Promise<void> {
     out[6] = SIDE;
     out[7] = SIDE;
     out[8] = inst.y;
+    out[9] = 1;
     return out;
   };
 
@@ -1082,8 +1085,8 @@ async function runGroundingShadowSpike(): Promise<void> {
     const s = layersToSet(layers);
     renderer.setSprites(s.renderLayers, s.gbufferLayers, s.maxW, s.maxH);
     const origins = layers.map((l) => l.originPx);
-    const all = new Float32Array(list.length * 9);
-    list.forEach((inst, i) => all.set(instance(inst, origins), i * 9));
+    const all = new Float32Array(list.length * 10);
+    list.forEach((inst, i) => all.set(instance(inst, origins), i * 10));
     renderer.render(all, list.length, null, null, { zoom: 1, panX: 0, panY: 0 }, []);
     renderer.readPixels(px);
     return sha256(px);
