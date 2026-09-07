@@ -6,6 +6,7 @@ import {
 } from '../../bake/export.js';
 import { depthRange, projectBoxFrame } from '../../bake/iso.js';
 import { PAD_PX } from '../../bake/bake.js';
+import { groundShadowPadPx } from '../../bake/shadow.js';
 import {
   VIEW_SLOTS,
   slotAnchorPoint,
@@ -187,12 +188,16 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
       const yaw = slotYawDeg(slot);
       const unrotated = yawRotatedBoxSize(passes.result.size as Vec3, -yaw);
       const anchor = slotAnchorPoint(doc.origin, unrotated, yaw);
+      // Frame exactly like the bake did: the grounding shadow grows the
+      // bake rect by its pad, so the overlay must include the same pad or
+      // it projects onto the wrong pixels.
       const proj = projectBoxFrame(
         passes.result.size as Vec3,
         passes.result.pxPerUnit,
         PAD_PX,
         undefined,
         anchor,
+        doc.groundShadow ? groundShadowPadPx(passes.result.pxPerUnit) : 0,
       );
       const { zoom, panX, panY } = transform;
       const px = (p: [number, number]): number => panX + p[0] * zoom;

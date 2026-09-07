@@ -111,6 +111,11 @@ list when a change lands (and prune it — history belongs in the archives).
   strength (`isoinfinity-world/5`, `/1`–`/4` still load): a toolbar shadow
   field like the height field — set before placing, carried by each
   placement (0 = off), persisted per placement (omitted at full strength).
+- Overlay framing fix — the sprite editor's 2D bounding-box overlay now
+  projects with the same ground-shadow pad the bake framed with, so with
+  the grounding shadow on (the default) the box, origin cross and baked
+  pixels line up instead of the overlay drawing inset/shifted; origin
+  authoring order is pinned as bake-invariant by `verify:bundles` checks.
 
 ## In progress
 

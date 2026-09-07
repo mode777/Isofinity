@@ -632,6 +632,117 @@ async function main(): Promise<void> {
     );
   }
 
+  // 9. Origin-anchor order invariance + overlay parity: authoring the
+  //    anchor before or after a bake must produce identical framing,
+  //    camera and originPx (the anchor is authoring state, never framing
+  //    data — ADR 0008), and the sprite editor's overlay projection must
+  //    reproduce the bake frame's pixels exactly when it uses the same
+  //    ground-shadow pad rule.
+  {
+    console.log('test: origin-anchor order invariance + overlay parity');
+    const ppu = 64;
+    const size: Vec3 = [2, 1, 0.5];
+    const center: Vec3 = [size[0] / 2, 0, size[2] / 2];
+
+    const bakeFraming = (origin: Vec3, yawDeg: number, shadow: boolean) => {
+      const boxSize = yawRotatedBoxSize(size, yawDeg);
+      const anchor = slotAnchorPoint(origin, size, yawDeg);
+      return frameIsoBox(
+        boxSize,
+        ppu,
+        PAD_PX,
+        ISO_AZIMUTH_DEG,
+        anchor,
+        shadow ? groundShadowPadPx(ppu) : 0,
+      );
+    };
+
+    for (const shadow of [false, true]) {
+      for (const yawDeg of [0, 90]) {
+        const boxSize = yawRotatedBoxSize(size, yawDeg);
+        // Order A: anchor authored first, then baked.
+        const a = bakeFraming(center, yawDeg, shadow);
+        // Order B: baked at the default anchor, then re-anchored (the
+        // editor's setBakeOrigin math: projectBoxFrame with the slot
+        // anchor and the same pad rule).
+        const b = bakeFraming([0, 0, 0], yawDeg, shadow);
+        const bAnchor = slotAnchorPoint(center, size, yawDeg);
+        const bOrigin = projectBoxFrame(
+          boxSize,
+          ppu,
+          PAD_PX,
+          ISO_AZIMUTH_DEG,
+          bAnchor,
+          shadow ? groundShadowPadPx(ppu) : 0,
+        ).origin;
+        const tag = `shadow=${shadow ? 'on' : 'off'} yaw=${yawDeg}`;
+        ok(
+          a.width === b.width && a.height === b.height,
+          `${tag}: both orders frame the same rect (${a.width}x${a.height})`,
+        );
+        ok(
+          a.camera.projectionMatrix.equals(b.camera.projectionMatrix) &&
+            a.camera.matrixWorld.equals(b.camera.matrixWorld),
+          `${tag}: both orders project through the identical camera`,
+        );
+        ok(
+          approx(a.originPx[0], bOrigin[0], 1e-9) && approx(a.originPx[1], bOrigin[1], 1e-9),
+          `${tag}: both orders record the same originPx`,
+        );
+        // Anchor-only effect: a non-default anchor moves originPx while
+        // the projected box edges (the pixels) stay fixed.
+        const plain = projectBoxFrame(boxSize, ppu, PAD_PX, ISO_AZIMUTH_DEG, [0, 0, 0], 0);
+        const anchored = projectBoxFrame(boxSize, ppu, PAD_PX, ISO_AZIMUTH_DEG, bAnchor, 0);
+        ok(
+          (anchored.origin[0] !== plain.origin[0] || anchored.origin[1] !== plain.origin[1]) &&
+            plain.edges.every(([p, q], i) =>
+              approx(p[0], anchored.edges[i][0][0], 1e-9) &&
+              approx(p[1], anchored.edges[i][0][1], 1e-9) &&
+              approx(q[0], anchored.edges[i][1][0], 1e-9) &&
+              approx(q[1], anchored.edges[i][1][1], 1e-9),
+            ),
+          `${tag}: the anchor moves the cross, never the box pixels`,
+        );
+      }
+    }
+
+    // Overlay parity: the sprite editor's overlay projection, when given
+    // the same ground-shadow pad the bake used, reproduces the bake
+    // frame's box-corner pixel and origin cross exactly; omitting the pad
+    // (the pre-fix bug) shifts them.
+    for (const shadow of [false, true]) {
+      const bake = bakeFraming(center, 0, shadow);
+      const bakeProj = projectBoxFrame(
+        size,
+        ppu,
+        PAD_PX,
+        ISO_AZIMUTH_DEG,
+        slotAnchorPoint(center, size, 0),
+        shadow ? groundShadowPadPx(ppu) : 0,
+      );
+      const anchor = slotAnchorPoint(center, size, 0);
+      const pad = shadow ? groundShadowPadPx(ppu) : 0;
+      const overlay = projectBoxFrame(size, ppu, PAD_PX, ISO_AZIMUTH_DEG, anchor, pad);
+      const tag = `shadow=${shadow ? 'on' : 'off'}`;
+      ok(
+        overlay.width === bake.width &&
+          overlay.height === bake.height &&
+          approx(overlay.edges[0][0][0], bakeProj.edges[0][0][0], 1e-9) &&
+          approx(overlay.edges[0][0][1], bakeProj.edges[0][0][1], 1e-9) &&
+          approx(overlay.origin[0], bake.originPx[0], 1e-9) &&
+          approx(overlay.origin[1], bake.originPx[1], 1e-9),
+        `${tag}: pad-matched overlay projection equals the bake frame`,
+      );
+      if (shadow) {
+        const unpadded = projectBoxFrame(size, ppu, PAD_PX, ISO_AZIMUTH_DEG, anchor, 0);
+        ok(
+          unpadded.origin[0] !== bake.originPx[0] || unpadded.origin[1] !== bake.originPx[1],
+          `${tag}: omitting the pad shifts the overlay (the fixed bug)`,
+        );
+      }
+    }
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 }

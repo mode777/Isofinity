@@ -22,6 +22,7 @@ import cesiumManUrl from '../app/assets/CesiumMan.glb?url';
 import { decodeBundle } from '../app/bundleView.js';
 import { parseGroundMaterial } from '../app/groundMaterial.js';
 import { encodePngBytes } from './export.js';
+import { groundShadowPadPx } from './shadow.js';
 import {
   strToU8,
   zipSync,
@@ -1313,6 +1314,57 @@ async function main(): Promise<void> {
         Math.abs(proj[1] - ev.result.originPx[1]) < 5e-4,
       `restored e view re-projects its slot anchor onto the stored originPx (got ${JSON.stringify(proj)} vs ${JSON.stringify(ev.result.originPx)})`,
     );
+  }
+
+  // 3e. Origin-anchor order invariance with real GL bakes: baking with
+  //     the anchor authored first must be byte-identical to baking at the
+  //     default anchor (the anchor is authoring state, never framing
+  //     data), and the recorded originPx must equal the pure re-projection
+  //     the editor's setBakeOrigin performs.
+  {
+    log('test: origin authored before vs after the bake bakes identical pixels');
+    const slab = getSlab();
+    const origin: Vec3 = [slab.size[0] / 2, 0, slab.size[2] / 2];
+    for (const shadow of [false, true]) {
+      const withAnchor = bakePrimitive(slab, undefined, undefined, origin, shadow);
+      const defaultThenAnchor = bakePrimitive(slab, undefined, undefined, undefined, shadow);
+      ok(
+        withAnchor.width === defaultThenAnchor.width &&
+          withAnchor.height === defaultThenAnchor.height &&
+          withAnchor.gbuffer.every((v, i) => v === defaultThenAnchor.gbuffer[i]),
+        `shadow=${shadow ? 'on' : 'off'}: baking with the anchor authored first is byte-identical`,
+      );
+      const reproj = projectBoxFrame(
+        withAnchor.size,
+        withAnchor.pxPerUnit,
+        PAD_PX,
+        undefined,
+        origin,
+        shadow ? groundShadowPadPx(withAnchor.pxPerUnit) : 0,
+      ).origin;
+      ok(
+        Math.abs(withAnchor.originPx[0] - reproj[0]) < 5e-4 &&
+          Math.abs(withAnchor.originPx[1] - reproj[1]) < 5e-4,
+        `shadow=${shadow ? 'on' : 'off'}: baked originPx equals the setBakeOrigin re-projection`,
+      );
+      // Overlay parity: with the pad the bake used, the sprite editor's
+      // overlay projection lands on the bake frame's pixels.
+      const overlay = projectBoxFrame(
+        withAnchor.size,
+        withAnchor.pxPerUnit,
+        PAD_PX,
+        undefined,
+        origin,
+        shadow ? groundShadowPadPx(withAnchor.pxPerUnit) : 0,
+      );
+      ok(
+        overlay.width === withAnchor.width &&
+          overlay.height === withAnchor.height &&
+          Math.abs(overlay.origin[0] - withAnchor.originPx[0]) < 5e-4 &&
+          Math.abs(overlay.origin[1] - withAnchor.originPx[1]) < 5e-4,
+        `shadow=${shadow ? 'on' : 'off'}: pad-matched overlay projection equals the bake frame`,
+      );
+    }
   }
 
   // 3b. Hand-built fixtures: legacy passes ignored, minimal v5, unknown format.
