@@ -55,15 +55,15 @@ the overlay aligns with the baked pixels in every document state.
 
 - **WHEN** the user doubles the uniform scale of a model document that has
   a custom origin
-- **THEN** the origin values halve proportionally, continuing to mark the
-  same relative spot of the asset
+- **THEN** the origin doubles with the box so it keeps marking the same
+  relative spot of the asset
 
 #### Scenario: Overlay cross marks the anchor
 
-- **WHEN** the user authors a non-default origin on a document with the
-  bounding-box overlay enabled
-- **THEN** the overlay's origin cross sits at the projected anchor point
-  in every view slot
+- **WHEN** the bounding-box overlay is shown for a document with a custom
+  origin
+- **THEN** the overlay's origin cross sits at the projected origin point
+  in every view slot rather than at the box corner
 
 #### Scenario: Baking after authoring the origin matches baking before
 

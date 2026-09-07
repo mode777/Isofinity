@@ -603,6 +603,13 @@ proportionally so it keeps marking the same relative spot of the asset. The
 viewport's bounding-box overlay SHALL mark the current origin point with
 its origin cross.
 
+The anchor SHALL be framing-independent authoring state: baking a slot
+SHALL produce the same sprite pixels and the same recorded origin whether
+the anchor was authored before or after that bake. The bounding-box overlay
+SHALL be projected with the same framing rule the bake used — including the
+grounding-shadow pad when the document's grounding shadow is enabled — so
+the overlay aligns with the baked pixels in every document state.
+
 #### Scenario: Ground-center button
 
 - **WHEN** the user presses the ground-center button on a document whose
@@ -640,7 +647,25 @@ its origin cross.
 - **WHEN** the bounding-box overlay is shown for a document with a custom
   origin
 - **THEN** the overlay's origin cross sits at the projected origin point
-  rather than at the box corner
+  in every view slot rather than at the box corner
+
+#### Scenario: Baking after authoring the origin matches baking before
+
+- **GIVEN** a fixed source and a fixed authored origin (e.g. ground center)
+- **WHEN** one document is baked with the origin authored first and another
+  document is baked at the default origin with the same origin projected
+  afterwards
+- **THEN** both documents' slot passes have identical pixel dimensions and
+  pixel content, and identical recorded per-view origins
+
+#### Scenario: Overlay tracks the grounding-shadow framing
+
+- **WHEN** the bounding-box overlay is shown on a document whose
+  grounding shadow is enabled
+- **THEN** the projected box edges land on the same pixels the baked box
+  occupies in the stored passes, instead of being inset and shifted by the
+  missing ground pad
+
 ### Requirement: Each view slot bakes individually
 
 The sprite document's bake action SHALL apply to the currently selected
