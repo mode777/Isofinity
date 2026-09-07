@@ -182,12 +182,19 @@ depth-tested sprite instance slotted into the painter-sorted batch, so
 per-pixel occlusion shows exactly how the placement would sit among its
 neighbors; it is preview-only (never placed, never marks the document
 dirty) and yields the hover feedback to the eraser's unit-cell
-highlight. Placement anchors at the layer's recorded origin — the sprite
-is drawn so its `originPx` lands at the placement's position (the cell's
-min corner at the placement height), so a sprite authored with a
-ground-center origin pivots around its center when its facing changes,
-while ground-footprint picking and erase stay cell-based regardless of
-the anchor (ADR 0008).
+highlight. Placement is free-form — there are no cells: the asset's
+origin anchor lands exactly at the mouse position, meaning the anchor's
+world position is `(mouse ground x, brush height, mouse ground z)` —
+the cursor acts as a point hovering `brush height` above its ground
+track (height 1 = the cursor hovering 1 unit above the ground), and the
+sprite is drawn so its `originPx` lands on that point. The height
+arithmetic follows: the anchor sits on the ground exactly when the brush
+height is 0, and the asset's base rides at (brush height − anchor y), so
+an asset anchored above its base (a hook) sinks at height 0 and stands
+on the ground when the brush height equals its anchor y. A sprite
+authored with a ground-center origin pivots around its center when its
+facing changes, while ground-footprint picking and erase stay
+ground-position-based regardless of the anchor (ADR 0008).
 
 The toolbar's **character** brush places the built-in animated character
 (Khronos CesiumMan, committed with attribution) as a *mesh placement*:

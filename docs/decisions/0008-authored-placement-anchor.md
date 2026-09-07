@@ -54,6 +54,14 @@ The placement anchor is a per-asset authored value:
 
 ## Rejected alternatives
 
+> **Amendment (anchor-lands-at-cursor):** the placement-point convention
+> below is cursor-exact — the anchor's world position is
+> `(mouse ground x, brush height, mouse ground z)`, with no half-cell
+> offset. The height rule is unchanged: the anchor lands at the brush
+> height, so a raised anchor still sinks the asset at ground level
+> (base height = brush height − anchor y). Everything else in this
+> decision — anchor authoring, per-slot derivation, `originPx` — stands.
+
 - **Anchor lands at the clicked cell's center** (with the default anchor
   becoming the ground-plane center): grid-aligned by default, but it
   changes the default for every existing sprite, shifts multi-cell assets

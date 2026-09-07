@@ -441,8 +441,8 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       const ghost =
         hover && brushIndex >= 0
           ? (() => {
-              const x = hover.ground[0] - 0.5;
-              const z = hover.ground[1] - 0.5;
+              const x = hover.ground[0];
+              const z = hover.ground[1];
               const y = effectiveHeight(live, hover.px[0], hover.px[1]);
               return { layer: brushIndex, x, y, z, key: depthOf(x, y, z) };
             })()

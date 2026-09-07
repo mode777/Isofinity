@@ -88,6 +88,13 @@ list when a change lands (and prune it — history belongs in the archives).
   a re-bake, the anchor rides provenance (omitted at the default, no
   format bump), and placement lands it at the placement point while
   picking/erase stay cell-based.
+- Cursor-exact anchor placement — sprite placement is free-form with no
+  half-cell offset: the anchor point lands exactly at the mouse position
+  as a 3D hover point (mouse ground track at the brush height; height 1 =
+  cursor hovering 1 unit above the ground; anchor on ground ⟺ brush
+  height 0, base on ground ⟺ brush height = anchor y), and the ghost
+  matches the landed placement exactly. Character placement keeps its own
+  convention; picking/erase unchanged.
 - Ground plane + materials (`isoinfinity-world/4`, `/1`–`/3` still load) —
   a flat material-backed ground plane rendered as real world-space
   geometry writing the shared depth map (backdrop only, never

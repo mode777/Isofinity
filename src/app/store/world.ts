@@ -803,7 +803,7 @@ export function placeAt(docId: string, gx: number, gz: number, y = 0): void {
     ed().setStatus(`brush "${doc.tool}" is not loaded — pick a brush from the toolbar`);
     return;
   }
-  doc.world.place(gx - 0.5, gz - 0.5, doc.tool, y, dir, doc.shadowLevel);
+  doc.world.place(gx, gz, doc.tool, y, dir, doc.shadowLevel);
   ed().markDirty(docId);
 }
 
