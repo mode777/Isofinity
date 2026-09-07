@@ -320,6 +320,24 @@ export async function writeWorkspaceFile(
   }
 }
 
+/** Create a subfolder (any depth) inside the folder; existing dirs are fine. */
+export async function createWorkspaceFolder(
+  folder: WorkspaceFolder,
+  path: string,
+): Promise<void> {
+  try {
+    const segs = path.split('/').filter((s) => s && s !== '.');
+    if (segs.length === 0 || segs.some((s) => s === '..')) {
+      throw new Error(`invalid folder path "${path}"`);
+    }
+    await resolveDirs(await folderHandle(folder, true), segs, true);
+  } catch (err) {
+    throw new Error(
+      `workspace ${folder}/: cannot create "${path}" — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 /** Remove one file from the folder (subfolders allowed). */
 export async function deleteWorkspaceFile(
   folder: WorkspaceFolder,

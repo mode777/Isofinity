@@ -120,8 +120,10 @@ export function DirTree(props: {
   );
 }
 
-/** Expansion-set state helper: toggle one directory path. */
-export function useExpansion(initial: string[] = []): [Set<string>, (path: string) => void] {
+/** Expansion-set state helper: toggle one directory path; setter exposed too. */
+export function useExpansion(
+  initial: string[] = [],
+): [Set<string>, (path: string) => void, React.Dispatch<React.SetStateAction<Set<string>>>] {
   const [expanded, setExpanded] = useState<Set<string>>(new Set(initial));
   const toggle = (path: string): void => {
     setExpanded((prev) => {
@@ -131,5 +133,5 @@ export function useExpansion(initial: string[] = []): [Set<string>, (path: strin
       return next;
     });
   };
-  return [expanded, toggle];
+  return [expanded, toggle, setExpanded];
 }

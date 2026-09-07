@@ -628,6 +628,35 @@ span.dirtree-caret {
   color: var(--text);
 }
 
+.file-dialog-newdir {
+  width: 100%;
+  margin-top: 0.5rem;
+  color: var(--muted);
+}
+
+.file-dialog-newdir-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+}
+
+.file-dialog-newdir-row input[type='text'] {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-dialog-error {
+  margin: 0.4rem 0 0;
+  color: #d98a8a;
+}
+
+.file-dialog-folders .file-dialog-newdir,
+.file-dialog-folders .file-dialog-newdir-row button {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.8rem;
+}
+
 .file-dialog-files {
   display: flex;
   flex-direction: column;

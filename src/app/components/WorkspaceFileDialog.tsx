@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { WorkspaceFolder } from '../../shared/workspace.js';
+import { createWorkspaceFolder, type WorkspaceFolder } from '../../shared/workspace.js';
 import { useProject } from '../store/project.js';
 import { buildDirTree, filesAt, useExpansion, type DirNode } from './fileTree.js';
 
@@ -23,18 +23,43 @@ export function WorkspaceFileDialog(props: {
 }): React.JSX.Element {
   const { folder, mode } = props;
   const paths = useProject((s) => s[listingKey(folder)]);
-  const [expanded, toggle] = useExpansion([]);
+  const [expanded, toggle, setExpanded] = useExpansion([]);
   const [cur, setCur] = useState(() => lastDir.get(folder) ?? '');
   const [selected, setSelected] = useState<string | null>(null);
   const [name, setName] = useState(props.defaultName ?? '');
+  // Directories created this session that the listing cannot know about
+  // (empty folders have no files to list); editor chrome, never serialized.
+  const [extraDirs, setExtraDirs] = useState<string[]>([]);
+  const [newDirName, setNewDirName] = useState<string | null>(null);
+  const [dirError, setDirError] = useState<string | null>(null);
 
-  const tree = useMemo(() => buildDirTree(paths, folder), [folder, paths]);
+  const tree = useMemo(
+    () => buildDirTree([...paths, ...extraDirs], folder),
+    [folder, paths, extraDirs],
+  );
   const filesHere = useMemo(() => filesAt(tree, cur), [tree, cur]);
   const fullPath = `${folder}/${cur ? `${cur}/` : ''}`;
 
   const enter = (path: string): void => {
     setCur(path);
     setSelected(null);
+  };
+
+  const createDir = async (): Promise<void> => {
+    const trimmed = newDirName?.trim();
+    if (!trimmed) return;
+    const path = cur ? `${cur}/${trimmed}` : trimmed;
+    try {
+      await createWorkspaceFolder(folder, path);
+      setExtraDirs((prev) => (prev.includes(path) ? prev : [...prev, path]));
+      setExpanded((prev) => new Set(prev).add(path));
+      setCur(path);
+      setSelected(null);
+      setNewDirName(null);
+      setDirError(null);
+    } catch (err) {
+      setDirError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const accept = (): void => {
@@ -72,6 +97,39 @@ export function WorkspaceFileDialog(props: {
         <div className="file-dialog-body">
           <div className="file-dialog-folders">
             <DirTree tree={tree} expanded={expanded} onToggle={toggle} onEnter={enter} activeDir={cur} />
+            {newDirName === null ? (
+              <button
+                className="file-dialog-newdir"
+                onClick={() => {
+                  setNewDirName('');
+                  setDirError(null);
+                }}
+              >
+                + New folder
+              </button>
+            ) : (
+              <div className="file-dialog-newdir-row">
+                <input
+                  type="text"
+                  placeholder="folder name"
+                  autoFocus
+                  value={newDirName}
+                  onChange={(e) => setNewDirName(e.target.value)}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') void createDir();
+                    if (e.key === 'Escape') setNewDirName(null);
+                  }}
+                />
+                <button aria-label="Create folder" onClick={() => void createDir()}>
+                  ✓
+                </button>
+                <button aria-label="Cancel" onClick={() => setNewDirName(null)}>
+                  ×
+                </button>
+              </div>
+            )}
+            {dirError ? <p className="hint file-dialog-error">{dirError}</p> : null}
           </div>
           <div className="file-dialog-files">
             <div className="file-dialog-crumb" title={fullPath}>

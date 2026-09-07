@@ -56,6 +56,26 @@ and the accept action is disabled in save mode when the name field is empty.
   the accept action
 - **THEN** nothing is saved and the accept affordance is unavailable
 
+### Requirement: New folders can be created from the dialog
+
+The save/load dialog SHALL offer a new-folder affordance that creates a
+subfolder inside the currently selected folder (on demand, any depth) and
+navigates into it. A creation failure (permission lost, invalid name) SHALL
+be reported inside the dialog without closing it. Created folders are
+immediately usable as save targets.
+
+#### Scenario: Creating a subfolder while saving
+
+- **WHEN** the user activates the new-folder affordance in `worlds/`, enters
+  `campaign1`, and confirms
+- **THEN** `worlds/campaign1/` exists, the dialog navigates into it, and a
+  save there writes `worlds/campaign1/<name>.json`
+
+#### Scenario: Failed creation is reported in the dialog
+
+- **WHEN** folder creation fails (e.g. permission revoked)
+- **THEN** the dialog shows the error and stays open with its state intact
+
 ### Requirement: Modal without a workspace falls back to current behavior
 
 When no workspace is connected, save and load SHALL behave exactly as they

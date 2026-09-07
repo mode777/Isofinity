@@ -16,6 +16,8 @@
 - [x] 3.3 Add load mode: accepted-type filtering, double-activation or select+accept opens the file; verify loading a nested sprite and world
 - [x] 3.4 Remember last-used folder per kind in memory only (never serialized — ADR 0006); verify it survives within a session and not across reload
 
+- [x] 3.5 Add a new-folder affordance to the dialog that creates a subfolder in the current folder and navigates into it (`createWorkspaceFolder` + inline input); verify by creating `campaign1` under `worlds/` and saving into it
+
 ## 4. Routing save/load flows through the modal
 
 - [x] 4.1 Route connected-workspace save affordances (sprite bundle, world) through the modal; keep no-workspace download/file-dialog fallbacks untouched; verify both paths in the browser
