@@ -48,11 +48,27 @@ path-traced passes are store actions guarded by generation tokens.
 
 Lists the workspace's convention folders when connected — `sprites/`
 (bundles), `models/` (glTF files), and `worlds/` (JSON) —
-extension-filtered, with a refresh action. Activate an entry to open it;
-buttons offer "Import glTF file…" (dialog; drag-drop is not wired) and "New
-world". The browser does not list built-in primitives — primitives enter the
-pipeline only as world-editor brushes. Without a workspace the import dialog
-still starts sprite documents.
+extension-filtered, with a refresh action. Each section renders as a
+collapsible tree: nested subfolders inside a convention folder appear as
+expandable nodes and files as leaves at their relative path; activating a
+file opens it regardless of its depth. Buttons offer "Import glTF file…"
+(dialog; drag-drop is not wired) and "New world". The browser does not
+list built-in primitives — primitives enter the pipeline only as
+world-editor brushes. Without a workspace the import dialog still starts
+sprite documents.
+
+### Workspace file dialog
+
+With a workspace connected, the sprite and world **Save** buttons open a
+custom modal (`src/app/components/WorkspaceFileDialog.tsx`) modeled on
+native file dialogs: a folder tree on the left, the current folder's files
+on the right, a breadcrumb, and a name field in save mode (accept is
+disabled while the name is empty). Accepting a save writes to
+`<folder>/<subfolders>/<name>`, creating missing subfolders on demand;
+double-activating a file in load mode opens it. The last-used folder per
+convention folder is remembered in memory only — it is editor chrome and
+never serialized (ADR 0006). Without a workspace the previous
+prompt/download fallbacks are unchanged.
 
 ## Sprite editing
 

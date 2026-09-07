@@ -3,6 +3,7 @@ import { openBundleDoc, openGltfFiles, openModelDoc } from '../store/bake.js';
 import { useProject } from '../store/project.js';
 import { newWorldDoc, openWorldDoc, selectGroundMaterial } from '../store/world.js';
 import { useWorkspace } from '../store/workspace.js';
+import { buildDirTree, useExpansion, type DirNode } from './fileTree.js';
 
 export function ProjectBrowser(): React.JSX.Element {
   const sprites = useProject((s) => s.sprites);
@@ -30,7 +31,7 @@ export function ProjectBrowser(): React.JSX.Element {
       <section>
         <h3>Sprites</h3>
         {connected ? (
-          <FileList names={sprites} empty="sprites/ is empty" onOpen={(n) => void openBundleDoc(n)} />
+          <SectionTree paths={sprites} empty="sprites/ is empty" onOpen={(n) => void openBundleDoc(n)} />
         ) : (
           <p className="hint">Connect a workspace to browse sprites/</p>
         )}
@@ -39,7 +40,7 @@ export function ProjectBrowser(): React.JSX.Element {
       <section>
         <h3>Models</h3>
         {connected ? (
-          <FileList names={models} empty="models/ is empty" onOpen={(n) => void openModelDoc(n)} />
+          <SectionTree paths={models} empty="models/ is empty" onOpen={(n) => void openModelDoc(n)} />
         ) : (
           <p className="hint">Connect a workspace to browse models/</p>
         )}
@@ -62,7 +63,7 @@ export function ProjectBrowser(): React.JSX.Element {
         <h3>Worlds</h3>
         <button onClick={() => newWorldDoc()}>New world</button>
         {connected ? (
-          <FileList names={worlds} empty="worlds/ is empty" onOpen={(n) => void openWorldDoc(n)} />
+          <SectionTree paths={worlds} empty="worlds/ is empty" onOpen={(n) => void openWorldDoc(n)} />
         ) : (
           <p className="hint">Connect a workspace to browse worlds/</p>
         )}
@@ -71,7 +72,7 @@ export function ProjectBrowser(): React.JSX.Element {
       <section>
         <h3>Materials</h3>
         {connected ? (
-          <FileList names={materials} empty="materials/ is empty" onOpen={(n) => void selectGroundMaterial(n)} />
+          <SectionTree paths={materials} empty="materials/ is empty" onOpen={(n) => void selectGroundMaterial(n)} />
         ) : (
           <p className="hint">Connect a workspace to browse materials/</p>
         )}
@@ -87,21 +88,62 @@ export function ProjectBrowser(): React.JSX.Element {
   );
 }
 
-function FileList(props: {
-  names: string[];
+/** One convention folder rendered as a collapsible tree of its files. */
+function SectionTree(props: {
+  paths: string[];
   empty: string;
-  onOpen: (name: string) => void;
+  onOpen: (path: string) => void;
 }): React.JSX.Element {
-  if (props.names.length === 0) return <p className="hint">{props.empty}</p>;
+  const tree = buildDirTree(props.paths);
+  const [expanded, toggle] = useExpansion(tree.dirs.map((d) => d.path));
+  if (props.paths.length === 0) return <p className="hint">{props.empty}</p>;
+  return <DirNodeView node={tree} expanded={expanded} onToggle={toggle} onOpen={props.onOpen} depth={0} />;
+}
+
+function DirNodeView(props: {
+  node: DirNode;
+  expanded: Set<string>;
+  onToggle: (path: string) => void;
+  onOpen: (path: string) => void;
+  depth: number;
+}): React.JSX.Element {
+  const { node, depth } = props;
   return (
-    <ul>
-      {props.names.map((name) => (
-        <li key={name}>
-          <button title={name} onClick={() => props.onOpen(name)}>
-            {name}
-          </button>
-        </li>
-      ))}
+    <ul className={depth === 0 ? 'dirtree browser-tree' : 'dirtree'}>
+      {node.dirs.map((dir) => {
+        const isOpen = props.expanded.has(dir.path);
+        return (
+          <li key={dir.path}>
+            <div className="dirtree-dir">
+              <button
+                className="dirtree-caret"
+                aria-label={isOpen ? `Collapse ${dir.name}` : `Expand ${dir.name}`}
+                onClick={() => props.onToggle(dir.path)}
+              >
+                {isOpen ? '▾' : '▸'}
+              </button>
+              <button
+                className="dirtree-name"
+                title={dir.path}
+                onClick={() => props.onToggle(dir.path)}
+              >
+                {dir.name}/
+              </button>
+            </div>
+            {isOpen ? <DirNodeView {...props} node={dir} depth={depth + 1} /> : null}
+          </li>
+        );
+      })}
+      {node.files.map((file) => {
+        const path = node.path ? `${node.path}/${file}` : file;
+        return (
+          <li key={path}>
+            <button title={path} onClick={() => props.onOpen(path)}>
+              {file}
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }

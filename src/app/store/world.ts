@@ -685,7 +685,13 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
   const fallback = doc.ref
     ? doc.ref.title.replace(/\.json$/i, '')
     : suggestWorldName(useProject.getState().worlds);
-  const name = sanitizeWorldName(rawName?.trim() || fallback);
+  // Subfolder paths in the save target survive sanitization (applied to the
+  // base name only); the workspace layer creates missing directories.
+  const raw = rawName?.trim() || fallback;
+  const sep = raw.lastIndexOf('/');
+  const dirPart = sep >= 0 ? raw.slice(0, sep) : '';
+  const base = sanitizeWorldName(sep >= 0 ? raw.slice(sep + 1) : raw);
+  const name = dirPart ? `${dirPart}/${base}` : base;
   const file = `${name}.json`;
   try {
     const placements = doc.world.list();

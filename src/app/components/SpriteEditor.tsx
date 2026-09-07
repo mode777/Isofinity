@@ -43,8 +43,10 @@ import {
   sourcePrimitive,
 } from '../store/bake.js';
 import { useEditor } from '../store/editor.js';
+import { useWorkspace } from '../store/workspace.js';
 import { EditorToolbar } from './EditorToolbar.js';
 import { RealtimeCanvas } from './RealtimeCanvas.js';
+import { WorkspaceFileDialog } from './WorkspaceFileDialog.js';
 
 const VIEW_LABELS: Record<BakeViewMode, string> = {
   realtime: 'Realtime 3D',
@@ -79,7 +81,16 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
     panY: number;
   } | null>(null);
 
+  const [saveDialog, setSaveDialog] = useState(false);
+  const connected = useWorkspace((s) => s.state.kind) === 'connected';
+
   const onSave = (): void => {
+    // Connected: navigate folders in the workspace file dialog. Otherwise
+    // keep the plain-name prompt and the download fallback.
+    if (connected) {
+      setSaveDialog(true);
+      return;
+    }
     const raw = window.prompt('Save sprite as', doc.title);
     if (raw === null) return;
     const name = raw.trim();
@@ -315,6 +326,19 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
 
   return (
     <div className="sprite-editor">
+      {saveDialog ? (
+        <WorkspaceFileDialog
+          mode="save"
+          folder="sprites"
+          title="Save sprite bundle"
+          defaultName={doc.ref ? doc.ref.title : `${doc.title}${doc.result ? '.sprite' : ''}`}
+          onAccept={(path) => {
+            setSaveDialog(false);
+            void saveSprite(doc.docId, path);
+          }}
+          onClose={() => setSaveDialog(false)}
+        />
+      ) : null}
       <EditorToolbar>
         <button
           disabled={!doc.result}

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import {
   BUNDLE_EXT,
-  listWorkspaceFiles,
+  listWorkspaceTree,
   type WorkspaceFolder,
 } from '../../shared/workspace.js';
 import { useWorkspace } from './workspace.js';
@@ -38,6 +38,24 @@ export interface ProjectStore extends ProjectListings {
   list(folder: WorkspaceFolder): Promise<string[]>;
 }
 
+/** Accepted extensions per convention folder, in WORKSPACE_FOLDERS order. */
+export function folderExts(folder: WorkspaceFolder): string[] {
+  switch (folder) {
+    case 'sprites':
+      return SPRITE_EXTS;
+    case 'models':
+      return MODEL_EXTS;
+    case 'worlds':
+      return WORLD_EXTS;
+    case 'presets':
+      return PRESET_EXTS;
+    case 'materials':
+      return MATERIAL_EXTS;
+    default:
+      return HDRI_EXTS;
+  }
+}
+
 export const useProject = create<ProjectStore>((set) => ({
   ...EMPTY,
 
@@ -49,12 +67,12 @@ export const useProject = create<ProjectStore>((set) => ({
     }
     try {
       const [sprites, models, worlds, hdris, presets, materials] = await Promise.all([
-        listWorkspaceFiles('sprites', SPRITE_EXTS),
-        listWorkspaceFiles('models', MODEL_EXTS),
-        listWorkspaceFiles('worlds', WORLD_EXTS),
-        listWorkspaceFiles('hdri', HDRI_EXTS),
-        listWorkspaceFiles('presets', PRESET_EXTS),
-        listWorkspaceFiles('materials', MATERIAL_EXTS),
+        listWorkspaceTree('sprites', SPRITE_EXTS),
+        listWorkspaceTree('models', MODEL_EXTS),
+        listWorkspaceTree('worlds', WORLD_EXTS),
+        listWorkspaceTree('hdri', HDRI_EXTS),
+        listWorkspaceTree('presets', PRESET_EXTS),
+        listWorkspaceTree('materials', MATERIAL_EXTS),
       ]);
       set({ sprites, models, worlds, hdris, presets, materials });
     } catch (err) {
@@ -62,21 +80,7 @@ export const useProject = create<ProjectStore>((set) => ({
     }
   },
 
-  list: async (folder) => {
-    const exts =
-      folder === 'sprites'
-        ? SPRITE_EXTS
-        : folder === 'models'
-          ? MODEL_EXTS
-          : folder === 'worlds'
-            ? WORLD_EXTS
-        : folder === 'presets'
-          ? PRESET_EXTS
-          : folder === 'materials'
-            ? MATERIAL_EXTS
-            : HDRI_EXTS;
-    return listWorkspaceFiles(folder, exts);
-  },
+  list: async (folder) => listWorkspaceTree(folder, folderExts(folder)),
 }));
 
 // Re-read listings whenever the workspace connection changes.

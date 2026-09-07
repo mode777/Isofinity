@@ -205,6 +205,31 @@ async function folderHandle(
   return root.getDirectoryHandle(folder, { create });
 }
 
+/**
+ * Split a slash-relative name (`props/crates/crate1.sprite`) into directory
+ * segments and the final file name; `..` segments are rejected so paths can
+ * never escape their convention folder.
+ */
+function splitRelPath(name: string): { dirs: string[]; file: string } {
+  const segs = name.split('/');
+  const file = segs.pop() ?? '';
+  if (!file || file === '.' || segs.some((s) => !s || s === '.' || s === '..')) {
+    throw new Error(`invalid relative path "${name}"`);
+  }
+  return { dirs: segs, file };
+}
+
+/** Walk (creating, when `create`) the directory segments under `base`. */
+async function resolveDirs(
+  base: FileSystemDirectoryHandle,
+  dirs: string[],
+  create: boolean,
+): Promise<FileSystemDirectoryHandle> {
+  let cur = base;
+  for (const seg of dirs) cur = await cur.getDirectoryHandle(seg, { create });
+  return cur;
+}
+
 /** Flat listing of the folder's files whose name ends in one of `exts`, name-sorted. */
 export async function listWorkspaceFiles(
   folder: WorkspaceFolder,
@@ -218,14 +243,43 @@ export async function listWorkspaceFiles(
   return names.sort((a, b) => a.localeCompare(b));
 }
 
-/** Read one file from the folder as a File (content loads lazily). */
+/**
+ * Recursive listing of the folder: every matching file at any depth, as
+ * slash-separated paths relative to the folder (`props/crates/c1.sprite`),
+ * path-sorted. Flat layouts come back unchanged.
+ */
+export async function listWorkspaceTree(
+  folder: WorkspaceFolder,
+  exts: string[],
+): Promise<string[]> {
+  const root = await folderHandle(folder);
+  const out: string[] = [];
+  const walk = async (
+    dh: FileSystemDirectoryHandle,
+    prefix: string,
+  ): Promise<void> => {
+    for await (const [name, handle] of dh.entries()) {
+      const path = prefix ? `${prefix}/${name}` : name;
+      if (handle.kind === 'directory') {
+        await walk(handle as FileSystemDirectoryHandle, path);
+      } else if (matchesExts(name, exts)) {
+        out.push(path);
+      }
+    }
+  };
+  await walk(root, '');
+  return out.sort((a, b) => a.localeCompare(b));
+}
+
+/** Read one file from the folder (subfolders allowed) as a File. */
 export async function readWorkspaceFile(
   folder: WorkspaceFolder,
   name: string,
 ): Promise<File> {
   try {
-    const sub = await folderHandle(folder);
-    const handle = await sub.getFileHandle(name, { create: false });
+    const { dirs, file } = splitRelPath(name);
+    const sub = await resolveDirs(await folderHandle(folder), dirs, false);
+    const handle = await sub.getFileHandle(file, { create: false });
     return await handle.getFile();
   } catch (err) {
     throw new Error(
@@ -243,15 +297,16 @@ export async function readAllWorkspaceFiles(
   return Promise.all(names.map((name) => readWorkspaceFile(folder, name)));
 }
 
-/** Write (overwriting) one file into the folder. */
+/** Write (overwriting) one file into the folder, creating subfolders on demand. */
 export async function writeWorkspaceFile(
   folder: WorkspaceFolder,
   name: string,
   data: Uint8Array<ArrayBuffer> | string,
 ): Promise<void> {
   try {
-    const sub = await folderHandle(folder, true);
-    const handle = await sub.getFileHandle(name, { create: true });
+    const { dirs, file } = splitRelPath(name);
+    const sub = await resolveDirs(await folderHandle(folder, true), dirs, true);
+    const handle = await sub.getFileHandle(file, { create: true });
     const stream = await handle.createWritable();
     try {
       await stream.write(data);
@@ -265,14 +320,15 @@ export async function writeWorkspaceFile(
   }
 }
 
-/** Remove one file from the folder. */
+/** Remove one file from the folder (subfolders allowed). */
 export async function deleteWorkspaceFile(
   folder: WorkspaceFolder,
   name: string,
 ): Promise<void> {
   try {
-    const sub = await folderHandle(folder);
-    await sub.removeEntry(name);
+    const { dirs, file } = splitRelPath(name);
+    const sub = await resolveDirs(await folderHandle(folder), dirs, false);
+    await sub.removeEntry(file);
   } catch (err) {
     throw new Error(
       `workspace ${folder}/: cannot delete "${name}" — ${err instanceof Error ? err.message : String(err)}`,

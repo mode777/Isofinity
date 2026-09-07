@@ -62,8 +62,9 @@ it as the reference architecture; design against it.
 
 ## Workflow
 
-- Always commit and push after implementing an OpenSpec change with
-  `/opsx-apply` (include the change's `openspec/changes/<name>/` artifacts).
+- Always commit and push immediately after implementing an OpenSpec change
+  with `/opsx-apply` — do it proactively, without asking the user first
+  (include the change's `openspec/changes/<name>/` artifacts).
 - Whenever a commit is pushed after `/opsx-apply`, also report the resulting
   build version of the push: `v<commit count>+<short hash>` (e.g.
   `git rev-list --count HEAD` + `git rev-parse --short HEAD`).

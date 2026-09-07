@@ -116,6 +116,11 @@ list when a change lands (and prune it — history belongs in the archives).
   the grounding shadow on (the default) the box, origin cross and baked
   pixels line up instead of the overlay drawing inset/shifted; origin
   authoring order is pinned as bake-invariant by `verify:bundles` checks.
+- Workspace folder navigation — nested subfolders inside every convention
+  folder (recursive listings, on-demand folder creation on save), a
+  collapsible tree-view project browser, and a native-dialog-style
+  save/load modal (folder tree left, file list right, breadcrumb, name
+  field). Flat workspaces keep working unchanged; no format impact.
 
 ## In progress
 

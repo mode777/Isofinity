@@ -35,6 +35,7 @@ import { useEditor } from '../store/editor.js';
 import { useProject } from '../store/project.js';
 import { useWorkspace } from '../store/workspace.js';
 import { EditorToolbar } from './EditorToolbar.js';
+import { WorkspaceFileDialog } from './WorkspaceFileDialog.js';
 
 const MARGIN = 8;
 const GRID_N = 12;
@@ -878,10 +879,18 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
   const multiView = brushDirs.length > 1;
   const dirLabel = multiView ? ` (${dirValue.toUpperCase()})` : '';
 
+  const [saveDialog, setSaveDialog] = useState(false);
+
   const onSaveWorld = (): void => {
     const suggested = doc.ref
       ? doc.ref.title.replace(/\.json$/i, '')
       : suggestWorldName(worlds);
+    // Connected: navigate folders in the workspace file dialog. Otherwise
+    // keep the plain-name prompt (and no-workspace behavior unchanged).
+    if (connected) {
+      setSaveDialog(true);
+      return;
+    }
     const raw = window.prompt('Save world as', suggested);
     if (raw === null) return;
     const name = raw.trim();
@@ -904,6 +913,23 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
 
   return (
     <div className="world-editor">
+      {saveDialog ? (
+        <WorkspaceFileDialog
+          mode="save"
+          folder="worlds"
+          title="Save world"
+          defaultName={
+            doc.ref
+              ? doc.ref.title.replace(/\.json$/i, '')
+              : suggestWorldName(worlds)
+          }
+          onAccept={(path) => {
+            setSaveDialog(false);
+            void saveWorld(doc.docId, path);
+          }}
+          onClose={() => setSaveDialog(false)}
+        />
+      ) : null}
       <EditorToolbar>
         <button
           disabled={!connected}

@@ -515,3 +515,184 @@ canvas {
   white-space: nowrap;
 }
 
+
+/* --- collapsible directory trees (project browser + file dialog) --- */
+
+.dirtree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dirtree ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dirtree-dir {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.dirtree-dir.active > .dirtree-name {
+  background: var(--control-active);
+}
+
+.dirtree-caret {
+  flex: none;
+  width: 1.2rem;
+  padding: 0.15rem 0.3rem;
+  border: none;
+  background: none;
+  color: var(--muted);
+  text-align: center;
+  cursor: pointer;
+}
+
+span.dirtree-caret {
+  cursor: default;
+}
+
+.dirtree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* --- workspace file dialog modal --- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.file-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(46rem, 92vw);
+  height: min(30rem, 80vh);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.file-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--panel-border);
+  font-weight: 600;
+}
+
+.file-dialog-close {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.file-dialog-body {
+  display: grid;
+  grid-template-columns: 14rem 1fr;
+  flex: 1;
+  min-height: 0;
+}
+
+.file-dialog-folders {
+  overflow: auto;
+  padding: 0.5rem;
+  border-right: 1px solid var(--panel-border);
+}
+
+.file-dialog-folders .dirtree-name,
+.file-dialog-folders .dirtree-dir button {
+  color: var(--text);
+}
+
+.file-dialog-files {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0.5rem;
+}
+
+.file-dialog-crumb {
+  padding: 0.25rem 0.4rem;
+  margin-bottom: 0.4rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--control);
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-dialog-files ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.file-dialog-files li button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-dialog-files li button.active {
+  background: var(--control-active);
+}
+
+.file-dialog-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-top: 1px solid var(--panel-border);
+}
+
+.file-dialog-foot label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+  color: var(--muted);
+}
+
+.file-dialog-foot input[type='text'] {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-dialog-foot .primary:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
