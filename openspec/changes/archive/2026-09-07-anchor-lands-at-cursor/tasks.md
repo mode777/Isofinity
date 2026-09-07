@@ -7,9 +7,9 @@
 
 ## 2. Verification
 
-- [ ] 2.1 Browser check (`npm run dev` → world editor): with a ground-center-anchored sprite and brush height 0, the anchor point (select the placement → ground highlight) lands exactly at the click point; with the default corner-anchored primitive, the box min corner lands at the click point. Verify ghost and landed placement coincide while dragging.
-- [ ] 2.2 Browser check: raised/negative brush heights — the anchor lands at the cursor's ground position at that height (asset hangs/sinks accordingly), and the ghost matches.
-- [ ] 2.4 Browser check (depth regression, user's simplified scene): world with `cube` and a ground-center-anchored stool both at (0,0,0), y = 0 — the two must render as intersecting solids (per-pixel occlusion), with the stool's legs occluded by the cube's nearer faces, not perched flat on top; also verify a stool placed beside a cube stands on the floor.
+- [x] 2.1 Browser check (`npm run dev` → world editor): with a ground-center-anchored sprite and brush height 0, the anchor point (select the placement → ground highlight) lands exactly at the click point; with the default corner-anchored primitive, the box min corner lands at the click point. Verify ghost and landed placement coincide while dragging.
+- [x] 2.2 Browser check: raised/negative brush heights — the anchor lands at the cursor's ground position at that height (asset hangs/sinks accordingly), and the ghost matches.
+- [x] 2.4 Browser check (depth regression, user's simplified scene): world with `cube` and a ground-center-anchored stool both at (0,0,0), y = 0 — the two must render as intersecting solids (per-pixel occlusion), with the stool's legs occluded by the cube's nearer faces, not perched flat on top; also verify a stool placed beside a cube stands on the floor.
 - [x] 2.3 Run `npm run verify:bundles` and `npm run build` — both must pass (no bake/format behavior changed).
 
 ## 3. Docs
