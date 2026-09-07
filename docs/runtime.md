@@ -194,7 +194,13 @@ an asset anchored above its base (a hook) sinks at height 0 and stands
 on the ground when the brush height equals its anchor y. A sprite
 authored with a ground-center origin pivots around its center when its
 facing changes, while ground-footprint picking and erase stay
-ground-position-based regardless of the anchor (ADR 0008).
+ground-position-based regardless of the anchor (ADR 0008). Per-pixel
+occlusion stays truthful for anchored sprites: the baked g-buffer depth
+is measured from the box corner while the image is drawn from the anchor,
+so the compositor subtracts `dot(VIEW_DIR, anchor)` from each instance's
+depth offset — without it, an anchored sprite composites at its
+box-corner depth while drawn at its anchored position (a ground-center
+stool perches on geometry it merely stands behind/inside).
 
 The toolbar's **character** brush places the built-in animated character
 (Khronos CesiumMan, committed with attribution) as a *mesh placement*:

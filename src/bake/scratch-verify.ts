@@ -669,6 +669,7 @@ async function runMeshSpike(): Promise<void> {
     width: w,
     height: h,
     originPx: cube.originPx,
+    origin: [0, 0, 0],
     gbuffer: bakeFloatToHalf(cube.gbuffer, w, h),
     render: new Uint8Array(w * h * 4).fill(0).map((_, i) => (i % 4 === 3 ? 255 : 200)),
   };
@@ -768,6 +769,7 @@ async function runGroundSpike(): Promise<void> {
     width: w,
     height: h,
     originPx: cube.originPx,
+    origin: [0, 0, 0],
     gbuffer: bakeFloatToHalf(cube.gbuffer, w, h),
     render: new Uint8Array(w * h * 4).fill(0).map((_, i) => (i % 4 === 3 ? 255 : 200)),
   };
@@ -958,6 +960,7 @@ async function runGroundingShadowSpike(): Promise<void> {
       width: SIDE,
       height: SIDE,
       originPx: [0, 0],
+      origin: [0, 0, 0],
       gbuffer: bakeFloatToHalf(gbufF, SIDE, SIDE),
       render: rgba,
     };

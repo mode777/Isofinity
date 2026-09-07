@@ -1240,6 +1240,7 @@ export function resultToLayer(doc: BakeDocument, id: string): SpriteLayer | null
     width: doc.result.width,
     height: doc.result.height,
     originPx: doc.result.originPx,
+    origin: doc.origin,
     gbuffer: bakeFloatToHalf(doc.result.gbuffer, doc.result.width, doc.result.height),
     render: ptImageToLayerBytes(doc.render),
   };
@@ -1278,6 +1279,7 @@ export async function bakePrimitiveLayer(primitive: PrimitiveKind): Promise<Spri
       width: result.width,
       height: result.height,
       originPx: result.originPx,
+      origin: [0, 0, 0],
       gbuffer: bakeFloatToHalf(result.gbuffer, result.width, result.height),
       render: ptImageToLayerBytes(shadowed),
     };

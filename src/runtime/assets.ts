@@ -13,8 +13,11 @@ import type { PtEnvironment } from '../bake/pt.js';
 import { parseBake, type BakeManifest, type BakeProvenance } from '../bake/bundle.js';
 import {
   EXTRA_VIEW_SLOTS,
+  slotAnchorPoint,
+  slotYawDeg,
   VIEW_SLOTS,
   type ExtraViewSlot,
+  type Vec3,
   type ViewSlot,
 } from '../shared/iso.js';
 
@@ -63,6 +66,12 @@ export interface SpriteLayer {
   width: number;
   height: number;
   originPx: [number, number];
+  /** The layer's authored anchor in asset space (box-corner default). The
+   *  compositor needs its depth component: the baked g-buffer depth is
+   *  measured with the box corner at the placement, while the image is
+   *  drawn with the anchor there — `dot(VIEW_DIR, origin)` is the
+   *  difference. */
+  origin: Vec3;
   gbuffer: Uint16Array;
   /** Path-traced lit render (sRGB RGBA, top-down). Required: the runtime
    *  only displays shaded prerendered images. */
@@ -75,6 +84,11 @@ export interface SpriteSet {
   maxH: number;
   sizes: [number, number][];
   origins: [number, number][];
+  /** Per-layer authored anchor (asset space); pairs with `origins` — the
+   *  compositor subtracts its depth, `dot(VIEW_DIR, anchor)`, from the
+   *  instance depth offset so the g-buffer depth field matches the drawn
+   *  (anchored) image position. */
+  anchors: Vec3[];
   ppus: number[];
   gbufferLayers: Uint16Array[];
   renderLayers: Uint8Array[];
@@ -150,6 +164,7 @@ export function layersToSet(layers: SpriteLayer[]): SpriteSet {
     maxH,
     sizes: layers.map((l) => [l.width, l.height]),
     origins: layers.map((l) => l.originPx),
+    anchors: layers.map((l) => l.origin),
     ppus: layers.map((l) => l.pxPerUnit),
     gbufferLayers: layers.map((l) => padHalf(l.gbuffer, l.width, l.height, maxW, maxH)),
     renderLayers: layers.map((l) => padBytes(l.render, l.width, l.height, maxW, maxH)),
@@ -181,12 +196,14 @@ export async function loadBundleViews(buffer: ArrayBuffer): Promise<BundleViews>
   }
   const w = manifest.sprite.width;
   const h = manifest.sprite.height;
+  const anchor: Vec3 = provenance?.origin ?? [0, 0, 0];
   const north: SpriteLayer = {
     id: manifest.id,
     pxPerUnit: manifest.pxPerUnit,
     width: w,
     height: h,
     originPx: manifest.sprite.originPx,
+    origin: anchor,
     gbuffer: decodeExrGbuffer(await gbuffer.arrayBuffer(), w, h),
     render: await decodePng(render, w, h),
   };
@@ -205,6 +222,7 @@ export async function loadBundleViews(buffer: ArrayBuffer): Promise<BundleViews>
         width: view.width,
         height: view.height,
         originPx: view.originPx,
+        origin: slotAnchorPoint(anchor, manifest.cube.size, slotYawDeg(view.slot)),
         gbuffer: decodeExrGbuffer(
           await view.gbuffer.arrayBuffer(),
           view.width,

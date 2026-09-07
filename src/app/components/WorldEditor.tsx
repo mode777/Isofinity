@@ -348,6 +348,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         const layer = live.layers[li];
         const scale = PPU / spriteSet.ppus[li];
         const [ox, oy] = spriteSet.origins[li];
+        const [ax, ay, az] = spriteSet.anchors[li];
         const [w, h] = spriteSet.sizes[li];
         const [bx, by] = (() => {
           const [cx, cy] = toPx(p.x, p.z, p.y);
@@ -361,11 +362,15 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         const ny = DataUtils.fromHalfFloat(layer.gbuffer[o + 1]);
         const nz = DataUtils.fromHalfFloat(layer.gbuffer[o + 2]);
         if (nx * nx + ny * ny + nz * nz === 0) continue;
+        // Same anchor correction as the draw path: the baked depth field
+        // is measured from the box corner, the image is drawn from the
+        // anchor — subtract the anchor's depth so the reconstructed world
+        // position matches the drawn pixel.
         const d =
           DataUtils.fromHalfFloat(layer.gbuffer[o + 3]) +
-          VIEW_DIR[0] * p.x +
-          VIEW_DIR[1] * p.y +
-          VIEW_DIR[2] * p.z;
+          VIEW_DIR[0] * (p.x - ax) +
+          VIEW_DIR[1] * (p.y - ay) +
+          VIEW_DIR[2] * (p.z - az);
         if (d > best) best = d;
       }
       if (!Number.isFinite(best)) return 0;
@@ -462,13 +467,24 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       ): void => {
         const scale = PPU / spriteSet.ppus[layerIndex];
         const [ox, oy] = spriteSet.origins[layerIndex];
+        const [ax, ay, az] = spriteSet.anchors[layerIndex];
         const [w, h] = spriteSet.sizes[layerIndex];
         const [cx, cy] = toPx(x, z, y);
         instances[count * 10] = cx - ox * scale;
         instances[count * 10 + 1] = cy - oy * scale;
         instances[count * 10 + 2] = layerIndex;
+        // Instance depth offset: the placement's world depth minus the
+        // anchor's. The baked g-buffer depth is measured with the box
+        // corner at the placement point, but the image is drawn with the
+        // authored anchor there — without subtracting `dot(VIEW_DIR,
+        // anchor)` the depth field disagrees with the drawn pixels by the
+        // anchor's displacement and anchored sprites composite at the
+        // wrong depth (a ground-center stool renders perched on things
+        // it merely stands behind).
         instances[count * 10 + 3] =
-          VIEW_DIR[0] * x + VIEW_DIR[1] * y + VIEW_DIR[2] * z;
+          VIEW_DIR[0] * (x - ax) +
+          VIEW_DIR[1] * (y - ay) +
+          VIEW_DIR[2] * (z - az);
         instances[count * 10 + 4] = w * scale;
         instances[count * 10 + 5] = h * scale;
         instances[count * 10 + 6] = w;
