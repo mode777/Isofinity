@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { DataUtils } from 'three';
 import {
   SCREEN_UP,
   VIEW_DIR,
@@ -10,6 +9,7 @@ import {
 import { RUNTIME_PPU, layersToSet, viewLayerId } from '../../runtime/assets.js';
 import { meshYawMat, Renderer, type FlatBatch, type MeshDraw } from '../../runtime/renderer.js';
 import { CharacterPlayer, bindPosePalette } from '../../runtime/meshAsset.js';
+import { surfaceHeightAt } from '../../runtime/surfaceSnap.js';
 import { depthOf } from '../../runtime/world.js';
 import { PRIMITIVE_KINDS } from '../document.js';
 import type { ViewTransform, WorldDocument } from '../document.js';
@@ -25,6 +25,7 @@ import {
   selectBrush,
   setBrushDir,
   setHeightLevel,
+  setSnappedHeight,
   setShadowLevel,
   setSurfaceSnap,
   setTool,
@@ -328,53 +329,18 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
      * The effective placement height at the cursor: the brush height
      * level, or — when surface snap is on — the height of the visible
      * surface under the cursor, unprojected CPU-side from the world
-     * document's in-memory g-buffers (max composite depth among the
-     * covering placements, then `y = v·SCREEN_UP[1] + d·VIEW_DIR[1]`).
+     * document's in-memory g-buffers (`surfaceHeightAt`).
      * Empty ground or nothing covered = ground level.
      */
     const effectiveHeight = (live: WorldDocument, wx: number, wy: number): number => {
       if (!live.surfaceSnap) return live.heightLevel;
-      // Surface point = u·SCREEN_RIGHT + v·SCREEN_UP + d·VIEW_DIR; its y
-      // component only involves v and d (SCREEN_RIGHT[1] is 0).
-      const v = -(wy - ORIGIN_Y) / PPU;
-      let best = -Infinity;
-      for (const p of live.world.list()) {
-        // The visible surface comes from what is rendered: the
-        // placement's own direction view.
-        const li = live.layers.findIndex(
-          (l) => l.id === viewLayerId(p.primId, p.dir),
-        );
-        if (li < 0) continue;
-        const layer = live.layers[li];
-        const scale = PPU / spriteSet.ppus[li];
-        const [ox, oy] = spriteSet.origins[li];
-        const [ax, ay, az] = spriteSet.anchors[li];
-        const [w, h] = spriteSet.sizes[li];
-        const [bx, by] = (() => {
-          const [cx, cy] = toPx(p.x, p.z, p.y);
-          return [cx - ox * scale, cy - oy * scale];
-        })();
-        const tx = Math.floor((wx - bx) / scale);
-        const ty = Math.floor((wy - by) / scale);
-        if (tx < 0 || ty < 0 || tx >= w || ty >= h) continue;
-        const o = (ty * w + tx) * 4;
-        const nx = DataUtils.fromHalfFloat(layer.gbuffer[o]);
-        const ny = DataUtils.fromHalfFloat(layer.gbuffer[o + 1]);
-        const nz = DataUtils.fromHalfFloat(layer.gbuffer[o + 2]);
-        if (nx * nx + ny * ny + nz * nz === 0) continue;
-        // Same anchor correction as the draw path: the baked depth field
-        // is measured from the box corner, the image is drawn from the
-        // anchor — subtract the anchor's depth so the reconstructed world
-        // position matches the drawn pixel.
-        const d =
-          DataUtils.fromHalfFloat(layer.gbuffer[o + 3]) +
-          VIEW_DIR[0] * (p.x - ax) +
-          VIEW_DIR[1] * (p.y - ay) +
-          VIEW_DIR[2] * (p.z - az);
-        if (d > best) best = d;
-      }
-      if (!Number.isFinite(best)) return 0;
-      return Math.max(0, v * SCREEN_UP[1] + best * VIEW_DIR[1]);
+      const placements = live.world.list().map((p) => ({
+        x: p.x,
+        y: p.y,
+        z: p.z,
+        layer: live.layers.findIndex((l) => l.id === viewLayerId(p.primId, p.dir)),
+      }));
+      return surfaceHeightAt(spriteSet, placements, wx, wy, ORIGIN_Y, PPU, toPx);
     };
 
     const renderFrame = (): void => {
@@ -624,6 +590,18 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       return effectiveHeight(live, px[0], px[1]);
     };
 
+    // Publish the snap read for the height field's eyedropper display.
+    // Store updates only on change so per-move churn stays zero.
+    const publishSnapHeight = (px: [number, number] | null): void => {
+      const live = useEditor.getState().docs[doc.docId];
+      if (!live || live.kind !== 'world') return;
+      if (px === null || !live.surfaceSnap) {
+        setSnappedHeight(doc.docId, null);
+        return;
+      }
+      setSnappedHeight(doc.docId, effectiveHeight(live, px[0], px[1]));
+    };
+
     // Middle-drag pans (left paints, right erases); capture keeps the
     // drag alive outside the canvas.
     let pan: { x: number; y: number; zoom: number; panX: number; panY: number } | null = null;
@@ -690,6 +668,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           const pt = pointerPoint(e);
           if (!pt) return;
           hoverRef.current = pt;
+          publishSnapHeight(pt.px);
           placeAt(doc.docId, pt.ground[0], pt.ground[1], hoverPlacementHeight(pt.px));
         }
         return;
@@ -697,6 +676,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       const pt = pointerPoint(e);
       if (!pt) return;
       hoverRef.current = pt;
+      publishSnapHeight(pt.px);
       if (e.buttons & 1) {
         placeAt(doc.docId, pt.ground[0], pt.ground[1], hoverPlacementHeight(pt.px));
       }
@@ -735,6 +715,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       if (e.button === 2) {
         eraseAt(doc.docId, pt.ground[0], pt.ground[1]);
       } else if (e.button === 0) {
+        publishSnapHeight(pt.px);
         placeAt(doc.docId, pt.ground[0], pt.ground[1], hoverPlacementHeight(pt.px));
       }
     };
@@ -747,6 +728,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           const pt = pointerPoint(e);
           if (!pt) return;
           hoverRef.current = pt;
+          publishSnapHeight(pt.px);
           placeAt(doc.docId, pt.ground[0], pt.ground[1], hoverPlacementHeight(pt.px));
         }
         return;
@@ -763,6 +745,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     };
     const onLeave = (): void => {
       hoverRef.current = null;
+      publishSnapHeight(null);
     };
     const onContext = (e: Event): void => e.preventDefault();
 
@@ -1043,9 +1026,27 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         >
           Snap
         </button>
-        <label className="hint">
+        <label
+          className="hint"
+          title={
+            doc.surfaceSnap
+              ? 'Surface snap is reading the height under the cursor — toggle Snap off to set a height manually'
+              : 'Placement height — type a value and press Enter (Escape cancels); shift+mouse-move also adjusts it'
+          }
+        >
           h
-          <HeightInput value={doc.heightLevel} onCommit={(v) => setHeightLevel(doc.docId, v)} />
+          {doc.surfaceSnap ? (
+            <input
+              className="value-input"
+              type="text"
+              aria-label="Placement height (surface snap)"
+              value={(doc.snappedHeight ?? doc.heightLevel).toFixed(2)}
+              readOnly
+              tabIndex={-1}
+            />
+          ) : (
+            <HeightInput value={doc.heightLevel} onCommit={(v) => setHeightLevel(doc.docId, v)} />
+          )}
         </label>
         <label
           className="hint"

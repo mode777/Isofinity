@@ -128,6 +128,14 @@ list when a change lands (and prune it — history belongs in the archives).
   collapsible tree-view project browser, and a native-dialog-style
   save/load modal (folder tree left, file list right, breadcrumb, name
   field). Flat workspaces keep working unchanged; no format impact.
+- Surface-snap height fix — the CPU-side snap read now indexes the sprite
+  set's padded g-buffer stride (`maxW`) instead of the layer's own width,
+  which drifted across rows and misread the surface height whenever any
+  loaded sprite layer was wider than the picked asset's layer; the read
+  is extracted into `src/runtime/surfaceSnap.ts` (verified by a
+  `scratch-verify` spike against real bake data) and, while snap is on,
+  the toolbar height field shows the height snap read under the cursor.
+  No format impact.
 
 ## In progress
 

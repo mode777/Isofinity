@@ -480,8 +480,13 @@ verbatim, invalid input reverts, Escape cancels). The toolbar's
 the placement then takes its height from the visible surface under the
 cursor, computed CPU-side from the world document's in-memory g-buffers
 (max composite depth among the covering placements' texels, unprojected
-via the orthonormal frame). Height level and snap are per-document
-in-memory editor state, never saved. The **`E` key** cycles the brush
+via the orthonormal frame — `surfaceHeightAt` in
+`src/runtime/surfaceSnap.ts`; texel indexing uses the sprite set's
+padded stride `maxW`, matching the GPU upload). While snap is on the
+height field displays the height snap read under the cursor (an
+eyedropper read, transient in-memory state — the stored brush height is
+kept and applies again when snap goes off). Height level and snap are
+per-document in-memory editor state, never saved. The **`E` key** cycles the brush
 through its available directions (N → E → S → W, wrapping, skipping
 views the sprite does not provide; no-op for single-view brushes and
 while a form control has focus). Left-click/drag places the selected

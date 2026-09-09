@@ -18,6 +18,7 @@ import { buildBundle, parseBake } from './bundle.js';
 import { Renderer as WorldRenderer, meshYawMat, type MeshDraw } from '../runtime/renderer.js';
 import { bakeFloatToHalf, layersToSet, RUNTIME_PPU, type SpriteLayer } from '../runtime/assets.js';
 import { CharacterPlayer, parseCharacterAsset } from '../runtime/meshAsset.js';
+import { surfaceHeightAt } from '../runtime/surfaceSnap.js';
 import cesiumManUrl from '../app/assets/CesiumMan.glb?url';
 import { decodeBundle } from '../app/bundleView.js';
 import { parseGroundMaterial } from '../app/groundMaterial.js';
@@ -747,6 +748,75 @@ async function runMeshSpike(): Promise<void> {
   log(`  mesh-in-scene golden hash: sha256 ${hash1}`);
   log(`  (t+0.9s: ${hash3.slice(0, 16)}… / raised: ${hash4.slice(0, 16)}…)`);
   renderer.dispose();
+}
+
+/**
+ * Surface-snap spike: the CPU-side visible-surface height read against a
+ * REAL baked cube g-buffer, through the same layer/set construction the
+ * world editor uses (`bakeFloatToHalf` -> `layersToSet`). A wider empty
+ * layer loaded alongside forces `maxW` past the cube layer's width, so a
+ * stride regression (indexing with the layer's own width instead of the
+ * set's padded stride) breaks the reads.
+ */
+function runSurfaceSnapSpike(): void {
+  log('test: surface-snap height reads (real bake data)');
+  const cube = bakePrimitive(getCube());
+  const w = cube.width;
+  const h = cube.height;
+  const cubeLayer: SpriteLayer = {
+    id: 'cube',
+    pxPerUnit: cube.pxPerUnit,
+    width: w,
+    height: h,
+    originPx: cube.originPx,
+    origin: [0, 0, 0],
+    gbuffer: bakeFloatToHalf(cube.gbuffer, w, h),
+    render: new Uint8Array(w * h * 4),
+  };
+  // A wider all-empty layer: nothing to read from it, but its width makes
+  // the set's padded stride (`maxW`) exceed the cube layer's own.
+  const wide = cube.width + 40;
+  const wideLayer: SpriteLayer = {
+    ...cubeLayer,
+    id: 'wide',
+    width: wide,
+    gbuffer: new Uint16Array(wide * h * 4),
+    render: new Uint8Array(wide * h * 4),
+  };
+  const set = layersToSet([cubeLayer, wideLayer]);
+  ok(set.maxW === wide, `padded stride exceeds the cube layer width (${set.maxW} > ${w})`);
+
+  // Fixed world-image frame (same convention as the mesh spike).
+  const PPU = RUNTIME_PPU;
+  const ORIGIN_X = 300;
+  const ORIGIN_Y = 500;
+  const toPx = (x: number, z: number, y: number): [number, number] => {
+    const [u, v] = groundToScreen(x, z);
+    return [ORIGIN_X + u * PPU, ORIGIN_Y - (v + y * SCREEN_UP[1]) * PPU];
+  };
+  const placements = [{ x: 2, y: 0, z: 2, layer: 0 }];
+  const read = (wx: number, wy: number): number =>
+    surfaceHeightAt(set, placements, wx, wy, ORIGIN_Y, PPU, toPx);
+
+  // Top face of the ground cube: exact height 1 (sub-texel parallax only).
+  for (const [qx, qz] of [[2.5, 2.5], [2.2, 2.2], [2.8, 2.8], [2.2, 2.8], [2.8, 2.2]]) {
+    const [wx, wy] = toPx(qx, qz, 1);
+    const height = read(wx, wy);
+    ok(Math.abs(height - 1) < 0.02, `cube top face (${qx},${qz}) reads 1 (got ${height.toFixed(4)})`);
+  }
+  // Stacked cube (same cell, height 1): its top face reads 2 and wins the
+  // max-composite depth over the lower cube's overlapping top-face texels.
+  const stacked = [...placements, { x: 2, y: 1, z: 2, layer: 0 }];
+  {
+    const [wx, wy] = toPx(2.5, 2.5, 2);
+    const height = surfaceHeightAt(set, stacked, wx, wy, ORIGIN_Y, PPU, toPx);
+    ok(Math.abs(height - 2) < 0.02, `stacked cube top face reads 2 (got ${height.toFixed(4)})`);
+  }
+  // Empty ground far from the cube reads 0.
+  {
+    const [wx, wy] = toPx(50, 50, 0);
+    ok(read(wx, wy) === 0, 'empty ground reads 0');
+  }
 }
 
 /**
@@ -1619,6 +1689,9 @@ async function main(): Promise<void> {
 
   // 7. Dynamic-mesh spike: skinned character among sprites.
   await runMeshSpike();
+
+  // 7a. Surface-snap spike: CPU-side height reads against real bake data.
+  runSurfaceSnapSpike();
 
   // 7b. Ground-plane spike: textured ground material + compositing.
   await runGroundSpike();

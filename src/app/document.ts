@@ -263,6 +263,14 @@ export interface WorldDocument {
    */
   surfaceSnap: boolean;
   /**
+   * The height surface snap last read under the cursor (the eyedropper
+   * value shown in the height field while snap is on); null = no read
+   * yet (snap off, or the cursor left the viewport). Transient editor
+   * chrome — never written into world files and never marks the
+   * document dirty.
+   */
+  snappedHeight: number | null;
+  /**
    * Which way the current brush faces (its baked view slot). Only
    * meaningful for multi-view sprite brushes; affects the ghost preview
    * and the direction of new placements. In-memory editor state only —

@@ -185,6 +185,7 @@ export function newWorldDoc(): string {
     tool: '',
     heightLevel: 0,
     surfaceSnap: false,
+    snappedHeight: null,
     brushDir: 'n',
     shadowLevel: 1,
     viewTransform: null,
@@ -391,6 +392,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       tool: '',
       heightLevel: 0,
       surfaceSnap: false,
+      snappedHeight: null,
       brushDir: 'n',
     shadowLevel: 1,
       viewTransform: null,
@@ -844,6 +846,23 @@ export function setSurfaceSnap(docId: string, on: boolean): void {
   if (!doc) return;
   update(docId, (d) => {
     d.surfaceSnap = on;
+    // Turning snap off drops the eyedropper read with it.
+    if (!on) d.snappedHeight = null;
+  });
+}
+
+/**
+ * Publish the height surface snap last read under the cursor (the height
+ * field's eyedropper display). Transient editor chrome: never marks the
+ * document dirty and never reaches a saved world file.
+ */
+export function setSnappedHeight(docId: string, h: number | null): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  if (h !== null && !Number.isFinite(h)) return;
+  if (doc.snappedHeight === h) return;
+  update(docId, (d) => {
+    d.snappedHeight = h;
   });
 }
 
