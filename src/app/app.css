@@ -243,7 +243,9 @@ h2 {
   gap: 2px;
 }
 
-.browser li button {
+/* Direct children only: dirtree caret/name buttons (nested in .dirtree-dir)
+   must keep their compact widths. */
+.browser li > button {
   display: block;
   width: 100%;
   text-align: left;

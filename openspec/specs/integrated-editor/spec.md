@@ -37,6 +37,7 @@ the status bar. The version display SHALL show the shared build version.
 - **WHEN** the user switches from a sprite tab to a world tab
 - **THEN** the toolbar above the editor content changes from the sprite
   toolbar to the world toolbar
+
 ### Requirement: Opening a resource opens or focuses an editor tab
 
 Opening a sprite resource (built-in primitive, workspace model, or sprite
@@ -57,6 +58,7 @@ them.
 - **WHEN** the user has a sprite tab and a world tab open and alternates
   between them
 - **THEN** both tabs stay open and each activates its own editor
+
 ### Requirement: Editor documents persist in memory across tab switches
 
 Each open tab SHALL hold its editor document in memory, independent of any
@@ -92,6 +94,7 @@ only when saved to the workspace (or downloaded).
 
 - **WHEN** the user saves a dirty document to the workspace
 - **THEN** the tab's dirty indicator clears
+
 ### Requirement: Editor contexts are recreated from documents
 
 The editor SHALL keep at most one live render context per editor kind.
@@ -106,6 +109,7 @@ recreation SHALL not leak GPU resources across switches.
 - **THEN** the sprite editor now shows the second document's source,
   settings, and passes, and the first document's state is retained in its
   tab
+
 ### Requirement: Project browser lists workspace assets
 
 The project browser SHALL present each workspace convention folder it lists —
@@ -162,6 +166,7 @@ workspace assets need a connection.
 - **WHEN** no workspace is connected and the user imports a glTF through the
   browser's import dialog
 - **THEN** a sprite editor tab opens with that model as its bake source
+
 ### Requirement: Properties panel follows the active editor
 
 The properties panel SHALL show controls matching the active tab's editor
@@ -210,6 +215,7 @@ document only.
   switches to another sprite tab
 - **THEN** the second tab's properties show its own environment settings,
   unchanged by the first tab's edit
+
 ### Requirement: Place a baked sprite into a world document
 
 From a sprite editor whose document holds baked passes (including a
@@ -240,6 +246,7 @@ dirty.
 - **THEN** the placement restores from the bundle by asset id; when the
   bundle is absent the placement is reported as skipped, as with any
   missing sprite asset
+
 ### Requirement: Sprite editor toolbar
 
 A sprite editor SHALL render a toolbar above its content offering Save, the
@@ -330,6 +337,7 @@ placement requirement (target an open world tab or create a new world).
   passes
 - **THEN** Remove view is disabled; selecting a non-N slot with baked
   passes enables it and activating it discards that slot's passes
+
 ### Requirement: World editor toolbar
 
 A world editor SHALL render a toolbar above its content offering Save, a
@@ -493,6 +501,7 @@ turn the world document dirty.
   the workspace
 - **THEN** the status bar names the failure, the tool state is unchanged,
   and no placement occurs
+
 ### Requirement: Slider rows accept precise numeric input
 
 Every numeric slider in the properties panel (world key-light and
@@ -547,6 +556,7 @@ defines). A disabled slider SHALL disable its value field.
 
 - **WHEN** a view-only sprite tab shows the environment sliders
 - **THEN** the value fields cannot be edited, same as the sliders
+
 ### Requirement: Only explicit bake actions bake or render
 
 Editing a properties-panel control SHALL update the active document's
@@ -590,6 +600,7 @@ document SHALL stay usable for an explicit re-render.
   sprite toolbar
 - **THEN** the g-buffer re-bakes from the document's current source and
   settings and the path-traced render pass runs against it
+
 ### Requirement: Sprite editor viewport shows one view at a time
 
 The sprite editor's content area SHALL be a single viewport panel that
@@ -668,6 +679,7 @@ passes (Normals, Depth, Render).
 - **THEN** Normals, Depth, and Render remain selectable and display the
   bundle's baked passes, while Realtime 3D is disabled for lack of source
   geometry
+
 ### Requirement: Viewport pan and zoom with corner zoom controls
 
 The sprite viewport SHALL support panning and zooming the displayed view.
@@ -711,6 +723,7 @@ camera's view of the mesh.
 - **WHEN** the user zooms or pans while the Realtime 3D view is active
 - **THEN** the mesh's rendered view zooms and pans accordingly, and the
   isometric viewing direction is unchanged
+
 ### Requirement: Sprite viewport state is per-document in-memory
 
 The sprite viewport's view mode and zoom/pan SHALL be held per sprite
@@ -741,6 +754,7 @@ default view (fit zoom, first available view).
 - **WHEN** the user saves a sprite document viewed at 400% zoom and reopens
   it later
 - **THEN** the reopened sprite starts at the default view, not 400%
+
 ### Requirement: Sprite viewport bounding-box overlay
 
 The sprite viewport SHALL offer a toggleable bounding-box overlay that
@@ -796,6 +810,7 @@ switches and tab switches, not saved into sprite bundles.
   another sprite tab
 - **THEN** each tab's viewport reflects its own overlay state, and
   switching back restores the first tab's enabled overlay
+
 ### Requirement: Sprite viewport human-scale reference
 
 The sprite viewport SHALL offer a toggleable human-scale reference figure in
@@ -1255,3 +1270,34 @@ into world files, and never marking the document dirty.
 - **THEN** the file contains the placements' heights but no gizmo or
   shadow data, and showing the feedback never turned the document dirty
   by itself
+
+### Requirement: Project browser folder rows fit the panel
+
+In the project browser's directory tree, a folder row SHALL lay out its
+expand caret and the folder name side by side within the panel width. The
+caret SHALL occupy a compact fixed width; it SHALL NOT stretch to the row
+width. The folder name SHALL start immediately to the right of the caret,
+remain visible, and truncate with an ellipsis only when the available
+panel width is genuinely too narrow for the full name. This SHALL hold at
+every nesting depth.
+
+#### Scenario: Folder name stays visible next to the caret
+
+- **WHEN** the project browser shows a folder node at any depth
+- **THEN** the folder name is visible to the right of a compact caret
+  button, not pushed off the panel edge
+
+#### Scenario: Nested folders still fit
+
+- **WHEN** the user expands several nesting levels in a section of the
+  project browser
+- **THEN** each level's folder names remain readable within the panel,
+  indented per level, truncating only when the name exceeds the space
+  left of the panel edge
+
+#### Scenario: Other browser buttons keep full width
+
+- **WHEN** the project browser lists a file entry or other row whose
+  button is a direct child of a list item
+- **THEN** that button still spans the panel width and truncates with an
+  ellipsis as before
