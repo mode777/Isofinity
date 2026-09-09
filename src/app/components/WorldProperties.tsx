@@ -84,7 +84,7 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
             label="Energy"
             value={selectedLight.energy}
             min={0}
-            max={4}
+            max={40}
             step={0.05}
             format={(v) => v.toFixed(2)}
             onChange={(v) => setLightPlacement(doc.docId, selectedLight.id, { energy: v })}
