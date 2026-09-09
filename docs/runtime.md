@@ -468,9 +468,13 @@ carry per-vertex RGBA (`[x, y, r, g, b, a]`, 6 floats per vertex):
 
 ## Input
 
-Placements are **free-form** (continuous x/z on the ground plane,
-cursor-centered) — not grid-snapped — so overlapping objects exercise the
-per-pixel occlusion. Placements also carry a **height**: holding shift
+Placements are **free-form** (continuous x/z, cursor-centered) — not
+grid-snapped — so overlapping objects exercise the per-pixel occlusion.
+The brush anchor always projects exactly onto the cursor: its position is
+the cursor's view ray intersected with the horizontal plane at the
+effective placement height (the ground plane at height 0), so raising the
+height slides the placement along the view ray instead of displacing it
+up-screen. Placements also carry a **height**: holding shift
 and moving the mouse vertically over the viewport raises/lowers the brush
 height in free-form steps (up = raise, negative heights sink below the
 ground plane), and the toolbar's numeric height field sets it exactly
