@@ -1,5 +1,81 @@
 ## MODIFIED Requirements
 
+### Requirement: Brush ghost preview
+
+While a brush (pencil) tool is active in a world editor and the brush's
+sprite layer is loaded, the viewport SHALL render that brush's sprite as
+a ghost at the exact position the next placement would occupy — with the
+brush's anchor point projecting exactly onto the cursor: the anchor
+position SHALL be the cursor's view ray intersected with the horizontal
+plane at the effective placement height (at ground level that is the
+cursor's ground position; at a raised or sunken height the anchor
+follows the ray so mouse and anchor stay the same 2D point) — and at the
+effective placement height (the adjusted brush height, or the surface
+height under the cursor when surface snap is on) — tracking the pointer
+live. Placements (clicks, drags, and touch taps) SHALL land at the same
+anchor position and height the ghost showed. The ghost
+SHALL participate in the same per-pixel occlusion as a real placement
+(depth-tested, resolved by the baked g-buffer depth), so the preview
+shows exactly where the placement would interpenetrate or hide behind
+nearer objects, including objects above or below the ghost's height.
+Transparency is optional styling: the ghost MAY be drawn
+semi-transparent or opaque. The ghost SHALL be a preview only: it SHALL
+NOT affect picking or the placement list, and SHALL NOT mark the
+document dirty. The ghost SHALL be hidden when the eraser is active,
+when no brush is chosen, when the brush's layer is not loaded, and when
+the cursor leaves the viewport — in those states the viewport SHALL fall
+back to the unit-cell hover highlight (eraser) or no highlight.
+
+#### Scenario: Ghost follows the cursor
+
+- **WHEN** the user picks a brush and moves the mouse across the world
+  viewport
+- **THEN** a ghost copy of the brush's sprite moves with the cursor, its
+  anchor point projecting exactly onto the pointer's 2D position
+
+#### Scenario: Raised height keeps the anchor under the cursor
+
+- **WHEN** the placement height is raised (manually or via surface snap)
+  and the user moves the mouse across the world viewport
+- **THEN** the ghost's anchor point still projects exactly onto the
+  cursor — the ghost follows the cursor's ray at the height plane rather
+  than staying on the ray's ground intersection
+
+#### Scenario: Ghost reflects the effective height
+
+- **WHEN** the user raises the placement height by moving the mouse with
+  shift held, or hovers over a raised surface with surface snap on
+- **THEN** the ghost renders at that height, exactly where the next
+  placement would land
+
+#### Scenario: Click places what the ghost showed
+
+- **WHEN** the user left-clicks while the ghost is visible
+- **THEN** a placement of the same brush lands exactly where the ghost
+  was — same anchor position and same height — with the same per-pixel
+  occlusion the ghost showed
+
+#### Scenario: Ghost is occluded like a real placement
+
+- **WHEN** the ghost overlaps an existing placement that would partly
+  hide a real placement at that position and height
+- **THEN** the ghost's hidden pixels are occluded by the same per-pixel
+  depth boundary an actual placement there would get
+
+#### Scenario: Ghost hidden for eraser and missing brush
+
+- **WHEN** the user toggles the eraser, or picks no brush, while moving
+  the mouse over the viewport
+- **THEN** no ghost sprite is drawn; with the eraser the unit-cell hover
+  highlight shows as before
+
+#### Scenario: Ghost is a preview only
+
+- **WHEN** the user moves the mouse across the viewport with a brush
+  active
+- **THEN** the document stays clean (no dirty mark) and no placement
+  exists until an actual click or drag
+
 ### Requirement: Unclamped placement height control
 
 The world editor SHALL give the current brush a placement height that the

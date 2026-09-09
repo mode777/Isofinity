@@ -14,3 +14,8 @@
 - [ ] 3.1 Walk the spec scenarios in the browser (`npm run dev`): snap onto unit cube top lands at 1, height field shows the read, snap over empty ground stays grounded, snap overrides an adjusted height; report anything needing the user's eyes
 - [x] 3.2 Run `npm run build` (typecheck + production build) as the final gate
 - [x] 3.3 Update `docs/runtime.md` surface-snap description if it states the height semantics, add a `docs/roadmap.md` done entry, and confirm no ADR is needed (repair, not a new trade-off)
+
+## 4. Anchor-under-cursor placement (follow-up from browser verification)
+
+- [x] 4.1 Make the brush anchor always project exactly onto the cursor: intersect the cursor's view ray with the horizontal plane at the effective placement height (`groundAtHeight`/`anchorAt` in WorldEditor) and use it for the ghost and every placement path (mouse click/drag, touch tap/drag); eraser keeps ground-plane footprint picking — verified by `npm run build` and the user's browser check of the ghost tracking the cursor at raised heights
+- [x] 4.2 Update the change's spec delta: MODIFIED "Brush ghost preview" pins the anchor-under-cursor ray-plane rule with a raised-height scenario; note the follow-up in design.md

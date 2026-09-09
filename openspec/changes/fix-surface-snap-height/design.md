@@ -105,6 +105,23 @@ same `toPx`/anchor math as the draw path (they must not drift). Any
 half-texel edge discrepancy found during the fix is resolved by matching
 the draw path's texel convention exactly, not by special-casing.
 
+### D4: Anchor-under-cursor placement (follow-up from browser verification)
+
+Browser verification surfaced a second, pre-existing defect (not a
+regression of this change): the ghost and placements took their x/z from
+the cursor ray's intersection with the **ground plane**, then applied the
+height — so at any non-zero height the anchor projected up-screen away
+from the cursor. Fix: the anchor position is the cursor ray intersected
+with the horizontal plane **at the effective height**
+(`groundAtHeight`: solve the ground-basis inverse with `s − y·UP1`), used
+by the ghost and every placement path (mouse click/drag, touch tap/drag).
+At height 0 this is byte-identical to the old behavior; the eraser keeps
+ground-plane footprint picking. Spec-wise this replaces the ghost
+requirement's "centered on the cursor's ground position" with the
+anchor-under-cursor ray-plane rule (delta updated accordingly) — it
+strengthens the existing cursor-exact anchor placement intent rather
+than changing the placement model.
+
 ## Risks / Trade-offs
 
 - [Half-float depth precision gives 1 ± ε rather than exactly 1] → Accept

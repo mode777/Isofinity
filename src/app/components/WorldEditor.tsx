@@ -412,9 +412,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       const ghost =
         hover && brushIndex >= 0
           ? (() => {
-              const x = hover.ground[0];
-              const z = hover.ground[1];
-              const y = effectiveHeight(live, hover.px[0], hover.px[1]);
+              const { x, y, z } = anchorAt(hover.px);
               return { layer: brushIndex, x, y, z, key: depthOf(x, y, z) };
             })()
           : null;
@@ -590,6 +588,30 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       return effectiveHeight(live, px[0], px[1]);
     };
 
+    /**
+     * Ground position of the brush anchor at the given height: the
+     * cursor's view ray intersected with the horizontal plane at that
+     * height, so the anchor always projects exactly onto the cursor
+     * (at ground level this is the pixel's plain ground position).
+     * A world point at height y projects to screen v = UP0·x + UP2·z
+     * + y·UP1, so the ground basis coordinates solve with s − y·UP1.
+     */
+    const groundAtHeight = (px: [number, number], y: number): [number, number] => {
+      const u = (px[0] - ORIGIN_X) / PPU;
+      const s = -(px[1] - ORIGIN_Y) / PPU;
+      return screenToGround(u, s - y * SCREEN_UP[1]);
+    };
+
+    // The anchor position + height the next placement at the cursor
+    // would land at (shared by the ghost preview and every placement).
+    const anchorAt = (
+      px: [number, number],
+    ): { x: number; z: number; y: number } => {
+      const y = hoverPlacementHeight(px);
+      const [x, z] = groundAtHeight(px, y);
+      return { x, z, y };
+    };
+
     // Publish the snap read for the height field's eyedropper display.
     // Store updates only on change so per-move churn stays zero.
     const publishSnapHeight = (px: [number, number] | null): void => {
@@ -669,7 +691,8 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           if (!pt) return;
           hoverRef.current = pt;
           publishSnapHeight(pt.px);
-          placeAt(doc.docId, pt.ground[0], pt.ground[1], hoverPlacementHeight(pt.px));
+          const a = anchorAt(pt.px);
+          placeAt(doc.docId, a.x, a.z, a.y);
         }
         return;
       }
@@ -678,7 +701,8 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       hoverRef.current = pt;
       publishSnapHeight(pt.px);
       if (e.buttons & 1) {
-        placeAt(doc.docId, pt.ground[0], pt.ground[1], hoverPlacementHeight(pt.px));
+        const a = anchorAt(pt.px);
+        placeAt(doc.docId, a.x, a.z, a.y);
       }
     };
     const onDown = (e: PointerEvent): void => {
@@ -716,7 +740,8 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         eraseAt(doc.docId, pt.ground[0], pt.ground[1]);
       } else if (e.button === 0) {
         publishSnapHeight(pt.px);
-        placeAt(doc.docId, pt.ground[0], pt.ground[1], hoverPlacementHeight(pt.px));
+        const a = anchorAt(pt.px);
+        placeAt(doc.docId, a.x, a.z, a.y);
       }
     };
     const onUp = (e: PointerEvent): void => {
@@ -729,7 +754,8 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           if (!pt) return;
           hoverRef.current = pt;
           publishSnapHeight(pt.px);
-          placeAt(doc.docId, pt.ground[0], pt.ground[1], hoverPlacementHeight(pt.px));
+          const a = anchorAt(pt.px);
+          placeAt(doc.docId, a.x, a.z, a.y);
         }
         return;
       }
