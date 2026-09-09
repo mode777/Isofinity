@@ -242,10 +242,12 @@ workspace control explains its absence and dialogs/downloads keep working.
 ### Worlds
 
 **Save world** writes `worlds/<name>.json` (name defaults to the first
-free `world-<n>`): the format marker `isoinfinity-world/5`, every placement
+free `world-<n>`): the format marker `isoinfinity-world/6`, every placement
 (asset id + continuous ground position + height, always written; facing
 direction and grounding-shadow strength, each written only when not the
-default — north and full strength) and the
+default — north and full strength), every **point light placement**
+(emitter ground position, optional height, radius, energy, color —
+the `/6` additive fields), and the
 full light state — manual azimuth/elevation, intensity, key and ambient
 colors, dynamic-light switch, plus the sun-position values. A `/4` file
 also records additive optional ground state — the ground material's file
@@ -258,16 +260,19 @@ when the placement differs from full strength, and the per-placement
 value is set from the toolbar's shadow field before placing (like the
 height field). Saving an
 existing name overwrites it. Loading a world validates the file completely
-first (format marker `isoinfinity-world/5` or the older
-`/1`+`/2`+`/3`+`/4`,
+first (format marker `isoinfinity-world/6` or the older
+`/1`+`/2`+`/3`+`/4`+`/5`,
 placements with optional finite height, optional direction
-(`n`/`e`/`s`/`w`), optional shadow strength in [0, 1], light/sun fields,
+(`n`/`e`/`s`/`w`), optional shadow strength in [0, 1], optional point
+lights (finite position/radius/energy, `#rrggbb` color — a malformed
+light entry rejects the file), light/sun fields,
 optional ground/env state) so a corrupt
 file fails with
 a named error and opens nothing; `/1` placements and `/2` placements
 without a height restore at ground level, placements without a
 direction restore facing north, and placements without a shadow value
-restore at full strength. A valid file then restores the
+restore at full strength; `/5` and older files carry no lights. A valid
+file then restores the
 sun values, recomputes the sun, re-applies the saved manual angles (so
 hand-tweaked directions round-trip), loads every referenced sprite bundle
 from `sprites/` (each stored view slot with a render pass loads as a
@@ -305,41 +310,60 @@ live site.
 ## Display
 
 There are no display modes: every placed sprite shows its prerendered lit
-image shaded by the dynamic key + ambient lights (multiplicatively, over
-the baked g-buffer normal; see Lighting). Blending uses the render pass's
+image shaded by the dynamic lights through the unified deferred pass (see
+Lighting). Blending uses the render pass's
 antialiased alpha; fragment discard uses g-buffer emptiness
 (`normal == 0`, the hard raster coverage of the bake draw), never the
 render pass's soft edges — with one addition: g-buffer-empty render pixels
 carrying the baked **grounding shadow** (blue-dominant near-black tint,
 `r < b`) composite as the shadow, while empty pixels of any other color
 (the object's AA fringe) keep the historical discard, so sprites without
-the feature are pixel-unchanged. The shadow blends without key/ambient
-shading (it is part of the prerendered image, so it stays visible with the
-**Dynamic light** switch off) and is suppressed for placements off the
+the feature are pixel-unchanged. The shadow blends into the albedo·AO
+surface and maps to the ground plane in the screen-space g-buffer (up
+normal, ground-plane depth — the deferred pass lights it as floor); it
+stays visible with the **Dynamic light** switch off (it is part of the
+prerendered image) and is suppressed for placements off the
 ground plane, where the contact-shadow ellipses still apply. Shadow
 fragments write their true ground-plane depth, not the object's and not
 none — the z-buffer resolves every shadow/sprite interleaving
-   pixel-accurately (`docs/decisions/0010`). The **Dynamic light**
-   checkbox pins shading to identity: sprites show the pure prerendered
-   image and the ground its flat vertex color.
+pixel-accurately (`docs/decisions/0010`). The **Dynamic light**
+checkbox pins the factor to identity: sprites show the pure prerendered
+image and the ground its flat vertex color.
 
-## Lighting
+## Lighting (unified deferred)
 
-POE-style key + ambient over the baked G-buffer, shaded per pixel in the
-fragment shader:
+The compositor is **two-phase** (ADR 0011): a geometry pass draws ground,
+meshes and sprites into an offscreen framebuffer — a screen-space g-buffer
+(RT1, RGBA16F: world normal + linear reference-plane depth, the same
+channel layout as the per-sprite bake g-buffer), a display-referred
+albedo·AO surface (RT0, RGBA8), and a linear-depth texture (RT2, R16F) —
+and one fullscreen **deferred light pass** applies every dynamic light
+over the composite:
 
-- `color = linearToSrgb(srgbToLinear(render) * (ambient + key * max(dot(N, L), 0)))`
-  — the prerendered texel is sRGB-encoded (bake convention), shading
-  happens in linear space, the default framebuffer is sRGB. The prerender
-  already carries its own baked light, so the result double-shades — that
-  trade is the accepted experiment (additive compositing was tried first
-  and rejected).
+- `color = linearToSrgb(srgbToLinear(RT0) * (ambient + key * max(dot(N, L), 0)) + point lights)`
+  — the multiplicative factor (ADR 0003) is applied **exactly once, in the
+  light pass, for every surface kind**. For sprites this reproduces the old
+  forward per-fragment formula bit-for-bit (a sprite's RT0 texel *is* its
+  baked render texel; ADR 0003's "treat baked light as AO" formalized);
+  meshes and the ground bake their environment ambient (SH irradiance) into
+  their RT0 texel at write time and receive the same factor.
+- **World position** is reconstructed per pixel from the g-buffer depth
+  (ADR 0001) — `worldPos = sx·screenRight + sy·screenUp + depth·viewDir`,
+  the fixed-camera orthonormal frame — so point lights can evaluate
+  distance/attenuation anywhere on the composite.
 - `L` is a world-space direction toward the key light, parametrized by
-  azimuth/elevation sliders; key color (color picker) and intensity, are
+  azimuth/elevation sliders; key color (color picker) and intensity are
   uploaded as uniforms every frame — all realtime-tweakable in the
   "Key light" panel. The **Dynamic light** checkbox pins the factor to
-  identity (key zero, ambient one): sprites render the pure prerendered
-  image.
+  identity (key zero, ambient one, point lights dropped): the composite
+  shows the pure prerendered image.
+- **Point lights** are placements (light tool): position (emitter at the
+  placed cell center + height), radius (world units), energy, and color
+  (sRGB picker → linear). Evaluated in the light pass with a quadratic
+  window attenuation to exactly zero at the radius and the same
+  `max(dot(N, L), 0)` gating. At most **16** lights render concurrently
+  (`MAX_POINT_LIGHTS`, a std140 UBO); placements beyond the cap are legal
+  state that renders dark.
 - **Sun position** sliders (time of day 0–24 h, day of year 1–365,
   latitude −66°…+66°) compute the sun's azimuth/elevation via
   `src/shared/sun.ts` (NOAA-style declination + hour angle; local solar
@@ -353,15 +377,16 @@ fragment shader:
   direction — it does not follow the sliders.
 - The ambient term is a **color**: an ambient color picker (sRGB,
   converted to linear per channel — brightness comes from the picked
-  color, there is no separate ambient scalar).
-- The ground shades with `N = (0,1,0)` so it responds to the same light.
-- **Dynamic meshes** shade by the same formula the sprites do, rebuilt
-  from live data: `sRGB(ACES(albedo × E_env(N)) × factor)` — an SH
-  diffuse-irradiance probe (`E_env`) projected from the sprites' bake
-  environment (taken from bundle provenance, else the built-in default)
-  stands in for the baked texel, then the same key+ambient factor, the
-  same ACES fit and display-saturation. Same double-shading trade (ADR
-  0003), same identity behavior under the **Dynamic light** switch.
+  color, there is no separate ambient scalar), evaluated in the light pass
+  for every surface kind.
+- **Dynamic meshes** write their env-lit tonemapped texel
+  (`sRGB(ACES(albedo × E_env(N)))` — an SH diffuse-irradiance probe
+  (`E_env`) projected from the sprites' bake environment, taken from bundle
+  provenance, else the built-in default) into RT0 and their live skinned
+  normals into RT1; the light pass applies the same factor the sprites
+  receive — a character and a sprite of equal material/light now respond
+  identically to every dynamic light. Same double-shading trade (ADR 0003),
+  same identity behavior under the **Dynamic light** switch.
 
 ## Dynamic meshes
 
@@ -390,8 +415,9 @@ Without a material it is the flat checkerboard batch (below); with a
 ground material selected it becomes a real world-space quad drawn by its
 own program: lean PBR shading — linearized diffuse albedo, tangent-space
 normal-map perturbation (gl convention, analytic plane tangents), arm-map
-red channel as ambient occlusion — over the same SH ambient probe and
-key+ambient factor, ACES fit and display saturation as the mesh path.
+red channel as ambient occlusion — with the SH ambient probe, ACES fit
+and display saturation baked into its albedo·AO texel; the deferred light
+pass applies the same dynamic factor the meshes and sprites receive.
 Roughness/metal are decoded but not applied yet; specular and reflections
 are later work. Ground materials are zip files with a `.material`
 extension in the workspace's `materials/` folder; maps are identified by
@@ -412,23 +438,34 @@ baked with — a user-selected HDRI changes the dynamic ambient only
 
 Raw WebGL2, no scene graph, no matrices. Because the camera is fixed and
 orthographic, all projection happens once on the CPU
-(`src/shared/iso.ts` — same constants as the bake); the GPU side is a
-pure 2D compositor with five draw batches per frame (dynamic meshes are
-ADR 0007; the invariants refine to "no camera matrices — object
-transforms are per-instance data"). A single `uView`
-scale+offset uniform (backing-store pixels) applies the editor
-viewport's zoom/pan to every batch at draw time — the world data itself
-stays in world-image pixels. The flat batches (ground, shadows, overlay)
-carry per-vertex RGBA (`[x, y, r, g, b, a]`, 6 floats per vertex):
+(`src/shared/iso.ts` — same constants as the bake); the GPU side is a pure
+2D compositor with a geometry pass (three MRT targets), a deferred light
+pass, and an overlay batch (dynamic meshes are ADR 0007; the invariants
+refine to "no camera matrices — object transforms are per-instance
+data"). A single `uView` scale+offset uniform (backing-store pixels)
+applies the editor viewport's zoom/pan to every batch at draw time — the
+world data itself stays in world-image pixels. The flat batches (ground,
+shadows, overlay) carry per-vertex RGBA (`[x, y, r, g, b, a]`, 6 floats
+per vertex). The offscreen geometry framebuffer (recreated on resize)
+holds RT0 (RGBA8 display texel = albedo·AO), RT1 (RGBA16F: world normal +
+linear depth — the bake g-buffer layout), and RT2 (R16F: linear depth for
+the light pass's position reconstruction); blending is per-attachment
+straight alpha (each output's own alpha is its blend weight), with the
+light pass sampling all three afterwards:
 
 1. **Ground** — the grid's cell top faces (y=0) as a static vertex-color
-   triangle batch, CPU-projected at startup. No depth interaction (it
-   writes no depth, so sprites always composite over it).
+   triangle batch, CPU-projected at startup, written into RT0/RT1/RT2 with
+   the up normal and per-vertex ground-plane depth (deferred lighting hits
+   the floor). Still no window-depth interaction (it writes no
+   `gl_FragDepth`, so sprites always composite over it); with a ground
+   material selected, the textured plane (4) draws instead and does write
+   window depth.
 2. **Contact shadows** — for every placement (and ghost) standing above
    the ground: a soft black ellipse on the ground at the placement's
    ground cell, CPU-projected ground-plane circle, larger and fainter as
-   the height grows. Blended, no depth interaction — all sprites
-   composite over it. Editor chrome only.
+   the height grows. Blended into RT0 only (zero-weight g-buffer/depth
+   outputs preserve the surface data behind), no window-depth
+   interaction — all sprites composite over it. Editor chrome only.
 3. **Meshes** (skinned characters) — one draw call per placed character:
    the vertex shader blends four joint influences against a per-character
    joint palette (uploaded per frame by the CPU pose engine) and projects
@@ -439,32 +476,45 @@ carry per-vertex RGBA (`[x, y, r, g, b, a]`, 6 floats per vertex):
    LEQUAL test then resolves every character/sprite interpenetration
    pixel-accurately. With no character placed the batch is skipped and
    the frame is unchanged.
-4. **Sprites** — one instanced quad per placed object (per-instance quad
+4. **Ground material plane** (when a material is selected) — a world-space
+   quad with lean PBR shading baked into its RT0 texel (linearized
+   diffuse albedo, arm AO, SH ambient through the ACES fit), surface
+   normal (normal-map perturbation) into RT1, and the shared window depth
+   (`gl_FragDepth`), so sprites occlude against it per pixel.
+5. **Sprites** — one instanced quad per placed object (per-instance quad
    size + sprite texel size, 8 floats per instance; a ninth float carries
    the placement height for grounding-shadow suppression), painter-sorted by
    the 3D depth key `dot(cell-center, viewDir)` (far → near) for blend
    correctness, alpha-blended using the render pass's (antialiased)
    alpha, with **per-pixel occlusion**: each fragment samples the baked
-   g-buffer once (normals in rgb for shading and emptiness-based
-   coverage, depth in alpha), adds the per-object constant
+   g-buffer once (normals in rgb for emptiness-based coverage, depth in
+   alpha), adds the per-object constant
    `dot(origin + height, viewDir)` — the placement's full `(x, y, z)`
    offset, height included — and writes `gl_FragDepth`
    (`windowZ = 0.5 - d / 128`, see `DEPTH_LINEAR_RANGE` in the
    renderer); a LEQUAL depth buffer then resolves interpenetrations
    pixel-accurately, regardless of draw order — stacking and sinking
    included, at any height. The linear map keeps the whole reachable
-   placement range inside [0,1] with ample 24-bit precision.
-   Grounding-shadow fragments (g-buffer-empty, blue-tinted render pixels)
-   instead write the analytic ground-plane depth of their screen position
-   — the GLSL twin of the shared `groundFromWorldImagePx`/`groundDepth`
-   helpers, biased a hair toward the camera to settle coplanar
-   comparisons against the ground plane's own depth — so the single
-   batch's LEQUAL test resolves shadow-vs-sprite interleaving for free
-   (`docs/decisions/0010`).
-5. **Overlay** — hovered footprint (eraser) and the height gizmo
+   placement range inside [0,1] with ample 24-bit precision. The same
+   fragment routes its data into the MRT targets: baked render texel →
+   RT0, baked normal + offset depth → RT1/RT2. Grounding-shadow fragments
+   (g-buffer-empty, blue-tinted render pixels) instead write the analytic
+   ground-plane depth of their screen position — the GLSL twin of the
+   shared `groundFromWorldImagePx`/`groundDepth` helpers, biased a hair
+   toward the camera to settle coplanar comparisons against the ground
+   plane's own depth — plus the up normal, so the deferred pass lights
+   them as floor (`docs/decisions/0010`).
+6. **Deferred light pass** — a fullscreen quad over the default
+   framebuffer sampling RT0/RT1/RT2: reconstructs world position (ADR
+   0001), applies the ambient picker + key directional + point-light UBO
+   once (see Lighting). The **Dynamic light** switch pins the factor to
+   identity, which presents RT0·AO unmodified — the pure prerendered
+   composite.
+7. **Overlay** — hovered footprint (eraser), the height gizmo
    (landing diamond at a raised ghost + plumb line down to the ground
-   cell), as a per-frame vertex batch. No depth interaction. Editor
-   chrome only.
+   cell), and the point-light tool's ghost/selection radius rings, as a
+   per-frame vertex batch drawn unlit over the finished frame. No depth
+   interaction. Editor chrome only.
 
 ## Input
 
@@ -496,7 +546,11 @@ views the sprite does not provide; no-op for single-view brushes and
 while a form control has focus). Left-click/drag places the selected
 tool, right-click erases the nearest placement whose unit-cube footprint
 contains the cursor — resolving to the **topmost** (greatest depth key)
-— tool buttons or eraser selects. Ground picking inverts the shared
+— tool buttons or eraser selects. The **Light** tool places point lights
+(click; the emitter rides the cursor's ground point and effective height,
+clicking on a placed light selects it for the properties panel — radius,
+energy, color, position — and its radius ring shows in the viewport).
+Ground picking inverts the shared
 projection analytically (`screenToGround`) after inverting the viewport's
 zoom/pan transform, no hit-testing. The 12×12 checkerboard is a visual
 reference only. Viewport navigation: two-finger scroll pans, pinch

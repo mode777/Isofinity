@@ -37,6 +37,7 @@ import {
 } from '../document.js';
 import {
   DEFAULT_GROUND_TILE_SCALE,
+  DEFAULT_POINT_LIGHT,
   defaultGroundState,
 } from '../document.js';
 import { parseGroundMaterial } from '../groundMaterial.js';
@@ -45,13 +46,14 @@ import { nextDocId, useEditor, type EditorState } from './editor.js';
 import { bakePrimitiveLayer, anyBakeBusy, resultToLayer } from './bake.js';
 import { SPRITE_EXTS, useProject } from './project.js';
 
-const WORLD_FORMAT = 'isoinfinity-world/5';
-/** Older formats the parser still accepts; heights/directions/shadows default. */
+const WORLD_FORMAT = 'isoinfinity-world/6';
+/** Older formats the parser still accepts; heights/directions/shadows/lights default. */
 const LEGACY_WORLD_FORMATS = [
   'isoinfinity-world/1',
   'isoinfinity-world/2',
   'isoinfinity-world/3',
   'isoinfinity-world/4',
+  'isoinfinity-world/5',
 ];
 
 const ed = (): EditorState => useEditor.getState();
@@ -189,6 +191,7 @@ export function newWorldDoc(): string {
     brushDir: 'n',
     shadowLevel: 1,
     viewTransform: null,
+    selectedLightId: null,
   };
   ed().addDoc(doc);
   // A probe exists from the start (built-in default environment until a
@@ -203,6 +206,15 @@ interface WorldFile {
   name?: string;
   savedAt?: string;
   sprites: { asset: string; x: number; z: number; y: number; dir?: ViewSlot; shadow?: number }[];
+  /** Point light placements (present on /6 files only). Height is optional. */
+  lights: {
+    x: number;
+    z: number;
+    y?: number;
+    radius: number;
+    energy: number;
+    color: string;
+  }[];
   light: LightState;
   sun: SunState;
   /** Ground state (present on /4 files only). */
@@ -211,6 +223,9 @@ interface WorldFile {
   /** User-selected world HDRI (present on /4 files only). */
   envHdri?: string | null;
 }
+
+/** The sRGB hex a point light's color must match. */
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 const VIEW_SLOT_SET: ReadonlySet<string> = new Set(['n', 'e', 's', 'w']);
 
@@ -273,6 +288,35 @@ function parseWorldFile(text: string, fileName: string): WorldFile {
   if (!sunRaw || !isFiniteNumber(sunRaw.hour) || !isFiniteNumber(sunRaw.day) || !isFiniteNumber(sunRaw.lat)) {
     throw fail('malformed sun state');
   }
+  // Point light placements: /6 and later only (older files carry none).
+  const lights: WorldFile['lights'] = [];
+  const lightsRaw = obj.lights;
+  if (lightsRaw !== undefined) {
+    if (!Array.isArray(lightsRaw)) throw fail('malformed lights array');
+    for (const entry of lightsRaw) {
+      const l = entry as Record<string, unknown>;
+      if (!isFiniteNumber(l.x) || !isFiniteNumber(l.z)) {
+        throw fail('malformed point light (needs finite x/z)');
+      }
+      if (l.y !== undefined && !isFiniteNumber(l.y)) {
+        throw fail('malformed point light — height must be a finite number');
+      }
+      if (!isFiniteNumber(l.radius) || !isFiniteNumber(l.energy)) {
+        throw fail('malformed point light — radius and energy must be finite numbers');
+      }
+      if (typeof l.color !== 'string' || !HEX_COLOR_RE.test(l.color)) {
+        throw fail('malformed point light — color must be #rrggbb');
+      }
+      lights.push({
+        x: l.x,
+        z: l.z,
+        y: l.y === undefined ? 0 : l.y,
+        radius: l.radius,
+        energy: l.energy,
+        color: l.color,
+      });
+    }
+  }
   // Ground + user-selected environment: optional, /4 and later only.
   let groundMaterial: string | null = null;
   let groundTileScale: number | null = null;
@@ -312,6 +356,7 @@ function parseWorldFile(text: string, fileName: string): WorldFile {
     name: typeof obj.name === 'string' ? obj.name : fileName.replace(/\.json$/i, ''),
     savedAt: typeof obj.savedAt === 'string' ? obj.savedAt : undefined,
     sprites,
+    lights,
     groundMaterial,
     groundTileScale,
     envHdri,
@@ -396,6 +441,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       brushDir: 'n',
     shadowLevel: 1,
       viewTransform: null,
+      selectedLightId: null,
     };
 
     const skipped: { asset: string; reason: string }[] = [];
@@ -465,6 +511,11 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       );
     }
     doc.tool = doc.layers[0]?.id ?? '';
+
+    // Point lights (/6): restore every saved light placement.
+    for (const l of data.lights) {
+      doc.world.placeLight(l.x - 0.5, l.z - 0.5, l.y ?? 0, l.radius, l.energy, l.color);
+    }
 
     // Ground + user-selected environment (/4): names restore immediately,
     // the material's maps load best-effort after the doc opens.
@@ -697,6 +748,7 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
   const file = `${name}.json`;
   try {
     const placements = doc.world.list();
+    const lights = doc.world.listLights();
     const worldFile: WorldFile = {
       format: WORLD_FORMAT,
       name,
@@ -710,6 +762,17 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
         ...(p.dir !== 'n' ? { dir: p.dir } : {}),
         // Full strength is the default; omitted keeps /4 files identical.
         ...(p.shadow !== 1 ? { shadow: p.shadow } : {}),
+      })),
+      // Point light placements (/6): the emitter position is the cell
+      // center; save that position, not the footprint corner.
+      lights: lights.map((l) => ({
+        x: l.x + 0.5,
+        z: l.z + 0.5,
+        // Ground level is the default; a ground-level light may omit y.
+        ...(l.y !== 0 ? { y: l.y } : {}),
+        radius: l.radius,
+        energy: l.energy,
+        color: l.colorHex,
       })),
       light: doc.light,
       sun: doc.sun,
@@ -752,6 +815,9 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
 
 // --- placement & light ----------------------------------------------------
 
+/** The point-light placement tool's id (its own toolbar tool). */
+export const POINT_LIGHT_TOOL_ID = 'point-light';
+
 export function setTool(docId: string, tool: string): void {
   const doc = worldDoc(docId);
   if (!doc) return;
@@ -785,7 +851,31 @@ export function placeAt(docId: string, gx: number, gz: number, y = 0): void {
   const doc = worldDoc(docId);
   if (!doc) return;
   if (doc.tool === 'eraser') {
-    if (doc.world.removeTopAt(gx, gz)) ed().markDirty(docId);
+    if (doc.world.removeTopAt(gx, gz)) {
+      if (doc.selectedLightId !== null && !doc.world.lightAt(doc.selectedLightId)) {
+        update(docId, (d) => {
+          d.selectedLightId = null;
+        });
+      }
+      ed().markDirty(docId);
+    }
+    return;
+  }
+  if (doc.tool === POINT_LIGHT_TOOL_ID) {
+    // The emitter sits at the cursor's ground point; the footprint corner
+    // is the cell min corner so erase/pick ride the shared machinery.
+    const id = doc.world.placeLight(
+      gx - 0.5,
+      gz - 0.5,
+      y,
+      DEFAULT_POINT_LIGHT.radius,
+      DEFAULT_POINT_LIGHT.energy,
+      DEFAULT_POINT_LIGHT.colorHex,
+    );
+    update(docId, (d) => {
+      d.selectedLightId = id;
+    });
+    ed().markDirty(docId);
     return;
   }
   if (doc.tool === CHARACTER_BRUSH_ID) {
@@ -917,6 +1007,39 @@ export function setLight(docId: string, patch: Partial<LightState>): void {
   update(docId, (d) => {
     d.light = { ...d.light, ...patch };
   });
+  ed().markDirty(docId);
+}
+
+/** Select the point light the properties panel edits (null = deselect). */
+export function selectLight(docId: string, id: number | null): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  if (id !== null && !doc.world.lightAt(id)) return;
+  update(docId, (d) => {
+    d.selectedLightId = id;
+  });
+}
+
+/**
+ * Patch a placed point light's properties (radius, energy, color, or
+ * position — the position given as the emitter's ground point/height).
+ */
+export function setLightPlacement(
+  docId: string,
+  id: number,
+  patch: Partial<{ x: number; z: number; y: number; radius: number; energy: number; colorHex: string }>,
+): void {
+  const doc = worldDoc(docId);
+  if (!doc || !doc.world.lightAt(id)) return;
+  const clean: typeof patch = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (k === 'colorHex') {
+      if (typeof v === 'string') clean.colorHex = v;
+    } else if (typeof v === 'number' && Number.isFinite(v)) {
+      (clean as Record<string, number>)[k] = v;
+    }
+  }
+  doc.world.updateLight(id, clean);
   ed().markDirty(docId);
 }
 

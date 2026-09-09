@@ -20,6 +20,7 @@ holds only what stays true after a change is archived.
 | [0008](0008-authored-placement-anchor.md) | Accepted | The placement anchor is an authored per-asset origin (N-authored, slot-rotated) |
 | [0009](0009-raw-webgl2-compositor.md) | Accepted | The compositor stays raw WebGL2 (three.js as CPU-side libraries only) |
 | [0010](0010-transparent-pixel-depth-rule.md) | Accepted | Transparent compositing layers write the depth of the surface they lie on (grounding shadows) |
+| [0011](0011-unified-deferred-lighting.md) | Accepted | Unified deferred lighting: the dynamic factor is applied once, in the light pass, for every surface kind |
 
 ## Adding a decision
 

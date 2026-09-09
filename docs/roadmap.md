@@ -137,6 +137,22 @@ list when a change lands (and prune it — history belongs in the archives).
   the toolbar height field shows the height snap read under the cursor.
   No format impact.
 
+- Unified deferred lighting + point lights (`isoinfinity-world/6`,
+  `/1`–`/5` still load) — the compositor restructured into two phases
+  (ADR 0011): a geometry pass drawing ground, meshes and sprites into a
+  screen-space g-buffer (world normal + linear depth) plus an unlit
+  albedo·AO surface, then one fullscreen deferred light pass applying the
+  ADR 0003 multiplicative factor once for every surface kind (ambient
+  picker, key directional, and up to 16 point lights from a std140 UBO,
+  world position reconstructed from g-buffer depth per ADR 0001; sprite
+  and mesh shading stay pixel-equivalent to the forward formulas, the
+  mesh's post-tonemap factor application unified away). Point lights are
+  a placement kind — light tool, radius/energy/color/position in the
+  properties panel, quadratic window falloff to zero at the radius,
+  persisted with the world; grounding shadows map to the ground plane in
+  the screen g-buffer so lights pool on the floor. Sprite bundles and the
+  bake pipeline are untouched.
+
 ## In progress
 
 - Dynamic meshes in the compositor (ADR 0007) — skinned, animated

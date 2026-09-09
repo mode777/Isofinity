@@ -1,7 +1,9 @@
 # 0003 — Multiplicative shading of the prerendered image
 
 Status: Accepted (2026-09-02; commit 388862a's additive experiment
-rejected)
+rejected). Factor placement refined by [0011](0011-unified-deferred-lighting.md)
+— the factor is applied once, in the deferred light pass, for every
+surface kind.
 
 ## Context
 

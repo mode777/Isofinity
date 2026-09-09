@@ -3,8 +3,10 @@ import type { WorldDocument } from '../document.js';
 import {
   selectGroundMaterial,
   selectGroundMaterialFile,
+  selectLight,
   setGroundTileScale,
   setLight,
+  setLightPlacement,
   setSun,
   setWorldEnv,
   setWorldEnvFile,
@@ -31,8 +33,62 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
     setSun(doc.docId, { hour });
   };
 
+  const selectedLight =
+    doc.selectedLightId !== null ? doc.world.lightAt(doc.selectedLightId) : null;
+
   return (
     <>
+      {selectedLight ? (
+        <Section title="Point light">
+          <SliderRow
+            label="Radius"
+            value={selectedLight.radius}
+            min={0.5}
+            max={16}
+            step={0.1}
+            format={(v) => `${v.toFixed(1)} u`}
+            onChange={(v) => setLightPlacement(doc.docId, selectedLight.id, { radius: v })}
+          />
+          <SliderRow
+            label="Energy"
+            value={selectedLight.energy}
+            min={0}
+            max={4}
+            step={0.05}
+            format={(v) => v.toFixed(2)}
+            onChange={(v) => setLightPlacement(doc.docId, selectedLight.id, { energy: v })}
+          />
+          <ColorRow
+            label="Color"
+            value={selectedLight.colorHex}
+            onChange={(v) => setLightPlacement(doc.docId, selectedLight.id, { colorHex: v })}
+          />
+          <NumberRow
+            label="Position x"
+            value={Number((selectedLight.x + 0.5).toFixed(3))}
+            min={-99}
+            max={99}
+            onChange={(v) => setLightPlacement(doc.docId, selectedLight.id, { x: v - 0.5 })}
+          />
+          <NumberRow
+            label="Position z"
+            value={Number((selectedLight.z + 0.5).toFixed(3))}
+            min={-99}
+            max={99}
+            onChange={(v) => setLightPlacement(doc.docId, selectedLight.id, { z: v - 0.5 })}
+          />
+          <NumberRow
+            label="Height"
+            value={Number(selectedLight.y.toFixed(3))}
+            min={-99}
+            max={99}
+            onChange={(v) => setLightPlacement(doc.docId, selectedLight.id, { y: v })}
+          />
+          <button onClick={() => selectLight(doc.docId, null)}>Deselect</button>
+          <p className="hint">light tool: click a light to select, elsewhere to place</p>
+        </Section>
+      ) : null}
+
       <Section title="Key light">
         <CheckRow
           label="Dynamic light"

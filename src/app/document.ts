@@ -74,6 +74,19 @@ export const DEFAULT_LIGHT: LightState = {
 
 export const DEFAULT_SUN: SunState = { hour: 12, day: 80, lat: 45 };
 
+/** Defaults for newly placed point lights (editable per light afterwards). */
+export interface PointLightDefaults {
+  radius: number;
+  energy: number;
+  colorHex: string;
+}
+
+export const DEFAULT_POINT_LIGHT: PointLightDefaults = {
+  radius: 3,
+  energy: 1,
+  colorHex: '#ffd9a0',
+};
+
 /** Identity of the file/builtin a document was opened from or saved as. */
 export interface ResourceRef {
   /** Dedupe key; opening a resource with an already-open key focuses it. */
@@ -290,6 +303,12 @@ export interface WorldDocument {
    * only — never written into world files.
    */
   viewTransform: ViewTransform | null;
+  /**
+   * The point-light placement the properties panel edits (its stable
+   * placement id); null = none selected. In-memory editor state only —
+   * never written into world files.
+   */
+  selectedLightId: number | null;
 }
 
 export type EditorDocument = BakeDocument | WorldDocument;

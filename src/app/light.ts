@@ -5,7 +5,8 @@ function srgbToLinear(c: number): number {
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 }
 
-function srgbHexToLinearRgb(hex: string): [number, number, number] {
+/** sRGB hex (#rrggbb) → linear RGB per channel (shared by point lights). */
+export function srgbHexToLinearRgb(hex: string): [number, number, number] {
   return [
     srgbToLinear(parseInt(hex.slice(1, 3), 16) / 255),
     srgbToLinear(parseInt(hex.slice(3, 5), 16) / 255),

@@ -58,9 +58,10 @@ the pointer for the real semantics.
 
 ## World
 
-- **World** — placements + light state, saved as `isoinfinity-world/4`
-  JSON in `worlds/` (`/1`+`/2`+`/3` still load; missing heights = ground
-  level, missing directions = north, missing ground/env fields = defaults).
+- **World** — placements + light state, saved as `isoinfinity-world/6`
+  JSON in `worlds/` (`/1`+`/2`+`/3`+`/4`+`/5` still load; missing heights =
+  ground level, missing directions = north, missing ground/env fields =
+  defaults, older files carry no point lights).
 - **Ground material** — a zip file with a `.material` extension in
   `materials/` holding diffuse (`diff`, with `diffuse` accepted as an
   alias; `diff` wins when both are present), AO/Roughness/Metal (`arm`,
@@ -90,7 +91,11 @@ the pointer for the real semantics.
   a continuous ground position, height and yaw. Editor-session state:
   never serialized into world files (ADR 0006) — saving/loading a world
   drops characters silently. Erase resolves the topmost placement across
-  sprite and mesh kinds (shared depth key).
+  sprite, mesh, and light kinds (shared depth key).
+- **Point light placement** — a placed light (light tool): emitter at the
+  placed cell center + height, falloff radius, energy, sRGB color.
+  Persisted in `isoinfinity-world/6`; at most 16 render concurrently
+  (`MAX_POINT_LIGHTS`), further placements render dark.
 - **Joint palette** — per-character, per-frame array of
   `bone.matrixWorld · boneInverse` matrices (column-major `mat4[]`,
   ≤ 64 joints): the CPU pose engine's output, the mesh vertex shader's
@@ -103,8 +108,9 @@ the pointer for the real semantics.
 - **SH probe** — 9 RGB spherical-harmonics diffuse-irradiance
   coefficients projected from the sprites' bake environment (resolved
   from bundle provenance, else the built-in default; `src/runtime/
-  shProbe.ts`), evaluated per pixel in the mesh shader as a quadratic
-  polynomial of the normal — the dynamic mesh's ambient term.
+  shProbe.ts`), evaluated per pixel as a quadratic polynomial of the
+  normal — baked into the mesh/ground albedo·AO texel at geometry-write
+  time (the environment-derived part of the ambient).
 - **Character brush** — the world toolbar's built-in animated character
   (Khronos CesiumMan, committed with attribution): place/erase/height
   like a sprite brush; the ghost shows the bind pose; playback is in
@@ -124,16 +130,31 @@ the pointer for the real semantics.
 
 ## Runtime
 
-- **Compositor** — `src/runtime/renderer.ts`: four draw batches (ground,
-  contact shadows, instanced sprite quads, overlay); fixed orthographic
-  camera, no scene graph, projection on CPU (`src/shared/iso.ts`).
+- **Compositor** — `src/runtime/renderer.ts`: two-phase frame — a
+  geometry pass (ground, contact shadows, meshes, instanced sprite quads)
+  into an offscreen MRT target set, the deferred light pass, then the
+  unlit overlay; fixed orthographic camera, no scene graph, projection on
+  CPU (`src/shared/iso.ts`).
+- **Screen-space g-buffer** — the geometry pass's offscreen targets:
+  RT0 (RGBA8 display texel = albedo·AO), RT1 (RGBA16F: world normal +
+  linear depth — the per-sprite bake g-buffer layout), RT2 (R16F: linear
+  depth). Blending is straight alpha per attachment; the grounding shadow
+  maps to the ground plane (up normal, ground depth).
+- **Deferred light pass** — one fullscreen pass applying every dynamic
+  light — ambient picker, key directional, point lights — once, over the
+  composite, with world position reconstructed from the g-buffer depth
+  (ADR 0001) and the ADR 0003 multiplicative factor applied exactly once
+  for every surface kind (ADR 0011).
 - **Per-pixel occlusion** — each sprite fragment writes `gl_FragDepth`
   from baked g-buffer depth + the placement's full
   `dot(origin + height, viewDir)`; LEQUAL depth resolves
   interpenetrations — stacking included, at any height — regardless of
   draw order.
 - **Key/ambient light** — POE-style dynamic lighting multiplying the
-  prerendered texel in linear space (ADR 0003). **Dynamic light** switch
-  off = factor identity (pure prerender).
+  albedo·AO texel in linear space (ADR 0003), applied in the deferred
+  pass. **Dynamic light** switch off = factor identity (pure prerender).
+- **Point light** — a deferred light with position, radius (quadratic
+  window to zero at the edge), energy, and color; reaches ground, sprites,
+  and meshes alike through the same pass.
 - **Sun position** — `src/shared/sun.ts`: NOAA-style az/el from time of
   day / day of year / latitude; writes through to the manual sliders.

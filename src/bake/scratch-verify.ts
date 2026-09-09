@@ -15,7 +15,7 @@ import {
   yawRotatedBoxSize,
 } from '../shared/iso.js';
 import { buildBundle, parseBake } from './bundle.js';
-import { Renderer as WorldRenderer, meshYawMat, type MeshDraw } from '../runtime/renderer.js';
+import { Renderer as WorldRenderer, meshYawMat, type MeshDraw, type PointLightGpu } from '../runtime/renderer.js';
 import { bakeFloatToHalf, layersToSet, RUNTIME_PPU, type SpriteLayer } from '../runtime/assets.js';
 import { CharacterPlayer, parseCharacterAsset } from '../runtime/meshAsset.js';
 import { surfaceHeightAt } from '../runtime/surfaceSnap.js';
@@ -1238,6 +1238,165 @@ async function runGroundingShadowSpike(): Promise<void> {
   renderer.dispose();
 }
 
+/**
+ * Deferred-lighting spike: the two-phase compositor with point lights.
+ * Ground, sprite and mesh pixels pick up a point light through the one
+ * deferred pass; the quadratic window reaches ~zero at the radius; the
+ * 16-light cap renders further lights dark; the dynamic-off switch shows
+ * the pure prerendered image (exact prerender texels) with markers only.
+ */
+async function runDeferredLightSpike(): Promise<void> {
+  log('test: deferred light pass (point lights, cap, dynamic-off)');
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const cube = bakePrimitive(getCube());
+  const w = cube.width;
+  const h = cube.height;
+  const layer: SpriteLayer = {
+    id: 'cube',
+    pxPerUnit: cube.pxPerUnit,
+    width: w,
+    height: h,
+    originPx: cube.originPx,
+    origin: [0, 0, 0],
+    gbuffer: bakeFloatToHalf(cube.gbuffer, w, h),
+    render: new Uint8Array(w * h * 4).fill(0).map((_, i) => (i % 4 === 3 ? 255 : 200)),
+  };
+  const set = layersToSet([layer]);
+  const renderer = new WorldRenderer(canvas, set.renderLayers, set.gbufferLayers, set.maxW, set.maxH);
+  // The grounding-shadow spike's frame: the ground around the light is on
+  // the 256px canvas with this origin (down-screen = larger x+z).
+  const PPU = RUNTIME_PPU;
+  const ORIGIN_X = 96;
+  const ORIGIN_Y = 140;
+  renderer.setMeshFrame(ORIGIN_X, ORIGIN_Y, PPU);
+  renderer.setLight({ dir: [0.5, 0.7071, 0.5], key: [0.6, 0.6, 0.6], ambient: [0.3, 0.3, 0.35] });
+
+  const toPx = (x: number, z: number, y = 0): [number, number] => {
+    const [u, v] = groundToScreen(x, z);
+    return [ORIGIN_X + u * PPU, ORIGIN_Y - (v + y * SCREEN_UP[1]) * PPU];
+  };
+  {
+    const v = (p: [number, number]): number[] => [p[0], p[1], 130, 130, 135, 1];
+    const c0 = toPx(-3, -3);
+    const c1 = toPx(6, -3);
+    const c2 = toPx(6, 6);
+    const c3 = toPx(-3, 6);
+    renderer.setGround(new Float32Array([...v(c0), ...v(c1), ...v(c2), ...v(c0), ...v(c2), ...v(c3)]));
+  }
+
+  const px = new Uint8Array(canvas.width * canvas.height * 4);
+  const frame = (lights: PointLightGpu[], enabled = true): Promise<string> => {
+    renderer.setPointLights(lights);
+    renderer.setLightsEnabled(enabled);
+    renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, []);
+    renderer.readPixels(px);
+    return sha256(px);
+  };
+  const read = (x: number, z: number): [number, number, number] => {
+    const [sx, sy] = toPx(x, z);
+    const gy = canvas.height - 1 - Math.round(sy);
+    const o = (gy * canvas.width + Math.round(sx)) * 4;
+    return [px[o], px[o + 1], px[o + 2]];
+  };
+  const rgbSum = (c: [number, number, number]): number => c[0] + c[1] + c[2];
+  const L = (x: number, y: number, z: number, radius = 2, energy = 1): PointLightGpu => ({
+    pos: [x, y, z],
+    radius,
+    color: [1, 0.9, 0.7],
+    energy,
+  });
+
+  // Point light over bare ground: brightness falls off with distance and
+  // reaches ~zero at the radius edge (comparisons isolate the light by
+  // differencing each sample against the no-light frame).
+  await frame([]);
+  const none = px.slice();
+  await frame([L(2, 0, 2)]);
+  const lit = px.slice();
+  const sampleAt = (buf: Uint8Array, x: number, z: number): [number, number, number] => {
+    px.set(buf.subarray(0, px.length));
+    return read(x, z);
+  };
+  const diff = (x: number, z: number): number =>
+    rgbSum(sampleAt(lit, x, z)) - rgbSum(sampleAt(none, x, z));
+  const dNear = diff(1.75, 1.75);         // ~0.35 from the emitter
+  const dHalf = diff(0.73, 0.73);         // 0.9 * radius (down-screen side)
+  const dOut = diff(0.44, 0.44);          // 1.1 * radius — beyond the window
+  ok(dNear > 0, `point light brightens the ground near it (Δ${dNear.toFixed(0)})`);
+  ok(dHalf > 0, `ground inside the radius is lit (Δ${dHalf.toFixed(0)})`);
+  ok(dHalf < dNear, `falloff decreases with distance (${dHalf.toFixed(0)} < ${dNear.toFixed(0)})`);
+  ok(dOut <= dHalf * 0.15 + 3, `contribution reaches ~zero beyond the radius (Δ${dOut.toFixed(0)} vs Δ${dHalf.toFixed(0)})`);
+
+  // A sprite and a mesh pick up the light through the same pass.
+  const spriteScale = PPU / cube.pxPerUnit;
+  const [cx, cy] = toPx(0.4, 0.4);
+  const instances = new Float32Array(10);
+  instances[0] = cx - cube.originPx[0] * spriteScale;
+  instances[1] = cy - cube.originPx[1] * spriteScale;
+  instances[2] = 0;
+  instances[3] = VIEW_DIR[0] * 0.4 + VIEW_DIR[2] * 0.4;
+  instances[4] = w * spriteScale;
+  instances[5] = h * spriteScale;
+  instances[6] = w;
+  instances[7] = h;
+  instances[8] = 0;
+  instances[9] = 1;
+  const frameSprite = (lights: PointLightGpu[]): Promise<string> => {
+    renderer.setPointLights(lights);
+    renderer.setLightsEnabled(true);
+    renderer.render(instances, 1, null, null, { zoom: 1, panX: 0, panY: 0 }, []);
+    renderer.readPixels(px);
+    return sha256(px);
+  };
+  ok(await frameSprite([]) !== await frameSprite([L(1.2, 0, 1.2)]), 'a sprite picks up the point light');
+
+  const asset = await parseCharacterAsset(await (await fetch(cesiumManUrl)).arrayBuffer());
+  renderer.setSkinningMode('gpu');
+  const player = new CharacterPlayer(asset);
+  player.update(1.2);
+  const off = asset.worldOffset;
+  const meshDraws: MeshDraw[] = [
+    { palette: player.palette, origin: [1.5 + off[0], off[1], 1.6 + off[2]], yawMat: meshYawMat(0.4) },
+  ];
+  const frameMesh = (lights: PointLightGpu[]): Promise<string> => {
+    renderer.setPointLights(lights);
+    renderer.setLightsEnabled(true);
+    renderer.render(new Float32Array(8), 0, null, null, { zoom: 1, panX: 0, panY: 0 }, meshDraws);
+    renderer.readPixels(px);
+    return sha256(px);
+  };
+  ok(await frameMesh([]) !== await frameMesh([L(2, 0, 2)]), 'a mesh picks up the point light');
+
+  // The 16-light cap: a 17th light contributes nothing (byte-identical).
+  const at = (x: number, z: number): PointLightGpu => L(x, 0, z);
+  const sixteen: PointLightGpu[] = Array.from({ length: 16 }, (_, i) => at(2 + (i % 4) * 0.1, 2 + Math.floor(i / 4) * 0.1));
+  const capped = await frame(sixteen);
+  const with17th = await frame([...sixteen, at(0.5, 0.5)]);
+  ok(capped === with17th, 'the 17th light renders dark (byte-identical frame)');
+  const capped2 = await frame(sixteen);
+  ok(capped === capped2, 'capped frame is deterministic');
+
+  // Dynamic light off: lights contribute nothing and sprites show the
+  // pure prerendered texels (the neutral 200-gray render pass).
+  ok(await frame([L(2, 0, 2)], false) === await frame([], false), 'dynamic-off: a placed light contributes nothing');
+  await frame([L(2, 0, 2)], false);
+  let pure = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    if (px[i] === 200 && px[i + 1] === 200 && px[i + 2] === 200 && px[i + 3] === 255) pure++;
+  }
+  ok(pure > 0, `dynamic-off: sprite shows the pure prerendered texel (${pure} px)`);
+  await frame([L(2, 0, 2)], true);
+  let shaded = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    if (px[i] === 200 && px[i + 1] === 200 && px[i + 2] === 200 && px[i + 3] === 255) shaded++;
+  }
+  ok(shaded === 0, 'dynamic-on: the same texel is shaded (no pure prerender pixels)');
+
+  renderer.dispose();
+}
+
 async function main(): Promise<void> {
   const { glb, gltfSet } = await buildQuadModel([
     { x0: 0, material: 0, name: 'texred' },
@@ -1698,6 +1857,10 @@ async function main(): Promise<void> {
 
   // 7c. Grounding-shadow spike: shadow pixel class + depth interleaving.
   await runGroundingShadowSpike();
+
+  // 7d. Deferred-lighting spike: point lights, the 16-light cap, and the
+  //     dynamic-off switch through the two-phase compositor.
+  await runDeferredLightSpike();
 
   log(`\n${passed} passed, ${failed} failed`, failed === 0 ? 'pass' : 'fail');
 }

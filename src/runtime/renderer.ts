@@ -5,20 +5,31 @@ import type { MeshGeometry, MeshSurface } from './meshAsset.js';
 /** Joint-palette cap, mirroring `meshAsset.ts`. */
 export const MAX_MESH_JOINTS = 64;
 
-const SHADE_CHUNK = `
-uniform vec3 uLightDir;
-uniform vec3 uKeyLight;
-uniform vec3 uAmbient;
+/** Compile-time cap on concurrently rendered point lights (deferred pass). */
+export const MAX_POINT_LIGHTS = 16;
+
+/**
+ * A point light for the deferred light pass. `color` is linear RGB (the
+ * editor converts its sRGB picker before upload); `energy` scales it.
+ */
+export interface PointLightGpu {
+  /** World-space emitting position (x, y, z). */
+  pos: readonly [number, number, number];
+  /** Falloff radius (world units; contribution reaches zero at the edge). */
+  radius: number;
+  /** Linear-space RGB of the emitted color. */
+  color: readonly [number, number, number];
+  /** Radiance scale. */
+  energy: number;
+}
+
+const COLOR_CHUNK = `
 vec3 srgbToLinear(vec3 c) {
   return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
 }
 vec3 linearToSrgb(vec3 c) {
   c = clamp(c, 0.0, 1.0);
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
-}
-vec3 shade(vec3 albedoSrgb, vec3 N) {
-  float ndl = max(dot(N, uLightDir), 0.0);
-  return linearToSrgb(srgbToLinear(albedoSrgb) * (uAmbient + uKeyLight * ndl));
 }
 `;
 
@@ -95,11 +106,9 @@ void main() {
 }
 `;
 
-// Lean PBR, single-pass: HDRI ambient (SH irradiance) plus the key light
-// are applied once, pre-tonemap — the same place the bake applies them —
-// so the ground matches the sprites' brightness instead of double-shading
-// (the mesh path's post-tonemap `shade()` re-application is its own
-// accepted trade, ADR 0003; the ground has no baked image to re-shade).
+// Lean PBR, geometry stage: the ground writes its env-lit tonemapped texel
+// (albedo·AO·SH ambient — its "prerender" equivalent) plus surface normal
+// and depth; the deferred light pass adds the dynamic lights on top.
 const GROUND_FRAG = `#version 300 es
 precision highp float;
 uniform sampler2D uDiffuse;
@@ -113,8 +122,9 @@ uniform float uDepthA;
 uniform float uDepthB;
 uniform float uSaturation;
 in vec3 vWorldPos;
-out vec4 outColor;
-${SHADE_CHUNK}
+layout(location = 0) out vec4 outAlbedo;
+layout(location = 1) out vec4 outGbuf;
+${COLOR_CHUNK}
 ${ACES_GLSL}
 ${SH_IRRADIANCE_GLSL}
 ${ISO_GLSL}
@@ -130,11 +140,11 @@ void main() {
     N = normalize(vec3(n.x, n.z, n.y));
   }
   float ao = uHasArm > 0.5 ? texture(uArm, uv).r : 1.0;
-  vec3 key = srgbToLinear(clamp(uKeyLight, 0.0, 1.0)) * max(dot(N, uLightDir), 0.0);
-  vec3 hdr = albedo * ao * (max(shIrradiance(N), vec3(0.0)) + key);
+  vec3 hdr = albedo * ao * max(shIrradiance(N), vec3(0.0));
   vec3 texel = linearToSrgb(ACESFilmic(hdr));
   float lum = dot(texel, vec3(0.2126, 0.7152, 0.0722));
-  outColor = vec4(mix(vec3(lum), texel, uSaturation), 1.0);
+  outAlbedo = vec4(mix(vec3(lum), texel, uSaturation), 1.0);
+  outGbuf = vec4(N, dot(VIEW_DIR, vWorldPos));
   gl_FragDepth = uDepthA * dot(VIEW_DIR, vWorldPos) + uDepthB;
 }
 `;
@@ -152,13 +162,69 @@ void main() {
 }
 `;
 
-const FLAT_FRAG = `#version 300 es
+// Editor chrome (hover highlight, gizmo) over the finished frame: unlit.
+const OVERLAY_FRAG = `#version 300 es
 precision highp float;
 in vec4 vColor;
 out vec4 outColor;
-${SHADE_CHUNK}
 void main() {
-  outColor = vec4(shade(vColor.rgb, vec3(0.0, 1.0, 0.0)), vColor.a);
+  outColor = vColor;
+}
+`;
+
+// Geometry-stage flat batch (the default ground): each vertex carries its
+// ground-plane depth (the flat batch IS the ground plane) so the deferred
+// pass can reconstruct the floor position; the flat ground keeps today's
+// no-window-depth behavior (sprites always composite over it).
+const FLAT_GROUND_VERT = `#version 300 es
+in vec2 aPos;
+in vec4 aColor;
+uniform vec2 uRes;
+uniform vec4 uView;
+uniform vec3 uProj;
+out vec4 vColor;
+out float vGroundDepth;
+${ISO_GLSL}
+${GROUND_UNPROJ_GLSL}
+void main() {
+  vec2 px = aPos * uView.xy + uView.zw;
+  vec2 s = vec2(aPos.x - uProj.x, uProj.y - aPos.y) / uProj.z;
+  float gx = (SH_A22 * s.x - SH_A12 * s.y) / SH_DET;
+  float gz = (SH_A11 * s.y - SH_A21 * s.x) / SH_DET;
+  vGroundDepth = dot(VIEW_DIR, vec3(gx, 0.0, gz));
+  gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
+  vColor = aColor;
+}
+`;
+
+const FLAT_GROUND_FRAG = `#version 300 es
+precision highp float;
+in vec4 vColor;
+in float vGroundDepth;
+layout(location = 0) out vec4 outAlbedo;
+layout(location = 1) out vec4 outGbuf;
+layout(location = 2) out vec4 outDepth;
+void main() {
+  outAlbedo = vec4(vColor.rgb, 1.0);
+  outGbuf = vec4(0.0, 1.0, 0.0, 1.0);
+  outDepth = vec4(vGroundDepth, 0.0, 0.0, 1.0);
+}
+`;
+
+// Contact shadows: color-only composite (straight source, the blend
+// applies the alpha); g-buffer and depth outputs are zero-weight so
+// blending preserves the surface data behind them.
+const FLAT_SHADOW_FRAG = `#version 300 es
+precision highp float;
+in vec4 vColor;
+in float vGroundDepth;
+layout(location = 0) out vec4 outAlbedo;
+layout(location = 1) out vec4 outGbuf;
+layout(location = 2) out vec4 outDepth;
+void main() {
+  outAlbedo = vColor;
+  outGbuf = vec4(0.0);
+  outDepth = vec4(0.0);
 }
 `;
 
@@ -203,6 +269,10 @@ void main() {
 }
 `;
 
+// Geometry stage: routes the bake data into the screen-space g-buffer
+// (RT1: world normal + linear depth) and the albedo·AO surface (RT2,
+// rgb = the baked render texel — its baked light IS its albedo·AO). The
+// dynamic-light factor moves to the deferred pass.
 const SPRITE_FRAG = `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
@@ -217,8 +287,9 @@ flat in float vLayer;
 flat in float vDepthOff;
 flat in float vHeight;
 flat in float vStrength;
-out vec4 outColor;
-${SHADE_CHUNK}
+layout(location = 0) out vec4 outAlbedo;
+layout(location = 1) out vec4 outGbuf;
+layout(location = 2) out vec4 outDepth;
 void main() {
   vec4 g = texture(uGbuffer, vec3(vUv, vLayer));
   vec4 r = texture(uRender, vec3(vUv, vLayer));
@@ -234,17 +305,21 @@ void main() {
     float a = r.a * vStrength;
     if (vHeight != 0.0 || a <= 0.0) discard;
     gl_FragDepth = uDepthA * (vGroundDepth + 1e-3) + uDepthB;
-    outColor = vec4(r.rgb, a);
+    outAlbedo = vec4(r.rgb, a);
+    outGbuf = vec4(0.0, 1.0, 0.0, a); // up normal, ground-plane surface
+    outDepth = vec4(vGroundDepth, 0.0, 0.0, 1.0);
     return;
   }
   float d = g.a + vDepthOff;
   gl_FragDepth = uDepthA * d + uDepthB;
-  outColor = vec4(shade(r.rgb, g.rgb), r.a);
+  outAlbedo = vec4(r.rgb, r.a);
+  outGbuf = vec4(g.rgb, r.a);
+  outDepth = vec4(d, 0.0, 0.0, 1.0);
 }
 `;
 
 // Skinned character mesh: palette skinning in the vertex stage, then the
-// same projection/depth/light pipeline the sprite path uses. The screen
+// same projection/depth pipeline the sprite path uses. The screen
 // projection inlines the shared iso constants (ISO_GLSL) so CPU-projected
 // sprites and GPU-projected meshes can never drift apart.
 // GPU-skinning vertex stage: palette blend against per-joint matrices
@@ -314,11 +389,10 @@ void main() {
 }
 `;
 
-// Shades like a baked texel: env-lit albedo through the same ACES + sRGB +
-// display-saturation chain the render pass was produced with, then the
-// world's dynamic key+ambient exactly as sprites apply it. Depth is the
-// shared world linear map — a mesh texel and a sprite texel at the same
-// world point write the same window depth.
+// Geometry stage: writes the env-lit tonemapped texel (SH irradiance over
+// live normals — the mesh's "prerender" equivalent) as albedo·AO plus its
+// live normals and world depth. The dynamic factor is applied once, in the
+// deferred pass, exactly as sprites receive it.
 const MESH_FRAG = `#version 300 es
 precision highp float;
 uniform sampler2D uAlbedo;
@@ -329,8 +403,10 @@ uniform float uDepthB;
 in vec3 vNormal;
 in vec3 vWorldPos;
 in vec2 vUv;
-out vec4 outColor;
-${SHADE_CHUNK}
+layout(location = 0) out vec4 outAlbedo;
+layout(location = 1) out vec4 outGbuf;
+layout(location = 2) out vec4 outDepth;
+${COLOR_CHUNK}
 ${ACES_GLSL}
 ${SH_IRRADIANCE_GLSL}
 ${ISO_GLSL}
@@ -341,8 +417,73 @@ void main() {
   vec3 texel = linearToSrgb(ACESFilmic(hdr));
   float lum = dot(texel, vec3(0.2126, 0.7152, 0.0722));
   texel = mix(vec3(lum), texel, uSaturation);
-  outColor = vec4(shade(texel, N), 1.0);
+  outAlbedo = vec4(texel, 1.0);
+  outGbuf = vec4(N, 1.0);
+  outDepth = vec4(dot(VIEW_DIR, vWorldPos), 0.0, 0.0, 1.0);
   gl_FragDepth = uDepthA * dot(VIEW_DIR, vWorldPos) + uDepthB;
+}
+`;
+
+// The deferred light pass: reconstructs world position from the
+// g-buffer depth (ADR 0001 — fixed orthographic camera), shades with the
+// ambient picker, key directional, and the point-light UBO, and applies
+// the multiplicative factor once for every surface kind.
+const LIGHT_VERT = `#version 300 es
+in vec2 aPos;
+void main() {
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}
+`;
+
+const LIGHT_FRAG = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uGbuf;    // RT1: rgb = world normal, a = linear depth
+uniform sampler2D uAlbedo;  // RT2: rgb = display texel (albedo·AO), a = AO hook
+uniform vec2 uRes;
+uniform vec4 uView;   // view transform: scale.xy, offset.xy (backing px)
+uniform vec3 uProj;   // world-image origin px (x, y), px per unit
+uniform vec3 uLightDir;
+uniform vec3 uKeyLight;
+uniform vec3 uAmbient;
+uniform int uPointCount;
+uniform float uLightsOn; // 0 = dynamic lights off: the identity factor
+layout(std140) uniform PointLights {
+  vec4 uPointPosRadius[${MAX_POINT_LIGHTS}];    // xyz world pos, w radius
+  vec4 uPointColorEnergy[${MAX_POINT_LIGHTS}];  // rgb linear color, w energy
+};
+out vec4 outColor;
+${COLOR_CHUNK}
+${ISO_GLSL}
+void main() {
+  ivec2 uv = ivec2(gl_FragCoord.xy);
+  vec4 g = texelFetch(uGbuf, uv, 0);
+  vec4 a = texelFetch(uAlbedo, uv, 0);
+  if (dot(g.rgb, g.rgb) == 0.0) {
+    outColor = vec4(a.rgb, 1.0);
+    return;
+  }
+  vec3 N = normalize(g.rgb);
+  // ADR 0001: full world position from the pixel coordinate plus one
+  // scalar (the g-buffer depth) — the fixed-camera orthonormal frame.
+  vec2 worldPx = vec2((gl_FragCoord.x - uView.z) / uView.x,
+                      (uRes.y - gl_FragCoord.y - uView.w) / uView.y);
+  vec2 s = vec2(worldPx.x - uProj.x, uProj.y - worldPx.y) / uProj.z;
+  vec3 wp = SCREEN_RIGHT * s.x + SCREEN_UP * s.y + VIEW_DIR * g.a;
+  vec3 factor = uAmbient + uKeyLight * max(dot(N, uLightDir), 0.0);
+  for (int i = 0; i < ${MAX_POINT_LIGHTS}; i++) {
+    if (i >= uPointCount) break;
+    vec3 L = uPointPosRadius[i].xyz - wp;
+    float dist = length(L);
+    float radius = uPointPosRadius[i].w;
+    if (radius <= 0.0 || dist >= radius) continue;
+    float win = 1.0 - dist / radius;
+    win *= win;
+    float nl = max(dot(N, L / max(dist, 1e-5)), 0.0);
+    factor += uPointColorEnergy[i].rgb * (uPointColorEnergy[i].w * win * nl);
+  }
+  vec3 lit = mix(vec3(1.0), factor, uLightsOn);
+  outColor = vec4(linearToSrgb(srgbToLinear(clamp(a.rgb, 0.0, 1.0)) * lit), 1.0);
 }
 `;
 
@@ -405,7 +546,6 @@ export type MeshSkinningMode = 'gpu' | 'cpu';
 interface MeshUniformSet {
   res: WebGLUniformLocation;
   view: WebGLUniformLocation;
-  light: Uniforms3;
   yaw: WebGLUniformLocation;
   origin: WebGLUniformLocation;
   proj: WebGLUniformLocation;
@@ -451,9 +591,14 @@ export function meshYawMat(yawRad: number, out: Float32Array = new Float32Array(
   return out;
 }
 
+/** Scene background clear color (also the light pass's backdrop). */
+const CLEAR_COLOR: [number, number, number] = [0.078, 0.086, 0.102];
+
 export class Renderer {
   private gl: WebGL2RenderingContext;
-  private flatProg: WebGLProgram;
+  private flatGroundProg: WebGLProgram;
+  private flatShadowProg: WebGLProgram;
+  private overlayProg: WebGLProgram;
   private spriteProg: WebGLProgram;
   private renderTex: WebGLTexture | null = null;
   private gbufferTex: WebGLTexture | null = null;
@@ -506,16 +651,19 @@ export class Renderer {
     depthA: WebGLUniformLocation;
     depthB: WebGLUniformLocation;
     sh: WebGLUniformLocation;
-    light: Uniforms3;
   };
-  private uFlatRes: WebGLUniformLocation;
-  private uFlatView: WebGLUniformLocation;
-  private uFlatLight: Uniforms3;
+  private uOverlayRes: WebGLUniformLocation;
+  private uOverlayView: WebGLUniformLocation;
+  private uFlatGroundRes: WebGLUniformLocation;
+  private uFlatGroundView: WebGLUniformLocation;
+  private uFlatGroundProj: WebGLUniformLocation;
+  private uFlatShadowRes: WebGLUniformLocation;
+  private uFlatShadowView: WebGLUniformLocation;
+  private uFlatShadowProj: WebGLUniformLocation;
   private uSpriteRes: WebGLUniformLocation;
   private uSpriteMaxSize: WebGLUniformLocation;
   private uSpriteView: WebGLUniformLocation;
   private uSpriteProj: WebGLUniformLocation;
-  private uSpriteLight: Uniforms3;
   private uDepthA: WebGLUniformLocation;
   private uDepthB: WebGLUniformLocation;
   private light: LightParams = {
@@ -523,6 +671,28 @@ export class Renderer {
     key: [1, 1, 1],
     ambient: [0.3, 0.3, 0.3],
   };
+  private lightsEnabled = true;
+  private pointLights: readonly PointLightGpu[] = [];
+  // --- deferred geometry targets ---
+  private geoFbo: WebGLFramebuffer | null = null;
+  private albedoTex: WebGLTexture | null = null;  // RT0: display texel
+  private gbufTex: WebGLTexture | null = null;    // RT1: normal + linear depth
+  private depthLinTex: WebGLTexture | null = null; // RT2: linear depth
+  private geoDepthRbo: WebGLRenderbuffer | null = null;
+  private geoW = 0;
+  private geoH = 0;
+  private lightProg: WebGLProgram;
+  private lightVao: WebGLVertexArrayObject;
+  private lightVbo: WebGLBuffer;
+  private pointUbo: WebGLBuffer;
+  private lightUniforms: {
+    res: WebGLUniformLocation;
+    view: WebGLUniformLocation;
+    proj: WebGLUniformLocation;
+    light: Uniforms3;
+      pointCount: WebGLUniformLocation;
+      lightsOn: WebGLUniformLocation;
+    };
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -539,31 +709,74 @@ export class Renderer {
     if (!gl) {
       throw new Error('WebGL2 unavailable');
     }
+    if (!gl.getExtension('EXT_color_buffer_float')) {
+      throw new Error('EXT_color_buffer_float unavailable');
+    }
     this.gl = gl;
 
-    this.flatProg = link(gl, FLAT_VERT, FLAT_FRAG);
+    this.flatGroundProg = link(gl, FLAT_GROUND_VERT, FLAT_GROUND_FRAG);
+    this.flatShadowProg = link(gl, FLAT_GROUND_VERT, FLAT_SHADOW_FRAG);
+    this.overlayProg = link(gl, FLAT_VERT, OVERLAY_FRAG);
     this.spriteProg = link(gl, SPRITE_VERT, SPRITE_FRAG);
-    this.uFlatRes = gl.getUniformLocation(this.flatProg, 'uRes')!;
-    this.uFlatView = gl.getUniformLocation(this.flatProg, 'uView')!;
-    this.uFlatLight = {
-      dir: gl.getUniformLocation(this.flatProg, 'uLightDir')!,
-      key: gl.getUniformLocation(this.flatProg, 'uKeyLight')!,
-      ambient: gl.getUniformLocation(this.flatProg, 'uAmbient')!,
-    };
+    this.lightProg = link(gl, LIGHT_VERT, LIGHT_FRAG);
+
+    const flatGroundU = (n: string): WebGLUniformLocation =>
+      gl.getUniformLocation(this.flatGroundProg, n)!;
+    this.uFlatGroundRes = flatGroundU('uRes');
+    this.uFlatGroundView = flatGroundU('uView');
+    this.uFlatGroundProj = flatGroundU('uProj');
+    const flatShadowU = (n: string): WebGLUniformLocation =>
+      gl.getUniformLocation(this.flatShadowProg, n)!;
+    this.uFlatShadowRes = flatShadowU('uRes');
+    this.uFlatShadowView = flatShadowU('uView');
+    this.uFlatShadowProj = flatShadowU('uProj');
+    this.uOverlayRes = gl.getUniformLocation(this.overlayProg, 'uRes')!;
+    this.uOverlayView = gl.getUniformLocation(this.overlayProg, 'uView')!;
     this.uSpriteRes = gl.getUniformLocation(this.spriteProg, 'uRes')!;
     this.uSpriteMaxSize = gl.getUniformLocation(this.spriteProg, 'uMaxSize')!;
     this.uSpriteView = gl.getUniformLocation(this.spriteProg, 'uView')!;
     this.uSpriteProj = gl.getUniformLocation(this.spriteProg, 'uProj')!;
-    this.uSpriteLight = {
-      dir: gl.getUniformLocation(this.spriteProg, 'uLightDir')!,
-      key: gl.getUniformLocation(this.spriteProg, 'uKeyLight')!,
-      ambient: gl.getUniformLocation(this.spriteProg, 'uAmbient')!,
-    };
     this.uDepthA = gl.getUniformLocation(this.spriteProg, 'uDepthA')!;
     this.uDepthB = gl.getUniformLocation(this.spriteProg, 'uDepthB')!;
     gl.useProgram(this.spriteProg);
     gl.uniform1f(this.uDepthA, -1 / (2 * DEPTH_LINEAR_RANGE));
     gl.uniform1f(this.uDepthB, 0.5);
+
+    // Deferred light pass: fullscreen quad + std140 point-light UBO.
+    const lu = (n: string): WebGLUniformLocation => gl.getUniformLocation(this.lightProg, n)!;
+    this.lightUniforms = {
+      res: lu('uRes'),
+      view: lu('uView'),
+      proj: lu('uProj'),
+      light: {
+        dir: lu('uLightDir'),
+        key: lu('uKeyLight'),
+        ambient: lu('uAmbient'),
+      },
+      pointCount: lu('uPointCount'),
+      lightsOn: lu('uLightsOn'),
+    };
+    gl.useProgram(this.lightProg);
+    gl.uniform1i(lu('uGbuf'), 1);
+    gl.uniform1i(lu('uAlbedo'), 0);
+    const blockIndex = gl.getUniformBlockIndex(this.lightProg, 'PointLights');
+    gl.uniformBlockBinding(this.lightProg, blockIndex, 0);
+    this.pointUbo = gl.createBuffer()!;
+    gl.bindBuffer(gl.UNIFORM_BUFFER, this.pointUbo);
+    gl.bufferData(gl.UNIFORM_BUFFER, MAX_POINT_LIGHTS * 32, gl.DYNAMIC_DRAW);
+    gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.pointUbo);
+    this.lightVao = gl.createVertexArray()!;
+    this.lightVbo = gl.createBuffer()!;
+    gl.bindVertexArray(this.lightVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.lightVbo);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
+      gl.STATIC_DRAW,
+    );
+    const aLightPos = gl.getAttribLocation(this.lightProg, 'aPos');
+    gl.enableVertexAttribArray(aLightPos);
+    gl.vertexAttribPointer(aLightPos, 2, gl.FLOAT, false, 8, 0);
 
     this.setSprites(renderLayers, gbufferLayers, maxW, maxH);
 
@@ -571,8 +784,8 @@ export class Renderer {
     this.groundVbo = gl.createBuffer()!;
     gl.bindVertexArray(this.groundVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.groundVbo);
-    const aFlatPos = gl.getAttribLocation(this.flatProg, 'aPos');
-    const aFlatColor = gl.getAttribLocation(this.flatProg, 'aColor');
+    const aFlatPos = gl.getAttribLocation(this.flatGroundProg, 'aPos');
+    const aFlatColor = gl.getAttribLocation(this.flatGroundProg, 'aColor');
     gl.enableVertexAttribArray(aFlatPos);
     gl.vertexAttribPointer(aFlatPos, 2, gl.FLOAT, false, 24, 0);
     gl.enableVertexAttribArray(aFlatColor);
@@ -587,14 +800,18 @@ export class Renderer {
     gl.enableVertexAttribArray(aFlatColor);
     gl.vertexAttribPointer(aFlatColor, 4, gl.FLOAT, false, 24, 8);
 
+    // Overlay runs on its own flat program (aPos/aColor locations coincide
+    // with the geometry flat batch's, but keep the layout self-contained).
     this.highlightVao = gl.createVertexArray()!;
     this.highlightVbo = gl.createBuffer()!;
     gl.bindVertexArray(this.highlightVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.highlightVbo);
-    gl.enableVertexAttribArray(aFlatPos);
-    gl.vertexAttribPointer(aFlatPos, 2, gl.FLOAT, false, 24, 0);
-    gl.enableVertexAttribArray(aFlatColor);
-    gl.vertexAttribPointer(aFlatColor, 4, gl.FLOAT, false, 24, 8);
+    const aOvPos = gl.getAttribLocation(this.overlayProg, 'aPos');
+    const aOvColor = gl.getAttribLocation(this.overlayProg, 'aColor');
+    gl.enableVertexAttribArray(aOvPos);
+    gl.vertexAttribPointer(aOvPos, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(aOvColor);
+    gl.vertexAttribPointer(aOvColor, 4, gl.FLOAT, false, 24, 8);
 
     this.spriteVao = gl.createVertexArray()!;
     this.instVbo = gl.createBuffer()!;
@@ -660,11 +877,6 @@ export class Renderer {
       depthA: gu('uDepthA'),
       depthB: gu('uDepthB'),
       sh: gu('uSh'),
-      light: {
-        dir: gu('uLightDir'),
-        key: gu('uKeyLight'),
-        ambient: gu('uAmbient'),
-      },
     };
     gl.useProgram(this.groundProg);
     gl.uniform1f(this.groundUniforms.depthA, -1 / (2 * DEPTH_LINEAR_RANGE));
@@ -689,7 +901,7 @@ export class Renderer {
     gl.depthFunc(gl.LEQUAL);
     gl.disable(gl.CULL_FACE);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.clearColor(0.078, 0.086, 0.102, 1);
+    gl.clearColor(CLEAR_COLOR[0], CLEAR_COLOR[1], CLEAR_COLOR[2], 1);
     gl.clearDepth(1);
   }
 
@@ -789,6 +1001,19 @@ export class Renderer {
 
   setLight(light: LightParams): void {
     this.light = light;
+  }
+
+  /**
+   * Gate the dynamic lights (the deferred pass applies the identity factor
+   * and point lights drop out when off — the pure prerendered composite).
+   */
+  setLightsEnabled(on: boolean): void {
+    this.lightsEnabled = on;
+  }
+
+  /** Point lights for the deferred pass; only the first 16 are uploaded. */
+  setPointLights(lights: readonly PointLightGpu[]): void {
+    this.pointLights = lights;
   }
 
   /**
@@ -892,7 +1117,7 @@ export class Renderer {
       gl.useProgram(u === this.meshUniforms.gpu ? this.meshProgGpu : this.meshProgCpu);
       gl.uniform3fv(u.sh, coeffs ?? zeros);
     }
-    // The ground program shares the ambient probe (SHADE/irradiance chunk).
+    // The ground program shares the ambient probe (SH chunk).
     gl.useProgram(this.groundProg);
     gl.uniform3fv(this.groundUniforms.sh, coeffs ?? zeros);
   }
@@ -921,6 +1146,7 @@ export class Renderer {
     const gl = this.gl;
     if (this.renderTex) gl.deleteTexture(this.renderTex);
     if (this.gbufferTex) gl.deleteTexture(this.gbufferTex);
+    this.deleteGeoTargets();
     gl.deleteBuffer(this.groundVbo);
     gl.deleteVertexArray(this.groundVao);
     gl.deleteBuffer(this.groundTexVbo);
@@ -932,6 +1158,9 @@ export class Renderer {
     gl.deleteVertexArray(this.highlightVao);
     gl.deleteBuffer(this.instVbo);
     gl.deleteVertexArray(this.spriteVao);
+    gl.deleteBuffer(this.lightVbo);
+    gl.deleteVertexArray(this.lightVao);
+    gl.deleteBuffer(this.pointUbo);
     if (this.meshPosVbo) gl.deleteBuffer(this.meshPosVbo);
     if (this.meshNrmVbo) gl.deleteBuffer(this.meshNrmVbo);
     if (this.meshUvVbo) gl.deleteBuffer(this.meshUvVbo);
@@ -940,11 +1169,14 @@ export class Renderer {
     if (this.meshIbo) gl.deleteBuffer(this.meshIbo);
     if (this.meshAlbedoTex) gl.deleteTexture(this.meshAlbedoTex);
     gl.deleteVertexArray(this.meshVao);
-    gl.deleteProgram(this.flatProg);
+    gl.deleteProgram(this.flatGroundProg);
+    gl.deleteProgram(this.flatShadowProg);
+    gl.deleteProgram(this.overlayProg);
     gl.deleteProgram(this.groundProg);
     gl.deleteProgram(this.meshProgGpu);
     gl.deleteProgram(this.meshProgCpu);
     gl.deleteProgram(this.spriteProg);
+    gl.deleteProgram(this.lightProg);
   }
 
   /** The raw context (diagnostic harnesses only — do not draw through it). */
@@ -963,11 +1195,6 @@ export class Renderer {
     const set: MeshUniformSet = {
       res: gl.getUniformLocation(prog, 'uRes')!,
       view: gl.getUniformLocation(prog, 'uView')!,
-      light: {
-        dir: gl.getUniformLocation(prog, 'uLightDir')!,
-        key: gl.getUniformLocation(prog, 'uKeyLight')!,
-        ambient: gl.getUniformLocation(prog, 'uAmbient')!,
-      },
       yaw: gl.getUniformLocation(prog, 'uYaw')!,
       origin: gl.getUniformLocation(prog, 'uOrigin')!,
       proj: gl.getUniformLocation(prog, 'uProj')!,
@@ -1082,6 +1309,65 @@ export class Renderer {
     this.groundArmTex = null;
   }
 
+  // --- deferred geometry targets -------------------------------------------
+
+  /** (Re)create the offscreen geometry FBO when the canvas size changes. */
+  private ensureGeoTargets(w: number, h: number): void {
+    if (this.geoFbo !== null && this.geoW === w && this.geoH === h) return;
+    const gl = this.gl;
+    this.deleteGeoTargets();
+    this.geoW = w;
+    this.geoH = h;
+
+    this.albedoTex = this.geoTexture(w, h, gl.RGBA8);
+    this.gbufTex = this.geoTexture(w, h, gl.RGBA16F);
+    this.depthLinTex = this.geoTexture(w, h, gl.R16F);
+    this.geoDepthRbo = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, this.geoDepthRbo);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
+
+    this.geoFbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.geoFbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.albedoTex, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, this.gbufTex, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, this.depthLinTex, 0);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.geoDepthRbo);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  private geoTexture(w: number, h: number, internal: number): WebGLTexture {
+    const gl = this.gl;
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    if (internal === gl.RGBA8) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    } else if (internal === gl.RGBA16F) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, gl.RED, gl.HALF_FLOAT, null);
+    }
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return tex;
+  }
+
+  private deleteGeoTargets(): void {
+    const gl = this.gl;
+    if (this.geoFbo) gl.deleteFramebuffer(this.geoFbo);
+    if (this.albedoTex) gl.deleteTexture(this.albedoTex);
+    if (this.gbufTex) gl.deleteTexture(this.gbufTex);
+    if (this.depthLinTex) gl.deleteTexture(this.depthLinTex);
+    if (this.geoDepthRbo) gl.deleteRenderbuffer(this.geoDepthRbo);
+    this.geoFbo = null;
+    this.albedoTex = null;
+    this.gbufTex = null;
+    this.depthLinTex = null;
+    this.geoDepthRbo = null;
+  }
+
   render(
     instances: Float32Array,
     count: number,
@@ -1092,41 +1378,61 @@ export class Renderer {
   ): void {
     const gl = this.gl;
     const canvas = gl.canvas as HTMLCanvasElement;
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    const w = canvas.width;
+    const h = canvas.height;
+    this.ensureGeoTargets(w, h);
 
-    gl.useProgram(this.flatProg);
-    gl.uniform2f(this.uFlatRes, canvas.width, canvas.height);
-    gl.uniform4f(this.uFlatView, view.zoom, view.zoom, view.panX, view.panY);
+    // ---- geometry pass: RT0 albedo·AO, RT1 normal+depth, RT2 depth ----
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.geoFbo);
+    gl.viewport(0, 0, w, h);
+    gl.clearBufferfv(gl.COLOR, 0, [...CLEAR_COLOR, 1]);
+    gl.clearBufferfv(gl.COLOR, 1, [0, 0, 0, 0]);
+    gl.clearBufferfv(gl.COLOR, 2, [0, 0, 0, 0]);
+    gl.clear(gl.DEPTH_BUFFER_BIT);
+
+    // Shared uniforms: the geometry programs project with the same view
+    // transform and world-image frame; the light pass reconstructs with
+    // their inverse.
     gl.useProgram(this.spriteProg);
-    gl.uniform2f(this.uSpriteRes, canvas.width, canvas.height);
+    gl.uniform2f(this.uSpriteRes, w, h);
     gl.uniform4f(this.uSpriteView, view.zoom, view.zoom, view.panX, view.panY);
-    // World-image px origin + px per unit: the grounding shadow's
-    // ground-plane unprojection runs in the same projection the meshes
-    // and the textured ground use.
     gl.uniform3f(this.uSpriteProj, this.meshFrame[0], this.meshFrame[1], this.meshFrame[2]);
+    const flatU = (
+      res: WebGLUniformLocation,
+      viewU: WebGLUniformLocation,
+      proj: WebGLUniformLocation,
+      prog: WebGLProgram,
+    ): void => {
+      gl.useProgram(prog);
+      gl.uniform2f(res, w, h);
+      gl.uniform4f(viewU, view.zoom, view.zoom, view.panX, view.panY);
+      gl.uniform3f(proj, this.meshFrame[0], this.meshFrame[1], this.meshFrame[2]);
+    };
+    flatU(this.uFlatGroundRes, this.uFlatGroundView, this.uFlatGroundProj, this.flatGroundProg);
+    flatU(this.uFlatShadowRes, this.uFlatShadowView, this.uFlatShadowProj, this.flatShadowProg);
     for (const mode of ['gpu', 'cpu'] as const) {
       const u = this.meshUniforms[mode];
       gl.useProgram(mode === 'gpu' ? this.meshProgGpu : this.meshProgCpu);
-      gl.uniform2f(u.res, canvas.width, canvas.height);
+      gl.uniform2f(u.res, w, h);
       gl.uniform4f(u.view, view.zoom, view.zoom, view.panX, view.panY);
       gl.uniform3f(u.proj, this.meshFrame[0], this.meshFrame[1], this.meshFrame[2]);
     }
+    gl.useProgram(this.groundProg);
+    gl.uniform2f(this.groundUniforms.res, w, h);
+    gl.uniform4f(this.groundUniforms.view, view.zoom, view.zoom, view.panX, view.panY);
+    gl.uniform3f(this.groundUniforms.proj, this.meshFrame[0], this.meshFrame[1], this.meshFrame[2]);
+    gl.uniform1f(this.groundUniforms.saturation, this.envSaturation);
+    gl.uniform1f(this.groundUniforms.exposure, this.envExposure);
 
-    // 1. Ground: opaque. Unlit flat batch by default (no depth
-    //    interaction — sprites always composite over it); with a material
-    //    selected the textured plane draws instead, writing the shared
-    //    linear depth so sprites occlude against it per pixel.
+    // 1. Ground: opaque. The flat batch keeps today's no-depth behavior
+    //    (sprites always composite over it) but now writes the g-buffer's
+    //    ground-plane surface so the deferred pass lights the floor; with
+    //    a material selected the textured plane draws instead, also
+    //    writing the shared window depth for per-pixel occlusion.
     gl.disable(gl.BLEND);
     if (this.groundMatTiles) {
       gl.enable(gl.DEPTH_TEST);
       gl.useProgram(this.groundProg);
-      gl.uniform2f(this.groundUniforms.res, canvas.width, canvas.height);
-      gl.uniform4f(this.groundUniforms.view, view.zoom, view.zoom, view.panX, view.panY);
-      gl.uniform3f(this.groundUniforms.proj, this.meshFrame[0], this.meshFrame[1], this.meshFrame[2]);
-      gl.uniform1f(this.groundUniforms.saturation, this.envSaturation);
-      gl.uniform1f(this.groundUniforms.exposure, this.envExposure);
-      uploadLight(gl, this.groundUniforms.light, this.light);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.groundDiffuseTex);
       gl.activeTexture(gl.TEXTURE1);
@@ -1136,19 +1442,17 @@ export class Renderer {
       gl.bindVertexArray(this.groundTexVao);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       gl.disable(gl.DEPTH_TEST);
-    } else {
-      gl.disable(gl.DEPTH_TEST);
-      gl.useProgram(this.flatProg);
-      gl.uniform2f(this.uFlatRes, canvas.width, canvas.height);
-      uploadLight(gl, this.uFlatLight, this.light);
+    } else if (this.groundVerts > 0) {
+      gl.useProgram(this.flatGroundProg);
       gl.bindVertexArray(this.groundVao);
       gl.drawArrays(gl.TRIANGLES, 0, this.groundVerts);
     }
 
-    // 2. Contact shadows: blended, still no depth interaction — they lie
-    //    flat on the ground and every sprite composites over them.
+    // 2. Contact shadows: color-only (g-buffer/depth outputs are
+    //    zero-weight), still no depth interaction.
     if (shadows && shadows.verts > 0) {
       gl.enable(gl.BLEND);
+      gl.useProgram(this.flatShadowProg);
       gl.bindVertexArray(this.shadowVao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.shadowVbo);
       gl.bufferData(gl.ARRAY_BUFFER, shadows.data, gl.DYNAMIC_DRAW);
@@ -1157,15 +1461,13 @@ export class Renderer {
 
     // 3. Meshes (skinned characters): opaque, depth WRITE + test — every
     //    sprite/character overlap below resolves pixel-accurately against
-    //    this depth. Skipped entirely when nothing is placed: no writes,
-    //    no state, the frame matches the pre-mesh renderer exactly.
+    //    this depth. Skipped entirely when nothing is placed.
     if (meshes.length > 0 && this.meshIndexCount > 0) {
       const gpu = this.meshSkinning === 'gpu';
       const u = this.meshUniforms[this.meshSkinning];
       gl.enable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
       gl.useProgram(this.meshProgram);
-      uploadLight(gl, u.light, this.light);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.meshAlbedoTex);
       gl.bindVertexArray(this.meshVao);
@@ -1192,8 +1494,6 @@ export class Renderer {
       gl.enable(gl.BLEND);
       gl.enable(gl.DEPTH_TEST);
       gl.useProgram(this.spriteProg);
-      gl.uniform2f(this.uSpriteRes, canvas.width, canvas.height);
-      uploadLight(gl, this.uSpriteLight, this.light);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.renderTex!);
       gl.activeTexture(gl.TEXTURE1);
@@ -1203,20 +1503,66 @@ export class Renderer {
       gl.bufferData(gl.ARRAY_BUFFER, instances, gl.DYNAMIC_DRAW);
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
       gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.BLEND);
     }
 
-    // 5. Overlay (hover highlight, height gizmo): blended editor chrome.
+    // ---- deferred light pass over the default framebuffer ----
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, w, h);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(this.lightProg);
+    gl.uniform2f(this.lightUniforms.res, w, h);
+    gl.uniform4f(this.lightUniforms.view, view.zoom, view.zoom, view.panX, view.panY);
+    gl.uniform3f(this.lightUniforms.proj, this.meshFrame[0], this.meshFrame[1], this.meshFrame[2]);
+    uploadLight(gl, this.lightUniforms.light, this.light);
+    const active = this.lightsEnabled
+      ? Math.min(this.pointLights.length, MAX_POINT_LIGHTS)
+      : 0;
+    gl.uniform1i(this.lightUniforms.pointCount, active);
+    gl.uniform1f(this.lightUniforms.lightsOn, this.lightsEnabled ? 1 : 0);
+    if (active > 0) {
+      // std140: each vec4 array is contiguous — all 16 posRadius entries,
+      // then all 16 colorEnergy entries.
+      const block = new Float32Array(MAX_POINT_LIGHTS * 8);
+      for (let i = 0; i < active; i++) {
+        const l = this.pointLights[i];
+        block[i * 4] = l.pos[0];
+        block[i * 4 + 1] = l.pos[1];
+        block[i * 4 + 2] = l.pos[2];
+        block[i * 4 + 3] = l.radius;
+        block[(MAX_POINT_LIGHTS + i) * 4] = l.color[0];
+        block[(MAX_POINT_LIGHTS + i) * 4 + 1] = l.color[1];
+        block[(MAX_POINT_LIGHTS + i) * 4 + 2] = l.color[2];
+        block[(MAX_POINT_LIGHTS + i) * 4 + 3] = l.energy;
+      }
+      gl.bindBuffer(gl.UNIFORM_BUFFER, this.pointUbo);
+      gl.bufferSubData(gl.UNIFORM_BUFFER, 0, block);
+    }
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.albedoTex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.gbufTex);
+    gl.bindVertexArray(this.lightVao);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    // 5. Overlay (hover highlight, height gizmo): unlit editor chrome
+    //    blended over the finished frame.
     if (overlay && overlay.verts > 0) {
-      gl.useProgram(this.flatProg);
-      gl.uniform2f(this.uFlatRes, canvas.width, canvas.height);
+      gl.useProgram(this.overlayProg);
+      gl.uniform2f(this.uOverlayRes, w, h);
+      gl.uniform4f(this.uOverlayView, view.zoom, view.zoom, view.panX, view.panY);
       gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.bindVertexArray(this.highlightVao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.highlightVbo);
       gl.bufferData(gl.ARRAY_BUFFER, overlay.data, gl.DYNAMIC_DRAW);
       gl.drawArrays(gl.TRIANGLES, 0, overlay.verts);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.bindVertexArray(null);
+    } else {
+      gl.bindVertexArray(null);
     }
-
-    gl.bindVertexArray(null);
   }
 
   private groundVerts = 0;

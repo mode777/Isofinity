@@ -11,18 +11,20 @@ import { meshYawMat, Renderer, type FlatBatch, type MeshDraw } from '../../runti
 import { CharacterPlayer, bindPosePalette } from '../../runtime/meshAsset.js';
 import { surfaceHeightAt } from '../../runtime/surfaceSnap.js';
 import { depthOf } from '../../runtime/world.js';
-import { PRIMITIVE_KINDS } from '../document.js';
+import { DEFAULT_POINT_LIGHT, PRIMITIVE_KINDS } from '../document.js';
 import type { ViewTransform, WorldDocument } from '../document.js';
 import { fitTransform, panned, ZOOM_STEP, zoomAround } from '../bakeView.js';
-import { lightParams } from '../light.js';
+import { lightParams, srgbHexToLinearRgb } from '../light.js';
 import {
   CHARACTER_BRUSH_ID,
+  POINT_LIGHT_TOOL_ID,
   brushDirections,
   cycleBrushDir,
   eraseAt,
   placeAt,
   saveWorld,
   selectBrush,
+  selectLight,
   setBrushDir,
   setHeightLevel,
   setSnappedHeight,
@@ -357,6 +359,18 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
 
       const t = live.viewTransform ?? fitTransform(CANVAS_W, CANVAS_H, panel.w, panel.h);
       renderer.setLight(lightParams(live.light));
+      renderer.setLightsEnabled(live.light.enabled);
+      // Point lights: the deferred pass evaluates them; the editor converts
+      // the sRGB picker color to linear per channel, as the key light does.
+      const placedLights = live.world.listLights();
+      renderer.setPointLights(
+        placedLights.map((l) => ({
+          pos: [l.x + 0.5, l.y, l.z + 0.5] as [number, number, number],
+          radius: l.radius,
+          color: srgbHexToLinearRgb(l.colorHex),
+          energy: l.energy,
+        })),
+      );
 
       // Character asset: (re)upload when the document's parsed character
       // changes — one upload per asset, shared by every placement draw.
@@ -534,19 +548,55 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       if (ghost) emitShadow(ghost.x, ghost.y, ghost.z);
       if (charGhost && charGhost.y > GROUND_EPSILON) emitShadow(charGhost.x, charGhost.y, charGhost.z);
 
-      // Overlays: the height gizmo for an off-ground ghost (raised or
-      // sunk), else the eraser's unit-cell hover highlight.
-      overlayBatch.reset();
-      if (ghost && Math.abs(ghost.y) > GROUND_EPSILON) {
-        emitGizmo(ghost.x, ghost.y, ghost.z);
-      } else if (hover && !ghost && live.tool === 'eraser') {
-        const [gx, gz] = hover.ground;
-        const [ax, ay] = toPx(gx - 0.5, gz - 0.5);
-        const [bx, by] = toPx(gx + 0.5, gz - 0.5);
-        const [cx, cy] = toPx(gx + 0.5, gz + 0.5);
-        const [dx, dy] = toPx(gx - 0.5, gz + 0.5);
-        overlayBatch.quad(ax, ay, bx, by, cx, cy, dx, dy, HIGHLIGHT_COLOR, 0.35);
+    // Ring editor chrome for point lights: a ground/horizontal circle at
+    // the light's position and radius (projected like the contact-shadow
+    // ellipse), plus a center dot.
+    const lightRing = (
+      x: number,
+      y: number,
+      z: number,
+      radius: number,
+      alpha: number,
+    ): void => {
+      const [cx, cy] = toPx(x, z, y);
+      let prev: [number, number] | null = null;
+      for (let i = 0; i <= SHADOW_SEGMENTS; i++) {
+        const t = (i / SHADOW_SEGMENTS) * Math.PI * 2;
+        const [px, py] = toPx(x + radius * Math.cos(t), z + radius * Math.sin(t), y);
+        if (prev !== null) {
+          overlayBatch.vert(cx, cy, HIGHLIGHT_COLOR, alpha);
+          overlayBatch.vert(prev[0], prev[1], HIGHLIGHT_COLOR, alpha);
+          overlayBatch.vert(px, py, HIGHLIGHT_COLOR, alpha);
+        }
+        prev = [px, py];
       }
+      const d = 4;
+      overlayBatch.quad(cx - d, cy - d, cx + d, cy - d, cx + d, cy + d, cx - d, cy + d, HIGHLIGHT_COLOR, Math.min(1, alpha + 0.15));
+    };
+
+    // Overlays: the height gizmo for an off-ground ghost (raised or
+    // sunk), else the eraser's unit-cell hover highlight — plus the
+    // point-light tool's ghost ring and the selected light's highlight.
+    overlayBatch.reset();
+    if (ghost && Math.abs(ghost.y) > GROUND_EPSILON) {
+      emitGizmo(ghost.x, ghost.y, ghost.z);
+    } else if (hover && !ghost && live.tool === 'eraser') {
+      const [gx, gz] = hover.ground;
+      const [ax, ay] = toPx(gx - 0.5, gz - 0.5);
+      const [bx, by] = toPx(gx + 0.5, gz - 0.5);
+      const [cx, cy] = toPx(gx + 0.5, gz + 0.5);
+      const [dx, dy] = toPx(gx - 0.5, gz + 0.5);
+      overlayBatch.quad(ax, ay, bx, by, cx, cy, dx, dy, HIGHLIGHT_COLOR, 0.35);
+    }
+    if (hover && live.tool === POINT_LIGHT_TOOL_ID) {
+      const [gx, gz] = hover.ground;
+      const y = effectiveHeight(live, hover.px[0], hover.px[1]);
+      lightRing(gx, y, gz, DEFAULT_POINT_LIGHT.radius, 0.6);
+    }
+    if (live.selectedLightId !== null) {
+      const sel = live.world.lightAt(live.selectedLightId);
+      if (sel) lightRing(sel.x + 0.5, sel.y, sel.z + 0.5, sel.radius, 0.85);
+    }
 
       renderer.render(
         instances,
@@ -691,6 +741,9 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           if (!pt) return;
           hoverRef.current = pt;
           publishSnapHeight(pt.px);
+          // Point lights place on tap, not drag (a drag would spam lights).
+          const live = useEditor.getState().docs[doc.docId];
+          if (live?.kind === 'world' && live.tool === POINT_LIGHT_TOOL_ID) return;
           const a = anchorAt(pt.px);
           placeAt(doc.docId, a.x, a.z, a.y);
         }
@@ -701,6 +754,9 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       hoverRef.current = pt;
       publishSnapHeight(pt.px);
       if (e.buttons & 1) {
+        // Point lights place on click, not drag (a drag would spam lights).
+        const live = useEditor.getState().docs[doc.docId];
+        if (live?.kind === 'world' && live.tool === POINT_LIGHT_TOOL_ID) return;
         const a = anchorAt(pt.px);
         placeAt(doc.docId, a.x, a.z, a.y);
       }
@@ -740,6 +796,26 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         eraseAt(doc.docId, pt.ground[0], pt.ground[1]);
       } else if (e.button === 0) {
         publishSnapHeight(pt.px);
+        const live = useEditor.getState().docs[doc.docId];
+        if (live?.kind === 'world' && live.tool === POINT_LIGHT_TOOL_ID) {
+          // Clicking on (near) a placed light selects it for the
+          // properties panel; clicking elsewhere places a new light.
+          const PICK_PX = 14;
+          let picked: number | null = null;
+          for (const l of live.world.listLights()) {
+            const [lx, ly] = toPx(l.x + 0.5, l.z + 0.5, l.y);
+            const dx = lx - pt.px[0];
+            const dy = ly - pt.px[1];
+            if (dx * dx + dy * dy <= PICK_PX * PICK_PX) {
+              picked = l.id;
+              break;
+            }
+          }
+          if (picked !== null) {
+            selectLight(doc.docId, picked);
+            return;
+          }
+        }
         const a = anchorAt(pt.px);
         placeAt(doc.docId, a.x, a.z, a.y);
       }
@@ -1044,6 +1120,13 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           onClick={() => setTool(doc.docId, 'eraser')}
         >
           Eraser
+        </button>
+        <button
+          className={activeTool === POINT_LIGHT_TOOL_ID ? 'active' : ''}
+          title="Point light — click places a light (position, radius, energy, color in the properties panel), click a light to select it, right-click erases"
+          onClick={() => setTool(doc.docId, POINT_LIGHT_TOOL_ID)}
+        >
+          Light
         </button>
         <button
           className={doc.surfaceSnap ? 'active' : ''}
