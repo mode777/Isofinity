@@ -43,6 +43,14 @@ The offscreen FBO carries:
   "treat baked light as AO" formalized); for meshes the environment-lit
   tonemapped texel the mesh shader already produces before `shade()`;
   for ground the material albedo with the arm map's AO in alpha.
+- **As-built addition — RT3 (RGBA16F, depth in r)**: blending needs each
+  attachment's own alpha as its weight, so the linear depth cannot live in
+  the g-buffer's alpha (it holds the blend weight there); it gets its own
+  attachment. RGBA16F rather than R16F: R16F renderability is covered only
+  by `EXT_color_buffer_float`, while RGBA16F also renders under
+  `EXT_color_buffer_half_float` — browsers with half-float-only support
+  would otherwise end up with an incomplete framebuffer and a silently
+  black world. The constructor accepts either extension.
 
 *Rejected a separate flat-color composite attachment (RT0 = shaded color)*:
 ambient is evaluated in the deferred pass from g-buffer normals, so an

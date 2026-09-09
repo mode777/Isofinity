@@ -137,7 +137,7 @@ the pointer for the real semantics.
   CPU (`src/shared/iso.ts`).
 - **Screen-space g-buffer** — the geometry pass's offscreen targets:
   RT0 (RGBA8 display texel = albedo·AO), RT1 (RGBA16F: world normal +
-  linear depth — the per-sprite bake g-buffer layout), RT2 (R16F: linear
+  linear depth — the per-sprite bake g-buffer layout), RT2 (RGBA16F: linear depth in r,
   depth). Blending is straight alpha per attachment; the grounding shadow
   maps to the ground plane (up normal, ground depth).
 - **Deferred light pass** — one fullscreen pass applying every dynamic

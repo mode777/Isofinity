@@ -124,6 +124,7 @@ uniform float uSaturation;
 in vec3 vWorldPos;
 layout(location = 0) out vec4 outAlbedo;
 layout(location = 1) out vec4 outGbuf;
+layout(location = 2) out vec4 outDepth;
 ${COLOR_CHUNK}
 ${ACES_GLSL}
 ${SH_IRRADIANCE_GLSL}
@@ -145,6 +146,7 @@ void main() {
   float lum = dot(texel, vec3(0.2126, 0.7152, 0.0722));
   outAlbedo = vec4(mix(vec3(lum), texel, uSaturation), 1.0);
   outGbuf = vec4(N, dot(VIEW_DIR, vWorldPos));
+  outDepth = vec4(dot(VIEW_DIR, vWorldPos), 0.0, 0.0, 1.0);
   gl_FragDepth = uDepthA * dot(VIEW_DIR, vWorldPos) + uDepthB;
 }
 `;
@@ -438,8 +440,9 @@ void main() {
 const LIGHT_FRAG = `#version 300 es
 precision highp float;
 precision highp int;
-uniform sampler2D uGbuf;    // RT1: rgb = world normal, a = linear depth
-uniform sampler2D uAlbedo;  // RT2: rgb = display texel (albedo·AO), a = AO hook
+uniform sampler2D uGbuf;    // RT1: rgb = world normal, a = blend weight
+uniform sampler2D uAlbedo;  // RT0: rgb = display texel (albedo·AO), a = AO hook
+uniform sampler2D uDepthLin; // RT2: r = linear reference-plane depth
 uniform vec2 uRes;
 uniform vec4 uView;   // view transform: scale.xy, offset.xy (backing px)
 uniform vec3 uProj;   // world-image origin px (x, y), px per unit
@@ -466,10 +469,11 @@ void main() {
   vec3 N = normalize(g.rgb);
   // ADR 0001: full world position from the pixel coordinate plus one
   // scalar (the g-buffer depth) — the fixed-camera orthonormal frame.
+  float d = texelFetch(uDepthLin, uv, 0).r;
   vec2 worldPx = vec2((gl_FragCoord.x - uView.z) / uView.x,
                       (uRes.y - gl_FragCoord.y - uView.w) / uView.y);
   vec2 s = vec2(worldPx.x - uProj.x, uProj.y - worldPx.y) / uProj.z;
-  vec3 wp = SCREEN_RIGHT * s.x + SCREEN_UP * s.y + VIEW_DIR * g.a;
+  vec3 wp = SCREEN_RIGHT * s.x + SCREEN_UP * s.y + VIEW_DIR * d;
   vec3 factor = uAmbient + uKeyLight * max(dot(N, uLightDir), 0.0);
   for (int i = 0; i < ${MAX_POINT_LIGHTS}; i++) {
     if (i >= uPointCount) break;
@@ -709,8 +713,12 @@ export class Renderer {
     if (!gl) {
       throw new Error('WebGL2 unavailable');
     }
-    if (!gl.getExtension('EXT_color_buffer_float')) {
-      throw new Error('EXT_color_buffer_float unavailable');
+    // Half-float rendering: the deferred geometry targets are RGBA16F.
+    // EXT_color_buffer_float covers it everywhere; Safari-lineage browsers
+    // ship only EXT_color_buffer_half_float — accept either.
+    if (!gl.getExtension('EXT_color_buffer_float') &&
+        !gl.getExtension('EXT_color_buffer_half_float')) {
+      throw new Error('float render targets unavailable (EXT_color_buffer_float / half_float)');
     }
     this.gl = gl;
 
@@ -759,6 +767,7 @@ export class Renderer {
     gl.useProgram(this.lightProg);
     gl.uniform1i(lu('uGbuf'), 1);
     gl.uniform1i(lu('uAlbedo'), 0);
+    gl.uniform1i(lu('uDepthLin'), 2);
     const blockIndex = gl.getUniformBlockIndex(this.lightProg, 'PointLights');
     gl.uniformBlockBinding(this.lightProg, blockIndex, 0);
     this.pointUbo = gl.createBuffer()!;
@@ -795,10 +804,14 @@ export class Renderer {
     this.shadowVbo = gl.createBuffer()!;
     gl.bindVertexArray(this.shadowVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.shadowVbo);
-    gl.enableVertexAttribArray(aFlatPos);
-    gl.vertexAttribPointer(aFlatPos, 2, gl.FLOAT, false, 24, 0);
-    gl.enableVertexAttribArray(aFlatColor);
-    gl.vertexAttribPointer(aFlatColor, 4, gl.FLOAT, false, 24, 8);
+    // The shadow program shares the flat vertex source, but query ITS OWN
+    // attribute locations — locations are per-program, not global.
+    const aShPos = gl.getAttribLocation(this.flatShadowProg, 'aPos');
+    const aShColor = gl.getAttribLocation(this.flatShadowProg, 'aColor');
+    gl.enableVertexAttribArray(aShPos);
+    gl.vertexAttribPointer(aShPos, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(aShColor);
+    gl.vertexAttribPointer(aShColor, 4, gl.FLOAT, false, 24, 8);
 
     // Overlay runs on its own flat program (aPos/aColor locations coincide
     // with the geometry flat batch's, but keep the layout self-contained).
@@ -1321,7 +1334,10 @@ export class Renderer {
 
     this.albedoTex = this.geoTexture(w, h, gl.RGBA8);
     this.gbufTex = this.geoTexture(w, h, gl.RGBA16F);
-    this.depthLinTex = this.geoTexture(w, h, gl.R16F);
+    // RGBA16F (depth in r), not R16F: R16F renderability is only covered
+    // by EXT_color_buffer_float, while RGBA16F also renders under
+    // EXT_color_buffer_half_float.
+    this.depthLinTex = this.geoTexture(w, h, gl.RGBA16F);
     this.geoDepthRbo = gl.createRenderbuffer();
     gl.bindRenderbuffer(gl.RENDERBUFFER, this.geoDepthRbo);
     gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
@@ -1333,6 +1349,11 @@ export class Renderer {
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, this.depthLinTex, 0);
     gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.geoDepthRbo);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      console.error(
+        `deferred geometry framebuffer incomplete (status ${gl.checkFramebufferStatus(gl.FRAMEBUFFER)})`,
+      );
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
@@ -1342,10 +1363,8 @@ export class Renderer {
     gl.bindTexture(gl.TEXTURE_2D, tex);
     if (internal === gl.RGBA8) {
       gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    } else if (internal === gl.RGBA16F) {
-      gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
     } else {
-      gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, gl.RED, gl.HALF_FLOAT, null);
+      gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
     }
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
@@ -1543,6 +1562,8 @@ export class Renderer {
     gl.bindTexture(gl.TEXTURE_2D, this.albedoTex);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.gbufTex);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.depthLinTex);
     gl.bindVertexArray(this.lightVao);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 

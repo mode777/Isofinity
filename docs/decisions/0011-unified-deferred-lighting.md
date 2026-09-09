@@ -20,7 +20,7 @@ The world compositor (`src/runtime/renderer.ts`) is a two-phase frame:
 1. A geometry pass draws ground, meshes and sprites into an offscreen MRT
    set — RT0 (RGBA8): display-referred albedo·AO texel; RT1 (RGBA16F):
    world-space normal + linear reference-plane depth (the bake g-buffer
-   layout); RT2 (R16F): linear depth. A sprite's RT0 texel is its baked
+   layout); RT2 (RGBA16F, depth in r — RGBA16F rather than R16F so the set also renders under EXT_color_buffer_half_float). A sprite's RT0 texel is its baked
    render texel — its baked light IS its albedo·AO (ADR 0003's trade,
    formalized); meshes and the ground bake their SH-environment ambient
    into the texel at write time.

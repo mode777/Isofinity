@@ -336,7 +336,7 @@ The compositor is **two-phase** (ADR 0011): a geometry pass draws ground,
 meshes and sprites into an offscreen framebuffer — a screen-space g-buffer
 (RT1, RGBA16F: world normal + linear reference-plane depth, the same
 channel layout as the per-sprite bake g-buffer), a display-referred
-albedo·AO surface (RT0, RGBA8), and a linear-depth texture (RT2, R16F) —
+albedo·AO surface (RT0, RGBA8), and a linear-depth texture (RT2, RGBA16F, depth in r — RGBA16F, not R16F, so it also renders under EXT_color_buffer_half_float) —
 and one fullscreen **deferred light pass** applies every dynamic light
 over the composite:
 
@@ -448,7 +448,7 @@ world data itself stays in world-image pixels. The flat batches (ground,
 shadows, overlay) carry per-vertex RGBA (`[x, y, r, g, b, a]`, 6 floats
 per vertex). The offscreen geometry framebuffer (recreated on resize)
 holds RT0 (RGBA8 display texel = albedo·AO), RT1 (RGBA16F: world normal +
-linear depth — the bake g-buffer layout), and RT2 (R16F: linear depth for
+linear depth — the bake g-buffer layout), and RT2 (RGBA16F: linear depth in r, for
 the light pass's position reconstruction); blending is per-attachment
 straight alpha (each output's own alpha is its blend weight), with the
 light pass sampling all three afterwards:
