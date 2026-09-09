@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import type { WorldDocument } from '../document.js';
 import {
+  removeLight,
   selectGroundMaterial,
   selectGroundMaterialFile,
   selectLight,
@@ -35,9 +36,39 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
 
   const selectedLight =
     doc.selectedLightId !== null ? doc.world.lightAt(doc.selectedLightId) : null;
+  const placedLights = doc.world.listLights();
 
   return (
     <>
+      <Section title="Point lights">
+        {placedLights.length === 0 ? (
+          <p className="hint">none placed — pick the Light tool and click the world</p>
+        ) : (
+          placedLights.map((l) => (
+            <div
+              key={l.id}
+              style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}
+            >
+              <button
+                style={{ flex: 1, textAlign: 'left' }}
+                className={doc.selectedLightId === l.id ? 'active' : ''}
+                title="Select this light (edits below, highlight ring in the viewport)"
+                onClick={() => selectLight(doc.docId, l.id)}
+              >
+                ({(l.x + 0.5).toFixed(1)}, {l.y.toFixed(1)}, {(l.z + 0.5).toFixed(1)})
+                {' · r'}{l.radius.toFixed(1)}
+              </button>
+              <button
+                title="Delete this light"
+                onClick={() => removeLight(doc.docId, l.id)}
+              >
+                ×
+              </button>
+            </div>
+          ))
+        )}
+      </Section>
+
       {selectedLight ? (
         <Section title="Point light">
           <SliderRow
@@ -85,7 +116,7 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
             onChange={(v) => setLightPlacement(doc.docId, selectedLight.id, { y: v })}
           />
           <button onClick={() => selectLight(doc.docId, null)}>Deselect</button>
-          <p className="hint">light tool: click a light to select, elsewhere to place</p>
+          <p className="hint">pick a light above or click one in the viewport with the Light tool</p>
         </Section>
       ) : null}
 

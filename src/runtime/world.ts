@@ -126,6 +126,14 @@ export class World {
     return this.lightItems.find((l) => l.id === id) ?? null;
   }
 
+  /** Remove a placed light by id; true when one was removed. */
+  removeLight(id: number): boolean {
+    const k = this.lightItems.findIndex((l) => l.id === id);
+    if (k < 0) return false;
+    this.lightItems.splice(k, 1);
+    return true;
+  }
+
   removeAt(x: number, z: number): Placement | null {
     let best = -1;
     for (let k = 0; k < this.items.length; k++) {

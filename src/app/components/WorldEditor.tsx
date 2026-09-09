@@ -571,7 +571,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         prev = [px, py];
       }
       const d = 4;
-      overlayBatch.quad(cx - d, cy - d, cx + d, cy - d, cx + d, cy + d, cx - d, cy + d, HIGHLIGHT_COLOR, Math.min(1, alpha + 0.15));
+      overlayBatch.quad(cx - d, cy - d, cx + d, cy - d, cx + d, cy + d, cx - d, cy + d, HIGHLIGHT_COLOR, Math.min(1, alpha + 0.1));
     };
 
     // Overlays: the height gizmo for an off-ground ghost (raised or
@@ -591,11 +591,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     if (hover && live.tool === POINT_LIGHT_TOOL_ID) {
       const [gx, gz] = hover.ground;
       const y = effectiveHeight(live, hover.px[0], hover.px[1]);
-      lightRing(gx, y, gz, DEFAULT_POINT_LIGHT.radius, 0.6);
+      lightRing(gx, y, gz, DEFAULT_POINT_LIGHT.radius, 0.25);
     }
     if (live.selectedLightId !== null) {
       const sel = live.world.lightAt(live.selectedLightId);
-      if (sel) lightRing(sel.x + 0.5, sel.y, sel.z + 0.5, sel.radius, 0.85);
+      if (sel) lightRing(sel.x + 0.5, sel.y, sel.z + 0.5, sel.radius, 0.4);
     }
 
       renderer.render(

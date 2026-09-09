@@ -1039,7 +1039,22 @@ export function setLightPlacement(
       (clean as Record<string, number>)[k] = v;
     }
   }
-  doc.world.updateLight(id, clean);
+  // Publish through the store (not just markDirty, which no-ops when the
+  // document is already dirty) so the panel re-renders with the new values.
+  update(docId, (d) => {
+    d.world.updateLight(id, clean);
+  });
+  ed().markDirty(docId);
+}
+
+/** Remove a placed point light by id (deselects it when selected). */
+export function removeLight(docId: string, id: number): void {
+  const doc = worldDoc(docId);
+  if (!doc || !doc.world.lightAt(id)) return;
+  update(docId, (d) => {
+    d.world.removeLight(id);
+    if (d.selectedLightId === id) d.selectedLightId = null;
+  });
   ed().markDirty(docId);
 }
 
