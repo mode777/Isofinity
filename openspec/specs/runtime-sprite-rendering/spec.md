@@ -135,13 +135,18 @@ brightness of the ambient fill comes solely from the picked color.
 
 ### Requirement: Every sprite displays the shaded prerendered image
 
-The runtime SHALL display every placed sprite by sampling its prerendered
-lit image and shading it with the dynamic key + ambient lights
-(multiplicatively, over the baked g-buffer normal), regardless of where the
-sprite came from (boot bake or bundle). The ambient term SHALL be the
-per-channel ambient color (see ADDED requirement above). The global
-Dynamic light switch SHALL pin shading to identity when disabled (pure
-prerendered image).
+The runtime SHALL display every placed sprite from its prerendered lit
+image, shaded by the world's dynamic lights through the unified deferred
+light pass: the sprite's geometry-pass draw writes its baked render texel
+as the albedo·AO surface and its baked g-buffer normal and depth (plus the
+placement's world offset) into the screen-space g-buffer, and the deferred
+pass applies the multiplicative factor (ambient + key + point lights) over
+the baked normal. The ambient term SHALL be the per-channel ambient color
+evaluated in the deferred pass (see the deferred-lighting capability). The
+global Dynamic light switch SHALL pin shading to identity when disabled
+(pure prerendered image, light pass skipped). Sprite shading SHALL be
+pixel-equivalent to the forward multiplicative model it replaces for every
+light state the forward model supports.
 
 #### Scenario: Boot-baked sprites show rendered images
 
@@ -155,6 +160,12 @@ prerendered image).
 - **THEN** all placed sprites — boot-baked and bundle-loaded alike —
   respond identically to the change
 
+#### Scenario: No point lights means no sprite shading change
+
+- **WHEN** a world without point lights renders under the same key/ambient
+  state before and after this change
+- **THEN** sprite pixels shade identically (the deferred factor reproduces
+  the forward multiplicative formula exactly)
 ### Requirement: Placements render their direction's view
 
 Every placement SHALL be drawn from the baked view matching its placement
@@ -306,17 +317,18 @@ The sprite compositor SHALL recognize a third pixel class in the render
 pass — pixels whose g-buffer value is empty (zero-length normal) but whose
 render alpha is positive and whose color is the dark grounding tint — and
 composite them as grounding shadows: alpha-blended without key/ambient
-shading, without writing the placement's object depth. Object pixels
+shading of the object texel, without writing the placement's object depth
+to the shared depth buffer. In the screen-space g-buffer a grounding-shadow
+pixel SHALL map to the ground plane: it writes the true ground-plane depth
+at that pixel (the analytic intersection of the pixel's view ray with the
+placement's ground cell plane, using the shared fixed-camera constants) and
+world-up as normal, so the deferred pass lights it as floor. Object pixels
 (g-buffer non-empty) and fully empty pixels SHALL composite exactly as
 before; g-buffer-driven occlusion, hit-testing and discard semantics SHALL
 be unchanged.
 
-A grounding-shadow pixel SHALL write its **true ground-plane depth**: the
-analytic intersection of the pixel's view ray with the placement's ground
-cell plane, using the shared fixed-camera constants (a GLSL twin of the
-CPU ground unprojection) — never the object's depth and never no depth.
-With the existing painter-sorted batch and LEQUAL depth test this makes
-the depth buffer resolve every interleaving pixel-accurately:
+With the existing painter-sorted batch and LEQUAL depth test this keeps the
+depth buffer resolving every interleaving pixel-accurately:
 
 - a farther sprite's opaque pixels are darkened by the shadow drawn over
   them (the shadow's ground depth is nearer and passes the test),
@@ -352,7 +364,6 @@ the depth buffer resolve every interleaving pixel-accurately:
 - **WHEN** the Dynamic light switch pins shading to identity
 - **THEN** the grounding shadow remains composited (it is part of the
   prerendered image, like the object's own baked light)
-
 ### Requirement: Raised placements suppress the baked grounding shadow
 
 A placement whose height is not the ground level SHALL NOT composite its
