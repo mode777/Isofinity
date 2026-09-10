@@ -86,3 +86,29 @@ cover the implementation sweep inside it.
    slider moves.
 4. `docs/runtime.md` Lighting/Worlds sections; spec deltas for
    `world-persistence` / `sun-position` as touched.
+
+## Add a world-editor tool or placement interaction
+
+1. State: is it persisted (layer 1) or in-memory (layer 2)? Tools,
+   selection, brush defaults and view state are layer 2 — say "never
+   written into world files" (ADR 0006). Give anything selectable a
+   stable runtime id (`src/runtime/world.ts`) so selection survives
+   erase/undo, which preserve object identity.
+2. Pure logic in `src/runtime/` (picking, geometry, depth) so it is
+   Node-testable; store actions in `src/app/store/world.ts` (validate
+   there, not in the component). Mutations that a user would undo record
+   one command on the history stack — a drag is one command, not one per
+   pointer-move.
+3. Viewport: pointer handling + overlay chrome in
+   `src/app/components/WorldEditor.tsx`. Left button acts on the
+   placement, middle-drag pans, right-click erases or clears (per tool);
+   Escape clears selection. Overlay chrome never serializes and never
+   dirties.
+4. Panel: per-placement properties in
+   `src/app/components/WorldProperties.tsx` (reuse `controls.tsx` rows).
+   Keep the toolbar to tool buttons and shared modes.
+5. Verifier: a `src/runtime/<feature>-verify.ts` + `npm run verify:<x>`
+   script when the logic is CPU-testable; otherwise note the browser
+   check for the user. Update `docs/runtime.md`, `docs/glossary.md`,
+   `docs/roadmap.md`, and add an ADR if the approach settles a durable
+   trade-off.

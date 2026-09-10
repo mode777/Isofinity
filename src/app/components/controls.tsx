@@ -87,6 +87,58 @@ export function NumberRow(props: {
   );
 }
 
+/**
+ * Label + precise numeric text field using the editor's commit
+ * conventions: Enter/focus-loss applies the entered finite value
+ * (optionally clamped to `min`/`max`, negative values allowed), empty or
+ * non-numeric input reverts, Escape cancels editing.
+ */
+export function PreciseNumberRow(props: {
+  label: string;
+  value: number;
+  format?: (v: number) => string;
+  min?: number;
+  max?: number;
+  onCommit: (v: number) => void;
+}): React.JSX.Element {
+  const { label, value, format, min, max, onCommit } = props;
+  const [editing, setEditing] = useState<string | null>(null);
+  const commit = (): void => {
+    if (editing === null) return;
+    const text = editing.trim().replace(',', '.');
+    setEditing(null);
+    if (text === '') return;
+    let parsed = Number(text);
+    if (!Number.isFinite(parsed)) return;
+    if (min !== undefined) parsed = Math.max(min, parsed);
+    if (max !== undefined) parsed = Math.min(max, parsed);
+    onCommit(parsed);
+  };
+  return (
+    <label className="row">
+      <span className="row-label">{label}</span>
+      <input
+        className="value-input"
+        type="text"
+        inputMode="decimal"
+        aria-label={label}
+        value={editing ?? (format ? format(value) : String(value))}
+        onFocus={() => setEditing(String(value))}
+        onChange={(e) => setEditing(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commit();
+          } else if (e.key === 'Escape') {
+            setEditing(null);
+          }
+        }}
+      />
+    </label>
+  );
+}
+
 export function ColorRow(props: {
   label: string;
   value: string;

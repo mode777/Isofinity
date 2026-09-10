@@ -160,6 +160,17 @@ list when a change lands (and prune it — history belongs in the archives).
   Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y, dirty marking on undo/redo, ids stable
   across undo. In-memory only per ADR 0006 — no format impact.
 
+- World-editor Select tool — select a sprite, character, or point light
+  (click; Escape/empty-click deselects) and drag it on the ground plane as
+  one undoable move. Sprite picking is pixel-accurate against the baked
+  g-buffer silhouette and per-fragment depth on the CPU (ADR 0012,
+  `src/runtime/selection.ts`, `npm run verify:selection`); meshes/lights
+  pick by screen-space proximity. The properties panel gains a Brush
+  section (height, shadow, direction — moved out of the toolbar; `E` still
+  cycles direction) and a selected-placement section (position, height,
+  shadow; the light editor for lights). Selection is in-memory per
+  ADR 0006; no format impact.
+
 ## In progress
 
 - Dynamic meshes in the compositor (ADR 0007) — skinned, animated

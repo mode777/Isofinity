@@ -221,6 +221,12 @@ export function defaultGroundState(): GroundState {
   return { material: null, tileScale: DEFAULT_GROUND_TILE_SCALE, maps: null };
 }
 
+/** A selected placement's identity (kind + stable placement id). */
+export interface PlacementRef {
+  kind: 'sprite' | 'mesh' | 'light';
+  id: number;
+}
+
 export interface WorldDocument {
   kind: 'world';
   docId: string;
@@ -305,11 +311,12 @@ export interface WorldDocument {
    */
   viewTransform: ViewTransform | null;
   /**
-   * The point-light placement the properties panel edits (its stable
-   * placement id); null = none selected. In-memory editor state only —
-   * never written into world files.
+   * The placement the Select tool (or the point-light tool's click) has
+   * selected: a sprite, mesh, or point light by stable placement id; null
+   * = none. In-memory editor state only — never written into world files
+   * (ADR 0006).
    */
-  selectedLightId: number | null;
+  selection: PlacementRef | null;
   /**
    * Undo/redo history of this document's mutating world operations
    * (place/erase sprites, meshes, point lights and light edits). Lives

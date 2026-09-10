@@ -1,6 +1,14 @@
 import { VIEW_DIR, type ViewSlot } from '../shared/iso.js';
 
 export interface Placement {
+  /**
+   * Stable per-document id, allocated from the same counter as mesh and
+   * light placements. Runtime-only: never serialized into world files
+   * (ADR 0006), so selection can name a sprite placement the way it names
+   * a mesh or light. Object identity is preserved across erase/undo, so
+   * the id stays valid.
+   */
+  id: number;
   x: number;
   z: number;
   /**
@@ -81,17 +89,18 @@ export class World {
   private items: Placement[] = [];
   private meshItems: MeshPlacement[] = [];
   private lightItems: LightPlacement[] = [];
-  private nextMeshId = 1;
+  private nextId = 1;
 
   place(x: number, z: number, primId: string, y = 0, dir: ViewSlot = 'n', shadow = 1): Placement {
-    const p: Placement = { x, z, y, primId, dir, shadow, key: depthOf(x, y, z) };
+    const id = this.nextId++;
+    const p: Placement = { id, x, z, y, primId, dir, shadow, key: depthOf(x, y, z) };
     this.items.push(p);
     return p;
   }
 
   /** Place a dynamic mesh; returns its stable placement id. */
   placeMesh(meshId: string, x: number, z: number, y = 0, yaw = 0): number {
-    const id = this.nextMeshId++;
+    const id = this.nextId++;
     this.meshItems.push({ id, meshId, x, z, y, yaw, key: depthOf(x, y, z) });
     return id;
   }
@@ -108,7 +117,7 @@ export class World {
     energy: number,
     colorHex: string,
   ): LightPlacement {
-    const id = this.nextMeshId++;
+    const id = this.nextId++;
     const l: LightPlacement = { id, x, z, y, radius, energy, colorHex, key: depthOf(x, y, z) };
     this.lightItems.push(l);
     return l;
@@ -127,6 +136,33 @@ export class World {
 
   lightAt(id: number): LightPlacement | null {
     return this.lightItems.find((l) => l.id === id) ?? null;
+  }
+
+  /** A sprite placement by id; null when none carries it. */
+  placementAt(id: number): Placement | null {
+    return this.items.find((p) => p.id === id) ?? null;
+  }
+
+  /** Update a sprite placement's position/height/shadow; re-keys its depth. */
+  updatePlacement(
+    id: number,
+    patch: Partial<Pick<Placement, 'x' | 'z' | 'y' | 'shadow'>>,
+  ): void {
+    const p = this.items.find((item) => item.id === id);
+    if (!p) return;
+    Object.assign(p, patch);
+    p.key = depthOf(p.x, p.y, p.z);
+  }
+
+  /** Update a placed mesh's position/height; re-keys its sort depth. */
+  updateMesh(
+    id: number,
+    patch: Partial<Pick<MeshPlacement, 'x' | 'z' | 'y' | 'yaw'>>,
+  ): void {
+    const m = this.meshItems.find((item) => item.id === id);
+    if (!m) return;
+    Object.assign(m, patch);
+    m.key = depthOf(m.x, m.y, m.z);
   }
 
   /** A placed mesh by id; null when none carries it. */

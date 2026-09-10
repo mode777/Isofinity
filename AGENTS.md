@@ -51,11 +51,15 @@ it as the reference architecture; design against it.
   extraction, pose-engine palettes, SH probe vs a numerical integral).
   Run after touching `src/runtime/meshAsset.ts` or
   `src/runtime/shProbe.ts`.
+- `npm run verify:selection` — Node-runnable world-editor selection checks
+  (`src/runtime/selection-verify.ts`: sprite g-buffer silhouette picking,
+  mesh/light proximity, placement id/update bookkeeping). Run after
+  touching `src/runtime/selection.ts` or `src/runtime/world.ts`.
 - Browser harness: `npm run dev` → `/scratch-verify.html` — bake/GL
   checks and primitive bundle hashes for regression diffs. Needs a
   browser: update it when bake behavior changes, but leave the actual
   browser run to the user.
-- No test framework or lint setup; the two harnesses above plus
+- No test framework or lint setup; the Node verifiers above plus
   `npm run build` are the gates.
 - `openspec` is not on PATH; run it via `npx openspec ...` (verified:
   `npx openspec --version` → 1.11.0).

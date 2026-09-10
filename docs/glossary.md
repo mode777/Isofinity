@@ -88,8 +88,22 @@ the pointer for the real semantics.
   negative (sunk below the ground plane).
 - **Placement height** — a placement's signed world-unit offset from the
   ground plane (negative = sunk below it). The brush height is adjusted
-  with shift + vertical mouse move or set exactly in the toolbar's
-  height field (per-document in-memory editor state, never saved).
+  with shift + vertical mouse move or set exactly in the properties
+  panel's Brush section (per-document in-memory editor state, never saved).
+- **Selection** — the one placement the Select tool (or the Light tool's
+  click) has picked, held per world document as `{ kind, id }` in memory
+  (ADR 0006): highlighted in the viewport, edited in the properties
+  panel, moved by dragging, and cleared on Escape, an empty click, or
+  when erase/undo removes it.
+- **Select tool** — the world toolbar tool that selects and drags
+  placements (sprite, character, or point light) on the ground plane; its
+  drag is one undo command, and its panel edits are undoable.
+- **Pick (selection)** — resolving the placement under the cursor. Sprites
+  use their baked g-buffer silhouette and per-fragment depth (so
+  transparent margins are not selectable and the visually nearest wins);
+  meshes and lights use screen-space proximity. Not to be confused with
+  the ground-footprint test erase uses (`src/runtime/selection.ts`,
+  ADR 0012).
 - **Surface snap** — toolbar toggle: placements take their height from
   the visible surface under the cursor, computed CPU-side from the
   in-memory g-buffers; overrides the shift+wheel height.

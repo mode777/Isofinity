@@ -4,32 +4,35 @@ import {
   VIEW_DIR,
   groundToScreen,
   screenToGround,
-  type ViewSlot,
 } from '../../shared/iso.js';
 import { RUNTIME_PPU, layersToSet, viewLayerId } from '../../runtime/assets.js';
 import { meshYawMat, Renderer, type FlatBatch, type MeshDraw } from '../../runtime/renderer.js';
 import { CharacterPlayer, bindPosePalette } from '../../runtime/meshAsset.js';
 import { surfaceHeightAt } from '../../runtime/surfaceSnap.js';
+import { pickPlacementAt } from '../../runtime/selection.js';
 import { depthOf } from '../../runtime/world.js';
 import { DEFAULT_POINT_LIGHT, PRIMITIVE_KINDS } from '../document.js';
-import type { ViewTransform, WorldDocument } from '../document.js';
+import type { PlacementRef, ViewTransform, WorldDocument } from '../document.js';
 import { fitTransform, panned, ZOOM_STEP, zoomAround } from '../bakeView.js';
 import { lightParams, srgbHexToLinearRgb } from '../light.js';
 import {
   CHARACTER_BRUSH_ID,
   POINT_LIGHT_TOOL_ID,
+  SELECT_TOOL_ID,
   brushDirections,
+  clearSelection,
+  commitSelectionMove,
   cycleBrushDir,
   eraseAt,
+  moveSelectionLive,
   placeAt,
   redoWorld,
   saveWorld,
   selectBrush,
   selectLight,
-  setBrushDir,
+  selectPlacement,
   setHeightLevel,
   setSnappedHeight,
-  setShadowLevel,
   setSurfaceSnap,
   setTool,
   setWorldViewTransform,
@@ -168,48 +171,6 @@ function buildGround(): Float32Array {
 
 const GROUND = buildGround();
 
-/**
- * The toolbar's placement-height field, following the editor's
- * precise-numeric-input conventions (SliderRow's value field): commit on
- * Enter or focus loss (negative values included — the height may sink
- * below the ground plane), reject empty or non-numeric input by
- * reverting, Escape cancels editing.
- */
-function HeightInput(props: { value: number; onCommit: (v: number) => void }): React.JSX.Element {
-  const { value, onCommit } = props;
-  const [editing, setEditing] = useState<string | null>(null);
-  const commit = (): void => {
-    if (editing === null) return;
-    const text = editing.trim().replace(',', '.');
-    setEditing(null);
-    if (text === '') return;
-    const parsed = Number(text);
-    if (!Number.isFinite(parsed)) return;
-    onCommit(parsed);
-  };
-  return (
-    <input
-      className="value-input"
-      type="text"
-      inputMode="decimal"
-      aria-label="Placement height"
-      title="Placement height — type a value and press Enter (Escape cancels); shift+mouse-move also adjusts it"
-      value={editing ?? value.toFixed(2)}
-      onFocus={() => setEditing(String(value))}
-      onChange={(e) => setEditing(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          commit();
-        } else if (e.key === 'Escape') {
-          setEditing(null);
-        }
-      }}
-    />
-  );
-}
-
 export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
   const { doc } = props;
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -345,6 +306,55 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         layer: live.layers.findIndex((l) => l.id === viewLayerId(p.primId, p.dir)),
       }));
       return surfaceHeightAt(spriteSet, placements, wx, wy, ORIGIN_Y, PPU, toPx);
+    };
+
+    /**
+     * The placement under a world-image pixel, or null: sprites by their
+     * baked g-buffer silhouette, meshes and point lights by screen-space
+     * proximity (design D2). Reads the same in-memory data the frame uses.
+     */
+    const pickAt = (live: WorldDocument, px: [number, number]): PlacementRef | null => {
+      const sprites = live.world.list().map((p) => ({
+        id: p.id,
+        x: p.x,
+        y: p.y,
+        z: p.z,
+        layer: live.layers.findIndex((l) => l.id === viewLayerId(p.primId, p.dir)),
+      }));
+      const off = live.character?.worldOffset ?? [0, 0, 0];
+      const height = live.character?.height ?? 1;
+      const meshes = live.world.listMeshes().map((m) => ({
+        id: m.id,
+        x: m.x + off[0],
+        y: m.y + off[1],
+        z: m.z + off[2],
+        height,
+      }));
+      const lights = live.world.listLights().map((l) => ({
+        id: l.id,
+        x: l.x,
+        y: l.y,
+        z: l.z,
+      }));
+      const hit = pickPlacementAt(spriteSet, sprites, meshes, lights, px[0], px[1], PPU, toPx);
+      return hit ? { kind: hit.kind, id: hit.id } : null;
+    };
+
+    /** A selected placement's current ground position, or null if gone. */
+    const placementPos = (
+      live: WorldDocument,
+      ref: PlacementRef,
+    ): { x: number; z: number } | null => {
+      if (ref.kind === 'sprite') {
+        const p = live.world.placementAt(ref.id);
+        return p ? { x: p.x, z: p.z } : null;
+      }
+      if (ref.kind === 'mesh') {
+        const m = live.world.meshAt(ref.id);
+        return m ? { x: m.x, z: m.z } : null;
+      }
+      const l = live.world.lightAt(ref.id);
+      return l ? { x: l.x, z: l.z } : null;
     };
 
     const renderFrame = (): void => {
@@ -595,9 +605,21 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       const y = effectiveHeight(live, hover.px[0], hover.px[1]);
       lightRing(gx, y, gz, DEFAULT_POINT_LIGHT.radius, 0.25);
     }
-    if (live.selectedLightId !== null) {
-      const sel = live.world.lightAt(live.selectedLightId);
-      if (sel) lightRing(sel.x + 0.5, sel.y, sel.z + 0.5, sel.radius, 0.4);
+    if (live.selection) {
+      const sel = live.selection;
+      if (sel.kind === 'sprite') {
+        const p = live.world.placementAt(sel.id);
+        if (p) emitGizmo(p.x, p.y, p.z);
+      } else if (sel.kind === 'mesh') {
+        const m = live.world.meshAt(sel.id);
+        if (m) {
+          const off = live.character?.worldOffset ?? [0, 0, 0];
+          emitGizmo(m.x + off[0], m.y + off[1], m.z + off[2]);
+        }
+      } else {
+        const l = live.world.lightAt(sel.id);
+        if (l) lightRing(l.x + 0.5, l.y, l.z + 0.5, l.radius, 0.4);
+      }
     }
 
       renderer.render(
@@ -680,6 +702,15 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     // drag alive outside the canvas.
     let pan: { x: number; y: number; zoom: number; panX: number; panY: number } | null = null;
 
+    // Select-tool drag in progress: the picked placement, the pointer's
+    // starting ground position, and the placement's starting ground
+    // position. Live moves update the world; release records one command.
+    let selectDrag: {
+      ref: PlacementRef;
+      pointer: [number, number];
+      from: { x: number; z: number };
+    } | null = null;
+
     // Touch state machine: 1 finger = left button (drag paints, release
     // without movement taps), 2 fingers = neutral pre-gesture, 3 fingers
     // = pan by centroid from the transform captured at gesture start.
@@ -714,6 +745,21 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         );
         return;
       }
+      // Select-tool drag: move the picked placement by the pointer's
+      // ground delta, keeping the grab offset (one command on release).
+      if (selectDrag) {
+        const pt = pointerPoint(e);
+        if (pt) {
+          const [gx, gz] = pt.ground;
+          moveSelectionLive(
+            doc.docId,
+            selectDrag.ref,
+            selectDrag.from.x + (gx - selectDrag.pointer[0]),
+            selectDrag.from.z + (gz - selectDrag.pointer[1]),
+          );
+        }
+        return;
+      }
       // Shift + vertical mouse move adjusts the placement height (up
       // raises, down lowers, below the ground plane included): free-form,
       // never panning. Hover tracking and drag-painting continue
@@ -746,6 +792,9 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           // Point lights place on tap, not drag (a drag would spam lights).
           const live = useEditor.getState().docs[doc.docId];
           if (live?.kind === 'world' && live.tool === POINT_LIGHT_TOOL_ID) return;
+          // The Select tool never places; a touch drag with no pick panned
+          // nothing until now, so just track hover.
+          if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) return;
           const a = anchorAt(pt.px);
           placeAt(doc.docId, a.x, a.z, a.y);
         }
@@ -759,6 +808,8 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         // Point lights place on click, not drag (a drag would spam lights).
         const live = useEditor.getState().docs[doc.docId];
         if (live?.kind === 'world' && live.tool === POINT_LIGHT_TOOL_ID) return;
+        // The Select tool never places.
+        if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) return;
         const a = anchorAt(pt.px);
         placeAt(doc.docId, a.x, a.z, a.y);
       }
@@ -780,6 +831,23 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           const [cx, cy] = touchCentroid();
           const t = liveRef.current.transform;
           touchPan = t ? { cx, cy, t } : null;
+        } else if (touchPts.size === 1) {
+          const live = useEditor.getState().docs[doc.docId];
+          if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) {
+            const pt = pointerPoint(e);
+            if (pt) {
+              const hit = pickAt(live, pt.px);
+              if (hit) {
+                selectPlacement(doc.docId, hit);
+                const pos = placementPos(live, hit);
+                if (pos) {
+                  selectDrag = { ref: hit, pointer: [pt.ground[0], pt.ground[1]], from: pos };
+                }
+              } else {
+                clearSelection(doc.docId);
+              }
+            }
+          }
         }
         return;
       }
@@ -795,10 +863,32 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       const pt = pointerPoint(e);
       if (!pt) return;
       if (e.button === 2) {
-        eraseAt(doc.docId, pt.ground[0], pt.ground[1]);
+        const live = useEditor.getState().docs[doc.docId];
+        if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) {
+          clearSelection(doc.docId);
+        } else {
+          eraseAt(doc.docId, pt.ground[0], pt.ground[1]);
+        }
       } else if (e.button === 0) {
         publishSnapHeight(pt.px);
         const live = useEditor.getState().docs[doc.docId];
+        if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) {
+          // Select the placement under the cursor (pixel-accurate for
+          // sprites); an empty click clears the selection. A hit starts a
+          // potential drag, recorded once on release.
+          const hit = pickAt(live, pt.px);
+          if (hit) {
+            selectPlacement(doc.docId, hit);
+            const pos = placementPos(live, hit);
+            if (pos) {
+              selectDrag = { ref: hit, pointer: [pt.ground[0], pt.ground[1]], from: pos };
+              canvas.setPointerCapture(e.pointerId);
+            }
+          } else {
+            clearSelection(doc.docId);
+          }
+          return;
+        }
         if (live?.kind === 'world' && live.tool === POINT_LIGHT_TOOL_ID) {
           // Clicking on (near) a placed light selects it for the
           // properties panel; clicking elsewhere places a new light.
@@ -823,13 +913,31 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       }
     };
     const onUp = (e: PointerEvent): void => {
+      // A select drag ends: record exactly one move command (no-op when
+      // the pointer never moved the placement).
+      if (selectDrag) {
+        const live = useEditor.getState().docs[doc.docId];
+        const to = live?.kind === 'world' ? placementPos(live, selectDrag.ref) : null;
+        if (to) commitSelectionMove(doc.docId, selectDrag.ref, selectDrag.from, to);
+        selectDrag = null;
+        if (canvas.hasPointerCapture(e.pointerId)) {
+          canvas.releasePointerCapture(e.pointerId);
+        }
+      }
       if (e.pointerType === 'touch') {
         const tp = touchPts.get(e.pointerId);
         touchEnd(e);
-        // Tap-to-place: a lone finger released where it landed.
+        // Tap: place the brush, or select/deselect with the Select tool.
         if (tp && !tp.moved && touchPts.size === 0) {
+          const live = useEditor.getState().docs[doc.docId];
           const pt = pointerPoint(e);
           if (!pt) return;
+          if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) {
+            const hit = pickAt(live, pt.px);
+            if (hit) selectPlacement(doc.docId, hit);
+            else clearSelection(doc.docId);
+            return;
+          }
           hoverRef.current = pt;
           publishSnapHeight(pt.px);
           const a = anchorAt(pt.px);
@@ -935,6 +1043,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         } else {
           redoWorld(doc.docId);
         }
+        return;
+      }
+      if (e.key === 'Escape') {
+        if (typing) return;
+        clearSelection(doc.docId);
         return;
       }
       if (e.key !== 'e' && e.key !== 'E') return;
@@ -1124,24 +1237,6 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
             </optgroup>
           ) : null}
         </select>
-        <select
-          aria-label="Brush direction"
-          title="Brush direction — which way the brush faces (its baked view slot); E cycles through the available directions"
-          value={dirValue}
-          disabled={!multiView}
-          onChange={(e) => {
-            // Same focus release as the brush select: a focused direction
-            // select lets types-ahead snap E back to the E option.
-            e.currentTarget.blur();
-            setBrushDir(doc.docId, e.target.value as ViewSlot);
-          }}
-        >
-          {brushDirs.map((slot) => (
-            <option key={slot} value={slot}>
-              {slot.toUpperCase()}
-            </option>
-          ))}
-        </select>
         <button
           className={activeTool === 'eraser' ? 'active' : ''}
           title="Eraser — left-click/drag removes placements"
@@ -1157,50 +1252,27 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           Light
         </button>
         <button
+          className={activeTool === SELECT_TOOL_ID ? 'active' : ''}
+          title="Select — click a sprite, character, or light to select it (sprite picks are pixel-accurate); drag to move it, Escape/empty-click to deselect"
+          onClick={() => setTool(doc.docId, SELECT_TOOL_ID)}
+        >
+          Select
+        </button>
+        <button
           className={doc.surfaceSnap ? 'active' : ''}
           title="Surface snap — placements take their height from the visible surface under the cursor (off: use the height field / shift+mouse-move height)"
           onClick={() => setSurfaceSnap(doc.docId, !doc.surfaceSnap)}
         >
           Snap
         </button>
-        <label
-          className="hint"
-          title={
-            doc.surfaceSnap
-              ? 'Surface snap is reading the height under the cursor — toggle Snap off to set a height manually'
-              : 'Placement height — type a value and press Enter (Escape cancels); shift+mouse-move also adjusts it'
-          }
-        >
-          h
-          {doc.surfaceSnap ? (
-            <input
-              className="value-input"
-              type="text"
-              aria-label="Placement height (surface snap)"
-              value={(doc.snappedHeight ?? doc.heightLevel).toFixed(2)}
-              readOnly
-              tabIndex={-1}
-            />
-          ) : (
-            <HeightInput value={doc.heightLevel} onCommit={(v) => setHeightLevel(doc.docId, v)} />
-          )}
-        </label>
-        <label
-          className="hint"
-          title="Grounding shadow — strength new placements carry (0 = off, 1 = full); persisted per placement in the world file"
-        >
-          shadow
-          <HeightInput
-            value={doc.shadowLevel}
-            onCommit={(v) => setShadowLevel(doc.docId, v)}
-          />
-        </label>
         <span className="hint">
           {activeTool === 'eraser'
             ? 'eraser'
-            : activeTool === ''
-              ? 'no brush'
-              : `${activeTool}${dirLabel}`}
+            : activeTool === SELECT_TOOL_ID
+              ? 'select'
+              : activeTool === ''
+                ? 'no brush'
+                : `${activeTool}${dirLabel}`}
         </span>
       </EditorToolbar>
       <div className="world-viewport" ref={viewportRef}>
@@ -1227,10 +1299,12 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       <p className="hint">
         {activeTool === 'eraser'
           ? 'tool: eraser — left-click/drag erases'
-          : activeTool === ''
-            ? 'pick a brush above — left-click/drag places it, right-click erases'
-            : `tool: ${activeTool}${dirLabel} — left-click/drag places, right-click erases`}
-        {' — E cycles the brush direction, shift+move sets the placement height, scroll pans, pinch zooms, middle-drag pans'}
+          : activeTool === SELECT_TOOL_ID
+            ? 'tool: select — click a placement to select, drag to move, Escape/empty-click deselects'
+            : activeTool === ''
+              ? 'pick a brush above — left-click/drag places it, right-click erases'
+              : `tool: ${activeTool}${dirLabel} — left-click/drag places, right-click erases`}
+        {' — E cycles the brush direction, shift+move sets the placement height, brush height/shadow/direction live in the properties panel, scroll pans, pinch zooms, middle-drag pans'}
       </p>
     </div>
   );

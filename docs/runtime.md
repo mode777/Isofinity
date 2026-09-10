@@ -211,18 +211,43 @@ Characters animate in place, one draw call each; placements are
 editor-session state — never written into world files (ADR 0006) — so a
 saved/reloaded world simply has none.
 
-A multi-view sprite brush can face any direction it baked: a direction
-dropdown next to the brush select lists the brush's available view slots
-(N/E/S/W order; enabled only when the brush is a multi-view sprite) and
-pressing `E` cycles through them with wrap. The ghost immediately shows
-the chosen view; already-placed sprites keep their direction. Brush
-direction is per-document in-memory editor state — never saved.
+A multi-view sprite brush can face any direction it baked: the
+properties panel's **Brush** section lists the brush's available view
+slots (N/E/S/W order; enabled only when the brush is a multi-view sprite)
+and pressing `E` cycles through them with wrap. The ghost immediately
+shows the chosen view; already-placed sprites keep their direction. Brush
+direction is per-document in-memory editor state — never saved. The same
+Brush section holds the brush's placement height and grounding-shadow
+strength (below); the toolbar keeps only the tool buttons, the brush
+dropdown, and the surface-snap toggle.
+
+### Select tool
+
+The toolbar's **Select** tool inspects and moves existing placements.
+Clicking selects the placement under the cursor — a sprite, a character,
+or a point light — clicking empty space or pressing Escape clears the
+selection, and one placement is selected at a time. Sprite selection is
+**pixel-accurate**: the picker reads the placement's baked g-buffer
+silhouette at the cursor pixel from the document's in-memory sprite set
+(`src/runtime/selection.ts`, the same padded-stride texel indexing
+`surfaceSnap.ts` uses) and resolves overlaps by the per-fragment depth
+the compositor uses (ADR 0012), so a sprite's transparent margin is not
+selectable and the visually topmost sprite wins. Characters and point
+lights are picked by screen-space proximity to their projected anchor.
+The selected placement is outlined by the overlay's height gizmo (or the
+light's radius ring), and the properties panel shows its editable
+properties. Dragging a selected placement moves it free-form along the
+ground plane (a sprite or character keeps its height; a light's emitter
+follows the cursor); the drag is one undoable command. Selection is
+per-document in-memory editor state (ADR 0006) — never serialized — and
+clears automatically when its target is erased or removed by undo/redo.
 
 ### Undo/redo
 
 Every mutating world operation records a command pair on the document's
 undo stack (`src/runtime/history.ts`): placing/erasing sprites, meshes and
-point lights, point-light edits and deletions. Undo (Ctrl/Cmd+Z) and redo
+point lights, point-light edits and deletions, selected-placement property
+edits, and each select-tool move drag. Undo (Ctrl/Cmd+Z) and redo
 (Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y) run via the toolbar buttons or the
 keyboard, both disabled at their stack ends, and mark the document dirty —
 after taking an edit back, the in-memory scene differs from the last save.
@@ -527,7 +552,8 @@ light pass sampling all three afterwards:
    composite.
 7. **Overlay** — hovered footprint (eraser), the height gizmo
    (landing diamond at a raised ghost + plumb line down to the ground
-   cell), and the point-light tool's ghost/selection radius rings, as a
+   cell), the select-tool highlight for the selected placement, and the
+   point-light tool's ghost/selection radius rings, as a
    per-frame vertex batch drawn unlit over the finished frame. No depth
    interaction. Editor chrome only.
 
@@ -542,9 +568,9 @@ height slides the placement along the view ray instead of displacing it
 up-screen. Placements also carry a **height**: holding shift
 and moving the mouse vertically over the viewport raises/lowers the brush
 height in free-form steps (up = raise, negative heights sink below the
-ground plane), and the toolbar's numeric height field sets it exactly
-(precise-input conventions: Enter/blur commits, negative values apply
-verbatim, invalid input reverts, Escape cancels). The toolbar's
+ground plane), and the properties panel's Brush height field sets it
+exactly (precise-input conventions: Enter/blur commits, negative values
+apply verbatim, invalid input reverts, Escape cancels). The toolbar's
 **surface snap** toggle overrides both —
 the placement then takes its height from the visible surface under the
 cursor, computed CPU-side from the world document's in-memory g-buffers
@@ -565,7 +591,9 @@ contains the cursor — resolving to the **topmost** (greatest depth key)
 (click; the emitter rides the cursor's ground point and effective height,
 clicking on a placed light selects it for the properties panel — radius,
 energy, color, position — and its radius ring shows in the viewport).
-Ground picking inverts the shared
+The **Select** tool's left button selects the placement under the cursor
+and drags it along the ground plane; an empty click or Escape clears the
+selection. Ground picking inverts the shared
 projection analytically (`screenToGround`) after inverting the viewport's
 zoom/pan transform, no hit-testing. The 12×12 checkerboard is a visual
 reference only. Viewport navigation: two-finger scroll pans, pinch
@@ -589,6 +617,7 @@ left/right placement bindings never move.
 - `src/runtime/mesh-verify.ts` — Node-runnable mesh checks (`npm run verify:mesh`)
 - `src/runtime/world.ts` — placement state, depth sort, footprint erase
 - `src/runtime/history.ts` — undo/redo command-pair stacks (world-edit history; `npm run verify:history`)
+- `src/runtime/selection.ts` — CPU placement picking for the Select tool (g-buffer silhouette + per-fragment depth; `npm run verify:selection`)
 - `src/app/document.ts` — document/tab types and defaults
 - `src/app/store/` — Zustand stores: editor (tabs + documents + status),
   workspace adapter, project listings, bake actions, world actions
