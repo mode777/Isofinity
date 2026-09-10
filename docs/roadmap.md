@@ -165,11 +165,13 @@ list when a change lands (and prune it — history belongs in the archives).
   one undoable move. Sprite picking is pixel-accurate against the baked
   g-buffer silhouette and per-fragment depth on the CPU (ADR 0012,
   `src/runtime/selection.ts`, `npm run verify:selection`); meshes/lights
-  pick by screen-space proximity. The properties panel gains a Brush
-  section (height, shadow, direction — moved out of the toolbar; `E` still
-  cycles direction) and a selected-placement section (position, height,
-  shadow; the light editor for lights). Selection is in-memory per
-  ADR 0006; no format impact.
+  pick by screen-space proximity. A selected sprite shows a bounding box
+  around its drawn extent and can be rotated via the panel or the `E` key.
+  The properties panel's Brush section (height, shadow, direction) appears
+  only while the brush tool is active and the selected-placement section
+  (position, height, shadow, facing; the light editor for lights) only
+  while the Select tool is active; `E` still cycles the brush otherwise.
+  Selection is in-memory per ADR 0006; no format impact.
 
 ## In progress
 

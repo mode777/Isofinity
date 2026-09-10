@@ -18,6 +18,7 @@ import {
   setLight,
   setLightPlacement,
   setShadowLevel,
+  setSpriteDir,
   setSun,
   setWorldEnv,
   setWorldEnvFile,
@@ -46,15 +47,21 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
 
   const selectedLight =
     doc.selection?.kind === 'light' ? doc.world.lightAt(doc.selection.id) : null;
+  const selectActive = doc.tool === SELECT_TOOL_ID;
   const selectedSprite =
-    doc.selection?.kind === 'sprite' ? doc.world.placementAt(doc.selection.id) : null;
+    selectActive && doc.selection?.kind === 'sprite'
+      ? doc.world.placementAt(doc.selection.id)
+      : null;
   const selectedMesh =
-    doc.selection?.kind === 'mesh' ? doc.world.meshAt(doc.selection.id) : null;
+    selectActive && doc.selection?.kind === 'mesh'
+      ? doc.world.meshAt(doc.selection.id)
+      : null;
   const placedLights = doc.world.listLights();
 
   const brushDirs = brushDirections(doc, doc.tool);
   const multiView = brushDirs.length > 1;
   const dirValue = brushDirs.includes(doc.brushDir) ? doc.brushDir : brushDirs[0] ?? 'n';
+  const spriteDirs = selectedSprite ? brushDirections(doc, selectedSprite.primId) : [];
   const noBrush =
     doc.tool === '' ||
     doc.tool === 'eraser' ||
@@ -63,64 +70,62 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
 
   return (
     <>
-      <Section title="Brush">
-        {noBrush ? (
-          <p className="hint">no placement brush active — pick one in the toolbar</p>
-        ) : (
+      {!noBrush ? (
+        <Section title="Brush">
           <p className="hint">brush: {doc.tool}</p>
-        )}
-        {doc.surfaceSnap ? (
-          <label className="row">
-            <span className="row-label">Height (snap)</span>
-            <input
-              className="value-input"
-              type="text"
-              aria-label="Placement height (surface snap)"
-              value={(doc.snappedHeight ?? doc.heightLevel).toFixed(2)}
-              readOnly
-              tabIndex={-1}
+          {doc.surfaceSnap ? (
+            <label className="row">
+              <span className="row-label">Height (snap)</span>
+              <input
+                className="value-input"
+                type="text"
+                aria-label="Placement height (surface snap)"
+                value={(doc.snappedHeight ?? doc.heightLevel).toFixed(2)}
+                readOnly
+                tabIndex={-1}
+              />
+            </label>
+          ) : (
+            <PreciseNumberRow
+              label="Height"
+              value={doc.heightLevel}
+              onCommit={(v) => setHeightLevel(doc.docId, v)}
             />
-          </label>
-        ) : (
-          <PreciseNumberRow
-            label="Height"
-            value={doc.heightLevel}
-            onCommit={(v) => setHeightLevel(doc.docId, v)}
+          )}
+          <SliderRow
+            label="Shadow"
+            value={doc.shadowLevel}
+            min={0}
+            max={1}
+            step={0.01}
+            format={(v) => v.toFixed(2)}
+            onChange={(v) => setShadowLevel(doc.docId, v)}
           />
-        )}
-        <SliderRow
-          label="Shadow"
-          value={doc.shadowLevel}
-          min={0}
-          max={1}
-          step={0.01}
-          format={(v) => v.toFixed(2)}
-          onChange={(v) => setShadowLevel(doc.docId, v)}
-        />
-        <label className="row">
-          <span className="row-label">Direction</span>
-          <select
-            aria-label="Brush direction"
-            title="Brush direction — which way the brush faces; E cycles the available directions"
-            value={dirValue}
-            disabled={!multiView}
-            onChange={(e) => {
-              e.currentTarget.blur();
-              setBrushDir(doc.docId, e.target.value as ViewSlot);
-            }}
-          >
-            {(brushDirs.length > 0 ? brushDirs : ['n' as ViewSlot]).map((slot) => (
-              <option key={slot} value={slot}>
-                {slot.toUpperCase()}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="hint">
-          height and shadow apply to the next placements; direction needs a
-          multi-view sprite
-        </p>
-      </Section>
+          <label className="row">
+            <span className="row-label">Direction</span>
+            <select
+              aria-label="Brush direction"
+              title="Brush direction — which way the brush faces; E cycles the available directions"
+              value={dirValue}
+              disabled={!multiView}
+              onChange={(e) => {
+                e.currentTarget.blur();
+                setBrushDir(doc.docId, e.target.value as ViewSlot);
+              }}
+            >
+              {(brushDirs.length > 0 ? brushDirs : ['n' as ViewSlot]).map((slot) => (
+                <option key={slot} value={slot}>
+                  {slot.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="hint">
+            height and shadow apply to the next placements; direction needs a
+            multi-view sprite
+          </p>
+        </Section>
+      ) : null}
 
       {selectedSprite ? (
         <Section title="Sprite">
@@ -156,6 +161,27 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
             format={(v) => v.toFixed(2)}
             onChange={(v) => patchSprite(doc.docId, selectedSprite.id, { shadow: v })}
           />
+          {spriteDirs.length > 0 ? (
+            <label className="row">
+              <span className="row-label">Direction</span>
+              <select
+                aria-label="Sprite direction"
+                title="Facing — the placement's baked view; E also cycles it"
+                value={selectedSprite.dir}
+                disabled={spriteDirs.length < 2}
+                onChange={(e) => {
+                  e.currentTarget.blur();
+                  setSpriteDir(doc.docId, selectedSprite.id, e.target.value as ViewSlot);
+                }}
+              >
+                {spriteDirs.map((slot) => (
+                  <option key={slot} value={slot}>
+                    {slot.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <button onClick={() => clearSelection(doc.docId)}>Deselect</button>
         </Section>
       ) : null}

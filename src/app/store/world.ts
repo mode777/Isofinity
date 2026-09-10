@@ -1232,6 +1232,46 @@ export function patchSprite(
   ed().markDirty(docId);
 }
 
+/**
+ * Change a placed sprite's facing (its baked view slot) as an undoable
+ * world edit. Ignored for directions the asset does not provide.
+ */
+export function setSpriteDir(docId: string, id: number, dir: ViewSlot): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  const placement = doc.world.placementAt(id);
+  if (!placement) return;
+  if (!brushDirections(doc, placement.primId).includes(dir)) return;
+  if (placement.dir === dir) return;
+  const before = placement.dir;
+  update(docId, (d) => {
+    d.world.updatePlacement(id, { dir });
+    d.history.push({
+      label: 'rotate sprite',
+      undo: () => d.world.updatePlacement(id, { dir: before }),
+      redo: () => d.world.updatePlacement(id, { dir }),
+    });
+  });
+  ed().markDirty(docId);
+}
+
+/**
+ * Cycle the selected sprite's facing through its available directions
+ * (the `E` key while the Select tool holds a sprite). Returns true when a
+ * sprite was rotated; false when there is no suitable selection.
+ */
+export function cycleSelectedSpriteDir(docId: string): boolean {
+  const doc = worldDoc(docId);
+  if (!doc || doc.selection?.kind !== 'sprite') return false;
+  const placement = doc.world.placementAt(doc.selection.id);
+  if (!placement) return false;
+  const dirs = brushDirections(doc, placement.primId);
+  if (dirs.length < 2) return false;
+  const next = dirs[(dirs.indexOf(placement.dir) + 1) % dirs.length];
+  setSpriteDir(docId, placement.id, next);
+  return true;
+}
+
 /** Patch a mesh placement's position or height as an undoable world edit. */
 export function patchMesh(
   docId: string,

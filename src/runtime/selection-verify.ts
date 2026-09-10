@@ -119,6 +119,9 @@ const PPU = 1;
   w.updatePlacement(sprite.id, { x: 10, z: 10 });
   check('updatePlacement moves x/z', sprite.x === 10 && sprite.z === 10);
 
+  w.updatePlacement(sprite.id, { dir: 'e' });
+  check('updatePlacement changes facing', sprite.dir === 'e' && sprite.y === 0);
+
   w.place(20, 20, 'b');
   const sorted = w.list();
   check(

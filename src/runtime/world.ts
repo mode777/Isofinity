@@ -143,10 +143,10 @@ export class World {
     return this.items.find((p) => p.id === id) ?? null;
   }
 
-  /** Update a sprite placement's position/height/shadow; re-keys its depth. */
+  /** Update a sprite placement's position/height/facing/shadow; re-keys depth. */
   updatePlacement(
     id: number,
-    patch: Partial<Pick<Placement, 'x' | 'z' | 'y' | 'shadow'>>,
+    patch: Partial<Pick<Placement, 'x' | 'z' | 'y' | 'shadow' | 'dir'>>,
   ): void {
     const p = this.items.find((item) => item.id === id);
     if (!p) return;

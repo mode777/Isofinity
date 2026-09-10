@@ -105,15 +105,26 @@ with the point-light tool.
 
 The viewport SHALL visibly mark the selected placement with an editor-chrome
 highlight anchored to its world position that tracks the viewport's zoom and
-pan, so the selection is identifiable among overlapping placements. The
-highlight SHALL be overlay chrome: it SHALL NOT be serialized into world files
-and showing it SHALL NOT mark the document dirty.
+pan, so the selection is identifiable among overlapping placements. For a
+selected sprite the highlight SHALL be a bounding box outlining the sprite
+exactly as it is drawn (the projected extent of the placement's baked view at
+its position, height, and facing), so the box matches the sprite's screen
+silhouette bounds. For a selected character or point light the highlight SHALL
+be an equivalent marker at the placement (the height gizmo, or the light's
+radius ring). The highlight SHALL be overlay chrome: it SHALL NOT be serialized
+into world files and showing it SHALL NOT mark the document dirty.
 
 #### Scenario: Highlight follows zoom and pan
 
 - **WHEN** the user zooms or pans the viewport with a placement selected
 - **THEN** the highlight stays anchored to the selected placement's world
   position, scaling and moving with the projected image
+
+#### Scenario: Selected sprite shows a bounding box
+
+- **WHEN** the user selects a sprite
+- **THEN** a bounding box outlines the sprite as drawn, moving and resizing with
+  the sprite's position, height, and facing
 
 #### Scenario: Highlight never reaches the saved file
 
@@ -186,6 +197,46 @@ mark the document dirty.
 - **WHEN** the user changes the x or z value of a selected sprite, character,
   or light
 - **THEN** the placement moves to that ground position immediately
+
+### Requirement: Selected sprite facing
+
+A selected sprite's facing SHALL be editable from the properties panel and the
+keyboard. The panel SHALL offer a direction control listing the sprite asset's
+available baked directions (N/E/S/W order), enabled when the asset has more than
+one placeable direction (disabled or absent otherwise, with the placement
+keeping its facing), and choosing a direction SHALL change the placement's
+facing immediately, redraw it from that view, and record an undoable edit. While
+the Select tool is active and a sprite is selected, pressing the `E` key (no
+modifiers, not while typing in a form control) SHALL cycle that placement's
+facing through its available directions with wrap; with no sprite selected, or
+under any other tool, `E` SHALL keep cycling the active brush's direction as
+before. Changing a placement's facing SHALL NOT change its ground position,
+height, or footprint picking.
+
+#### Scenario: Direction dropdown changes a placement's facing
+
+- **WHEN** the user selects a multi-view sprite and picks another direction
+- **THEN** the placement immediately shows that view and the change can be
+  undone
+
+#### Scenario: E cycles the selected sprite's facing
+
+- **WHEN** the Select tool is active with a multi-view sprite selected and the
+  user presses `E`
+- **THEN** the placement advances to its next available direction, wrapping at
+  the end, not the brush's direction
+
+#### Scenario: E still cycles the brush without a selected sprite
+
+- **WHEN** another tool is active, or the Select tool has no sprite selected,
+  and the user presses `E`
+- **THEN** the active brush's direction cycles as before
+
+#### Scenario: Single-view sprite has no facing control
+
+- **WHEN** the selected sprite is a single-view asset
+- **THEN** the direction control is disabled (or absent) and pressing `E` does
+  not change its facing
 
 ### Requirement: Selection is in-memory and cleared when stale
 

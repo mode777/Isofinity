@@ -23,6 +23,7 @@ import {
   clearSelection,
   commitSelectionMove,
   cycleBrushDir,
+  cycleSelectedSpriteDir,
   eraseAt,
   moveSelectionLive,
   placeAt,
@@ -586,6 +587,17 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       overlayBatch.quad(cx - d, cy - d, cx + d, cy - d, cx + d, cy + d, cx - d, cy + d, HIGHLIGHT_COLOR, Math.min(1, alpha + 0.1));
     };
 
+    // Axis-aligned rectangle outline (four thin quads) in world-image
+    // pixels: the selected sprite's drawn bounds.
+    const rectOutline = (x0: number, y0: number, x1: number, y1: number): void => {
+      const a = 0.9;
+      const t = 2;
+      overlayBatch.quad(x0, y0, x1, y0, x1, y0 + t, x0, y0 + t, HIGHLIGHT_COLOR, a);
+      overlayBatch.quad(x0, y1 - t, x1, y1 - t, x1, y1, x0, y1, HIGHLIGHT_COLOR, a);
+      overlayBatch.quad(x0, y0, x0 + t, y0, x0 + t, y1, x0, y1, HIGHLIGHT_COLOR, a);
+      overlayBatch.quad(x1 - t, y0, x1, y0, x1, y1, x1 - t, y1, HIGHLIGHT_COLOR, a);
+    };
+
     // Overlays: the height gizmo for an off-ground ghost (raised or
     // sunk), else the eraser's unit-cell hover highlight — plus the
     // point-light tool's ghost ring and the selected light's highlight.
@@ -609,7 +621,23 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       const sel = live.selection;
       if (sel.kind === 'sprite') {
         const p = live.world.placementAt(sel.id);
-        if (p) emitGizmo(p.x, p.y, p.z);
+        if (p) {
+          // Bounding box of the sprite exactly as drawn: the projected
+          // extent of its baked view at the placement's position, height,
+          // and facing (same quad math the sprite instance uses).
+          const layerIndex = live.layers.findIndex(
+            (l) => l.id === viewLayerId(p.primId, p.dir),
+          );
+          if (layerIndex >= 0) {
+            const scale = PPU / spriteSet.ppus[layerIndex];
+            const [ox, oy] = spriteSet.origins[layerIndex];
+            const [w, h] = spriteSet.sizes[layerIndex];
+            const [cx, cy] = toPx(p.x, p.z, p.y);
+            const x0 = cx - ox * scale;
+            const y0 = cy - oy * scale;
+            rectOutline(x0, y0, x0 + w * scale, y0 + h * scale);
+          }
+        }
       } else if (sel.kind === 'mesh') {
         const m = live.world.meshAt(sel.id);
         if (m) {
@@ -1053,6 +1081,16 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       if (e.key !== 'e' && e.key !== 'E') return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (typing) return;
+      // With the Select tool holding a sprite, E rotates that sprite;
+      // otherwise it cycles the active brush's direction.
+      const live = useEditor.getState().docs[doc.docId];
+      if (
+        live?.kind === 'world' &&
+        live.tool === SELECT_TOOL_ID &&
+        cycleSelectedSpriteDir(doc.docId)
+      ) {
+        return;
+      }
       cycleBrushDir(doc.docId);
     };
     window.addEventListener('keydown', onKeyDown);

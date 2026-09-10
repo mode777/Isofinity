@@ -150,15 +150,17 @@ source is a model), path-trace bake settings, and the environment controls
 render actions: the raster g-buffer bake is implicit in the render pass action,
 and the render pass action lives in the sprite editor toolbar. For a world
 editor it SHALL show a **Brush** section (the active brush's placement height,
-grounding-shadow strength, and direction), a **selected-placement** section when
-the Select tool holds a selection (the selected sprite's or character's ground
-position and height, and for a sprite its grounding-shadow strength; for a
-selected point light, the light properties — radius, energy, color, and
-position), and the key light controls (azimuth, elevation, intensity, color,
-ambient color, dynamic-light switch) and the sun-position controls. The panel
-SHALL NOT duplicate the per-editor toolbar's actions (save, place-in-world,
-render pass, undo/redo, and placement tool selection live in the toolbar).
-Editing a control SHALL update the active document only.
+grounding-shadow strength, and direction) only while the placement brush tool is
+active, a **selected-placement** section only while the Select tool is active
+with a selection (the selected sprite's or character's ground position and
+height, and for a sprite its grounding-shadow strength and, when the asset has
+more than one placeable direction, a facing control; for a selected point light,
+the light properties — radius, energy, color, and position), and the key light
+controls (azimuth, elevation, intensity, color, ambient color, dynamic-light
+switch) and the sun-position controls. The panel SHALL NOT duplicate the
+per-editor toolbar's actions (save, place-in-world, render pass, undo/redo, and
+placement tool selection live in the toolbar). Editing a control SHALL update
+the active document only.
 
 #### Scenario: Sprite tab shows bake properties
 
@@ -179,13 +181,18 @@ Editing a control SHALL update the active document only.
 - **THEN** the panel offers no raster bake button and no render pass button;
   the only render action is the sprite editor toolbar's
 
-#### Scenario: World tab shows brush and selected-placement properties
+#### Scenario: Brush section appears only with the brush tool
 
-- **WHEN** the user activates a world editor tab and selects a sprite with the
-  Select tool
-- **THEN** the properties panel shows the Brush section and a section for the
-  selected sprite's position, height, and grounding-shadow strength, alongside
-  the key light and sun-position controls
+- **WHEN** the user activates a world editor tab and picks a placement brush
+- **THEN** the properties panel shows the Brush section (height, shadow, and
+  direction), and switching to the Select, eraser, or point-light tool hides it
+
+#### Scenario: Selected sprite controls appear only with the Select tool
+
+- **WHEN** the user selects a sprite with the Select tool
+- **THEN** the panel shows that sprite's position, height, grounding-shadow
+  strength, and (for a multi-view asset) its facing control, and switching to
+  another tool hides the sprite section while keeping the selection
 
 #### Scenario: World tab shows light properties
 

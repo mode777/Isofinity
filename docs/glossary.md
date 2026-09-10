@@ -92,12 +92,13 @@ the pointer for the real semantics.
   panel's Brush section (per-document in-memory editor state, never saved).
 - **Selection** — the one placement the Select tool (or the Light tool's
   click) has picked, held per world document as `{ kind, id }` in memory
-  (ADR 0006): highlighted in the viewport, edited in the properties
-  panel, moved by dragging, and cleared on Escape, an empty click, or
-  when erase/undo removes it.
+  (ADR 0006): highlighted in the viewport (a bounding box for a sprite),
+  edited in the properties panel, moved by dragging, and cleared on
+  Escape, an empty click, or when erase/undo removes it.
 - **Select tool** — the world toolbar tool that selects and drags
   placements (sprite, character, or point light) on the ground plane; its
-  drag is one undo command, and its panel edits are undoable.
+  drag is one undo command, its panel edits are undoable, and the `E` key
+  rotates a selected sprite's facing.
 - **Pick (selection)** — resolving the placement under the cursor. Sprites
   use their baked g-buffer silhouette and per-fragment depth (so
   transparent margins are not selectable and the visually nearest wins);

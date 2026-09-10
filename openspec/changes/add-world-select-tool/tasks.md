@@ -38,3 +38,12 @@
 - [x] 6.1 Run `npm run verify:selection`, `npm run verify:bundles`, `npm run verify:mesh`, and `npm run verify:history` and confirm all pass.
 - [x] 6.2 Run `npm run build` and confirm the production build succeeds (typecheck + Vite).
 - [ ] 6.3 Leave the browser-only checks to the user: with `npm run dev`, confirm selecting sprites pixel-accurately (transparent margins miss), selecting/moving sprites, characters, and lights, one-undo-per-drag, and the Brush/selected-placement panel sections. No bake behavior changed, so `scratch-verify.html` hashes are expected to be unchanged.
+
+## 7. Follow-up refinements
+
+- [x] 7.1 Show the properties panel's Brush section only while the placement brush tool is active, and the selected sprite/character section only while the Select tool is active; verify `npm run build` and the panel behavior in the browser.
+- [x] 7.2 Add a facing (direction) control to the selected-sprite section listing the asset's available directions, enabled only for multi-view sprites, recording an undoable `dir` edit; verify with a `verify:selection` case for the direction cycle helper and `npm run build`.
+- [x] 7.3 Make the `E` key cycle the selected sprite's facing while the Select tool is active with a sprite selected, falling back to the brush-direction cycle otherwise; verify `npm run build` and in the browser.
+- [x] 7.4 Replace the selected-sprite gizmo with a bounding box outlining the sprite exactly as drawn (projected quad of the placement's baked view), keeping the height gizmo/radius ring for characters and lights; verify visually in the browser and confirm it adds no serialized state.
+- [x] 7.5 Re-run `npm run verify:selection`, `npm run verify:bundles`, `npm run verify:mesh`, `npm run verify:history`, and `npm run build`; update the relevant docs if behavior text changed.
+

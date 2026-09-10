@@ -218,8 +218,10 @@ and pressing `E` cycles through them with wrap. The ghost immediately
 shows the chosen view; already-placed sprites keep their direction. Brush
 direction is per-document in-memory editor state — never saved. The same
 Brush section holds the brush's placement height and grounding-shadow
-strength (below); the toolbar keeps only the tool buttons, the brush
-dropdown, and the surface-snap toggle.
+strength, and appears only while the brush tool is active; the toolbar
+keeps only the tool buttons, the brush dropdown, and the surface-snap
+toggle. The selected-placement section likewise appears only while the
+Select tool is active.
 
 ### Select tool
 
@@ -234,13 +236,19 @@ silhouette at the cursor pixel from the document's in-memory sprite set
 the compositor uses (ADR 0012), so a sprite's transparent margin is not
 selectable and the visually topmost sprite wins. Characters and point
 lights are picked by screen-space proximity to their projected anchor.
-The selected placement is outlined by the overlay's height gizmo (or the
-light's radius ring), and the properties panel shows its editable
-properties. Dragging a selected placement moves it free-form along the
-ground plane (a sprite or character keeps its height; a light's emitter
-follows the cursor); the drag is one undoable command. Selection is
-per-document in-memory editor state (ADR 0006) — never serialized — and
-clears automatically when its target is erased or removed by undo/redo.
+A selected sprite is outlined by a bounding box around its drawn extent
+(the projected quad of its baked view at its position, height, and
+facing); a selected character or light keeps the height gizmo or radius
+ring. The properties panel shows the selection's editable properties —
+position, height, grounding shadow, and (for a multi-view sprite) its
+facing — and the `E` key rotates a selected sprite through its available
+directions with wrap (falling back to the active brush's direction when
+no sprite is selected). Dragging a selected placement moves it free-form
+along the ground plane (a sprite or character keeps its height; a light's
+emitter follows the cursor); the drag is one undoable command. Selection
+is per-document in-memory editor state (ADR 0006) — never serialized —
+and clears automatically when its target is erased or removed by
+undo/redo.
 
 ### Undo/redo
 
