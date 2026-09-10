@@ -28,7 +28,7 @@ import {
 import {
   BUNDLE_EXT,
   deleteWorkspaceFile,
-  readAllWorkspaceFiles,
+  listWorkspaceTree,
   readWorkspaceFile,
   writeWorkspaceFile,
 } from '../../shared/workspace.js';
@@ -72,6 +72,9 @@ const PRIMITIVES: Record<PrimitiveKind, () => Primitive> = {
 };
 
 const MODEL_EXTS = ['.glb', '.gltf'];
+
+/** Everything in models/ that is not itself a model: .gltf external resources. */
+const SUPPORT_EXTS = ['.bin', '.png', '.jpg', '.jpeg', '.webp', '.ktx2', '.basis', '.tga'];
 
 /** The default anchor: the box min corner. */
 const DEFAULT_ORIGIN: Vec3 = [0, 0, 0];
@@ -394,18 +397,19 @@ function activeNotes(skipped: string[]): string {
 }
 
 async function loadModelFromWorkspace(fileName: string) {
-  const files = await readAllWorkspaceFiles('models', MODEL_EXTS);
-  const selected = files.find((f) => f.name === fileName);
-  if (!selected) throw new Error(`"${fileName}" is no longer in the models/ folder`);
-  // Exactly one model file plus the folder's supporting files, so
+  const [modelPaths, supportPaths] = await Promise.all([
+    listWorkspaceTree('models', MODEL_EXTS),
+    listWorkspaceTree('models', SUPPORT_EXTS),
+  ]);
+  if (!modelPaths.includes(fileName)) {
+    throw new Error(`"${fileName}" is no longer in the models/ folder`);
+  }
+  // The model plus the folder's supporting files (any depth), so
   // multi-file .gltf external resources resolve against models/.
-  const others = files.filter((f) => f !== selected && !MODEL_EXTS.includes(extOf(f.name)));
+  const [selected, ...others] = await Promise.all(
+    [fileName, ...supportPaths].map((p) => readWorkspaceFile('models', p)),
+  );
   return loadGltf([selected, ...others]);
-}
-
-function extOf(name: string): string {
-  const i = name.lastIndexOf('.');
-  return i < 0 ? '' : name.slice(i).toLowerCase();
 }
 
 function primitiveFor(doc: BakeDocument): Primitive {
