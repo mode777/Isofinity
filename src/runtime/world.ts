@@ -83,8 +83,10 @@ export class World {
   private lightItems: LightPlacement[] = [];
   private nextMeshId = 1;
 
-  place(x: number, z: number, primId: string, y = 0, dir: ViewSlot = 'n', shadow = 1): void {
-    this.items.push({ x, z, y, primId, dir, shadow, key: depthOf(x, y, z) });
+  place(x: number, z: number, primId: string, y = 0, dir: ViewSlot = 'n', shadow = 1): Placement {
+    const p: Placement = { x, z, y, primId, dir, shadow, key: depthOf(x, y, z) };
+    this.items.push(p);
+    return p;
   }
 
   /** Place a dynamic mesh; returns its stable placement id. */
@@ -96,7 +98,7 @@ export class World {
 
   /**
    * Place a point light at the given footprint corner (the emitter sits at
-   * the cell center); returns its stable placement id.
+   * the cell center); returns the placement (its `id` is the stable id).
    */
   placeLight(
     x: number,
@@ -105,10 +107,11 @@ export class World {
     radius: number,
     energy: number,
     colorHex: string,
-  ): number {
+  ): LightPlacement {
     const id = this.nextMeshId++;
-    this.lightItems.push({ id, x, z, y, radius, energy, colorHex, key: depthOf(x, y, z) });
-    return id;
+    const l: LightPlacement = { id, x, z, y, radius, energy, colorHex, key: depthOf(x, y, z) };
+    this.lightItems.push(l);
+    return l;
   }
 
   /** Update a placed light's properties; re-keys its sort depth. */
@@ -124,6 +127,11 @@ export class World {
 
   lightAt(id: number): LightPlacement | null {
     return this.lightItems.find((l) => l.id === id) ?? null;
+  }
+
+  /** A placed mesh by id; null when none carries it. */
+  meshAt(id: number): MeshPlacement | null {
+    return this.meshItems.find((m) => m.id === id) ?? null;
   }
 
   /** Remove a placed light by id; true when one was removed. */
@@ -147,6 +155,53 @@ export class World {
     return removed;
   }
 
+  // --- inverse-capable primitives (undo/redo history) -----------------------
+  //
+  // Each removal returns the placement object (identity preserved — mesh and
+  // light ids are keys held elsewhere) plus its array index, so the matching
+  // insert restores the exact prior state. Array order does not affect
+  // rendering (list() sorts by depth key), but restoring the index keeps
+  // undo byte-for-byte faithful to the pre-command arrays.
+
+  /** Re-insert a sprite placement at its recorded array index. */
+  insertSprite(p: Placement, index: number): void {
+    this.items.splice(Math.min(Math.max(index, 0), this.items.length), 0, p);
+  }
+
+  /** Remove a sprite placement by identity; null when it is already gone. */
+  removeSprite(p: Placement): { placement: Placement; index: number } | null {
+    const index = this.items.indexOf(p);
+    if (index < 0) return null;
+    this.items.splice(index, 1);
+    return { placement: p, index };
+  }
+
+  /** Re-insert a mesh placement at its recorded array index. */
+  insertMesh(m: MeshPlacement, index: number): void {
+    this.meshItems.splice(Math.min(Math.max(index, 0), this.meshItems.length), 0, m);
+  }
+
+  /** Remove a mesh placement by id; null when no mesh carries it. */
+  removeMeshById(id: number): { placement: MeshPlacement; index: number } | null {
+    const index = this.meshItems.findIndex((m) => m.id === id);
+    if (index < 0) return null;
+    const [placement] = this.meshItems.splice(index, 1);
+    return { placement, index };
+  }
+
+  /** Re-insert a light placement at its recorded array index. */
+  insertLight(l: LightPlacement, index: number): void {
+    this.lightItems.splice(Math.min(Math.max(index, 0), this.lightItems.length), 0, l);
+  }
+
+  /** Remove a light placement by id; null when no light carries it. */
+  removeLightById(id: number): { placement: LightPlacement; index: number } | null {
+    const index = this.lightItems.findIndex((l) => l.id === id);
+    if (index < 0) return null;
+    const [placement] = this.lightItems.splice(index, 1);
+    return { placement, index };
+  }
+
   /**
    * Topmost placement at the cursor across kinds (greatest depth key
    * within the unit-cell footprint): a sprite placement, a mesh placement,
@@ -156,9 +211,9 @@ export class World {
     x: number,
     z: number,
   ):
-    | { kind: 'sprite'; placement: Placement }
-    | { kind: 'mesh'; placement: MeshPlacement }
-    | { kind: 'light'; placement: LightPlacement }
+    | { kind: 'sprite'; placement: Placement; index: number }
+    | { kind: 'mesh'; placement: MeshPlacement; index: number }
+    | { kind: 'light'; placement: LightPlacement; index: number }
     | null {
     let bestSprite = -1;
     for (let k = 0; k < this.items.length; k++) {
@@ -189,14 +244,14 @@ export class World {
     if (best === -Infinity) return null;
     if (bestLight >= 0 && this.lightItems[bestLight].key === best) {
       const [placement] = this.lightItems.splice(bestLight, 1);
-      return { kind: 'light', placement };
+      return { kind: 'light', placement, index: bestLight };
     }
     if (bestMesh >= 0 && this.meshItems[bestMesh].key === best) {
       const [placement] = this.meshItems.splice(bestMesh, 1);
-      return { kind: 'mesh', placement };
+      return { kind: 'mesh', placement, index: bestMesh };
     }
     const [placement] = this.items.splice(bestSprite, 1);
-    return { kind: 'sprite', placement };
+    return { kind: 'sprite', placement, index: bestSprite };
   }
 
   clear(): void {

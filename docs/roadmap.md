@@ -153,6 +153,13 @@ list when a change lands (and prune it — history belongs in the archives).
   the screen g-buffer so lights pool on the floor. Sprite bundles and the
   bake pipeline are untouched.
 
+- World-editor undo/redo — every mutating world operation (place/erase
+  sprites, meshes, point lights, light edits/deletions) records an inverse
+  command pair on a per-document history stack (`src/runtime/history.ts`,
+  `npm run verify:history`); toolbar buttons + Ctrl/Cmd+Z /
+  Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y, dirty marking on undo/redo, ids stable
+  across undo. In-memory only per ADR 0006 — no format impact.
+
 ## In progress
 
 - Dynamic meshes in the compositor (ADR 0007) — skinned, animated

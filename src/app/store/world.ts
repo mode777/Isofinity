@@ -12,7 +12,13 @@ import {
   viewLayerId,
   type SpriteLayer,
 } from '../../runtime/assets.js';
-import { World } from '../../runtime/world.js';
+import {
+  World,
+  type LightPlacement,
+  type MeshPlacement,
+  type Placement,
+} from '../../runtime/world.js';
+import { HistoryStack, type HistoryCommand } from '../../runtime/history.js';
 import { parseCharacterAsset } from '../../runtime/meshAsset.js';
 import {
   equirectFromProcedural,
@@ -63,6 +69,92 @@ const worldDoc = (docId: string): WorldDocument | null => {
 };
 const update = (docId: string, mutate: (doc: WorldDocument) => void): void =>
   ed().update<WorldDocument>(docId, mutate);
+
+// --- undo/redo history ------------------------------------------------------
+
+/** Record a just-applied world command on the document's history stack. */
+function recordHistory(docId: string, cmd: HistoryCommand): void {
+  update(docId, (d) => {
+    d.history.push(cmd);
+  });
+}
+
+/** Undo of erase/remove: re-insert the exact placement object at its index. */
+type Removed =
+  | { kind: 'sprite'; placement: Placement; index: number }
+  | { kind: 'mesh'; placement: MeshPlacement; index: number }
+  | { kind: 'light'; placement: LightPlacement; index: number };
+
+function removalCommand(label: string, world: World, removed: Removed): HistoryCommand {
+  return {
+    label,
+    redo: () => {
+      if (removed.kind === 'sprite') world.insertSprite(removed.placement, removed.index);
+      else if (removed.kind === 'mesh') world.insertMesh(removed.placement, removed.index);
+      else world.insertLight(removed.placement, removed.index);
+    },
+    undo: () => {
+      if (removed.kind === 'sprite') world.removeSprite(removed.placement);
+      else if (removed.kind === 'mesh') world.removeMeshById(removed.placement.id);
+      else world.removeLightById(removed.placement.id);
+    },
+  };
+}
+
+function placementCommand(
+  label: string,
+  world: World,
+  placed: Placement | MeshPlacement | LightPlacement,
+): HistoryCommand {
+  if ('primId' in placed) {
+    return removalCommand(label, world, {
+      kind: 'sprite',
+      placement: placed,
+      index: Number.MAX_SAFE_INTEGER,
+    });
+  }
+  if ('meshId' in placed) {
+    return removalCommand(label, world, {
+      kind: 'mesh',
+      placement: placed,
+      index: Number.MAX_SAFE_INTEGER,
+    });
+  }
+  return removalCommand(label, world, {
+    kind: 'light',
+    placement: placed,
+    index: Number.MAX_SAFE_INTEGER,
+  });
+}
+
+/**
+ * Take the document's last world edit back (or re-apply the last undone
+ * one). Marks the document dirty either way — after undo/redo the in-memory
+ * scene differs from the last save, so the dirty-tab warning stays honest.
+ * Drops a stale selected light (one an undo removed).
+ */
+function worldHistoryStep(docId: string, step: 'undo' | 'redo'): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  const cmd = step === 'undo' ? doc.history.undo() : doc.history.redo();
+  if (!cmd) return;
+  update(docId, (d) => {
+    if (d.selectedLightId !== null && !d.world.lightAt(d.selectedLightId)) {
+      d.selectedLightId = null;
+    }
+  });
+  ed().markDirty(docId);
+}
+
+/** Undo the active world document's last edit. */
+export function undoWorld(docId: string): void {
+  worldHistoryStep(docId, 'undo');
+}
+
+/** Redo the active world document's last undone edit. */
+export function redoWorld(docId: string): void {
+  worldHistoryStep(docId, 'redo');
+}
 
 // --- environment probe ------------------------------------------------------
 
@@ -192,6 +284,7 @@ export function newWorldDoc(): string {
     shadowLevel: 1,
     viewTransform: null,
     selectedLightId: null,
+    history: new HistoryStack(),
   };
   ed().addDoc(doc);
   // A probe exists from the start (built-in default environment until a
@@ -442,6 +535,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     shadowLevel: 1,
       viewTransform: null,
       selectedLightId: null,
+      history: new HistoryStack(),
     };
 
     const skipped: { asset: string; reason: string }[] = [];
@@ -851,7 +945,16 @@ export function placeAt(docId: string, gx: number, gz: number, y = 0): void {
   const doc = worldDoc(docId);
   if (!doc) return;
   if (doc.tool === 'eraser') {
-    if (doc.world.removeTopAt(gx, gz)) {
+    const removed = doc.world.removeTopAt(gx, gz);
+    if (removed) {
+      recordHistory(
+        docId,
+        removalCommand(
+          `erase ${removed.kind}`,
+          doc.world,
+          removed as Removed,
+        ),
+      );
       if (doc.selectedLightId !== null && !doc.world.lightAt(doc.selectedLightId)) {
         update(docId, (d) => {
           d.selectedLightId = null;
@@ -864,7 +967,7 @@ export function placeAt(docId: string, gx: number, gz: number, y = 0): void {
   if (doc.tool === POINT_LIGHT_TOOL_ID) {
     // The emitter sits at the cursor's ground point; the footprint corner
     // is the cell min corner so erase/pick ride the shared machinery.
-    const id = doc.world.placeLight(
+    const light = doc.world.placeLight(
       gx - 0.5,
       gz - 0.5,
       y,
@@ -872,8 +975,9 @@ export function placeAt(docId: string, gx: number, gz: number, y = 0): void {
       DEFAULT_POINT_LIGHT.energy,
       DEFAULT_POINT_LIGHT.colorHex,
     );
+    recordHistory(docId, placementCommand('place light', doc.world, light));
     update(docId, (d) => {
-      d.selectedLightId = id;
+      d.selectedLightId = light.id;
     });
     ed().markDirty(docId);
     return;
@@ -883,7 +987,9 @@ export function placeAt(docId: string, gx: number, gz: number, y = 0): void {
       ed().setStatus('brush "character" is not loaded — pick a brush from the toolbar');
       return;
     }
-    doc.world.placeMesh(CHARACTER_BRUSH_ID, gx - 0.5, gz - 0.5, y);
+    const id = doc.world.placeMesh(CHARACTER_BRUSH_ID, gx - 0.5, gz - 0.5, y);
+    const mesh = doc.world.meshAt(id);
+    if (mesh) recordHistory(docId, placementCommand('place character', doc.world, mesh));
     ed().markDirty(docId);
     return;
   }
@@ -895,7 +1001,8 @@ export function placeAt(docId: string, gx: number, gz: number, y = 0): void {
     ed().setStatus(`brush "${doc.tool}" is not loaded — pick a brush from the toolbar`);
     return;
   }
-  doc.world.place(gx, gz, doc.tool, y, dir, doc.shadowLevel);
+  const placed = doc.world.place(gx, gz, doc.tool, y, dir, doc.shadowLevel);
+  recordHistory(docId, placementCommand('place sprite', doc.world, placed));
   ed().markDirty(docId);
 }
 
@@ -998,7 +1105,11 @@ export function cycleBrushDir(docId: string): void {
 export function eraseAt(docId: string, gx: number, gz: number): void {
   const doc = worldDoc(docId);
   if (!doc) return;
-  if (doc.world.removeTopAt(gx, gz)) ed().markDirty(docId);
+  const removed = doc.world.removeTopAt(gx, gz);
+  if (removed) {
+    recordHistory(docId, removalCommand(`erase ${removed.kind}`, doc.world, removed as Removed));
+    ed().markDirty(docId);
+  }
 }
 
 export function setLight(docId: string, patch: Partial<LightState>): void {
@@ -1039,10 +1150,23 @@ export function setLightPlacement(
       (clean as Record<string, number>)[k] = v;
     }
   }
+  // Capture the light's values for exactly the patched keys so undo
+  // restores them and redo re-applies them (updateLight re-keys depth).
+  const light = doc.world.lightAt(id)!;
+  type LightPatch = typeof patch;
+  const before: LightPatch = {};
+  for (const k of Object.keys(clean) as (keyof LightPatch)[]) {
+    before[k] = light[k] as never;
+  }
   // Publish through the store (not just markDirty, which no-ops when the
   // document is already dirty) so the panel re-renders with the new values.
   update(docId, (d) => {
     d.world.updateLight(id, clean);
+    d.history.push({
+      label: 'edit light',
+      undo: () => d.world.updateLight(id, before),
+      redo: () => d.world.updateLight(id, clean),
+    });
   });
   ed().markDirty(docId);
 }
@@ -1050,9 +1174,17 @@ export function setLightPlacement(
 /** Remove a placed point light by id (deselects it when selected). */
 export function removeLight(docId: string, id: number): void {
   const doc = worldDoc(docId);
-  if (!doc || !doc.world.lightAt(id)) return;
+  if (!doc) return;
+  const removed = doc.world.removeLightById(id);
+  if (!removed) return;
   update(docId, (d) => {
-    d.world.removeLight(id);
+    d.history.push(
+      removalCommand('delete light', d.world, {
+        kind: 'light',
+        placement: removed.placement,
+        index: removed.index,
+      }),
+    );
     if (d.selectedLightId === id) d.selectedLightId = null;
   });
   ed().markDirty(docId);
@@ -1232,9 +1364,10 @@ export function placeInWorld(bakeDocId: string, targetDocId?: string): void {
   const id = uniqueLayerId(bdoc.result.id, target.layers);
   const layer = resultToLayer(bdoc as BakeDocument, id);
   if (!layer) return;
+  const placed = target.world.place(9.5, 5.5, id);
   update(target.docId, (d) => {
     d.layers = [...d.layers, layer];
-    d.world.place(9.5, 5.5, id);
+    d.history.push(placementCommand('place sprite', d.world, placed));
     d.tool = id;
   });
   ed().markDirty(target.docId);

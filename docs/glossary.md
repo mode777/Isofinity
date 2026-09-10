@@ -55,6 +55,12 @@ the pointer for the real semantics.
 - **Workspace** — a local folder bound via the File System Access API
   (`src/shared/workspace.ts`) with convention subfolders `hdri/`,
   `models/`, `sprites/`, `worlds/`, `presets/`, `materials/`.
+- **Command (undo)** — a do/undo pair recorded on a world document's
+  history stack when a mutating world operation applies (`src/runtime/
+  history.ts`); carries the minimal inverse delta, never a snapshot.
+- **Undo stack** — per world document, in-memory only (ADR 0006): undo/
+  redo walks it with Ctrl+Z / Ctrl+Shift+Z; a new command drops the redo
+  end; it never reaches a world file.
 
 ## World
 

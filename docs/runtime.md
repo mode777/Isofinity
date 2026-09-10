@@ -218,6 +218,21 @@ pressing `E` cycles through them with wrap. The ghost immediately shows
 the chosen view; already-placed sprites keep their direction. Brush
 direction is per-document in-memory editor state — never saved.
 
+### Undo/redo
+
+Every mutating world operation records a command pair on the document's
+undo stack (`src/runtime/history.ts`): placing/erasing sprites, meshes and
+point lights, point-light edits and deletions. Undo (Ctrl/Cmd+Z) and redo
+(Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y) run via the toolbar buttons or the
+keyboard, both disabled at their stack ends, and mark the document dirty —
+after taking an edit back, the in-memory scene differs from the last save.
+Commands are inverse deltas, not snapshots: removals re-insert the exact
+placement object (mesh/light ids are stable keys held by the engine's
+animation players), so undo/redo never renumbers ids. History lives on the
+world document — per document, surviving tab switches — and is in-memory
+editor state only (ADR 0006): it never reaches a world file, and viewport/
+brush state stays un-undoable.
+
 ## Assets
 
 The world editor uploads two WebGL2 `TEXTURE_2D_ARRAY`s: the render pass
@@ -573,6 +588,7 @@ left/right placement bindings never move.
 - `src/runtime/shProbe.ts` — environment → SH diffuse-irradiance probe (CPU + GLSL basis twins)
 - `src/runtime/mesh-verify.ts` — Node-runnable mesh checks (`npm run verify:mesh`)
 - `src/runtime/world.ts` — placement state, depth sort, footprint erase
+- `src/runtime/history.ts` — undo/redo command-pair stacks (world-edit history; `npm run verify:history`)
 - `src/app/document.ts` — document/tab types and defaults
 - `src/app/store/` — Zustand stores: editor (tabs + documents + status),
   workspace adapter, project listings, bake actions, world actions

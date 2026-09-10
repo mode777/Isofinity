@@ -22,6 +22,7 @@ import {
   cycleBrushDir,
   eraseAt,
   placeAt,
+  redoWorld,
   saveWorld,
   selectBrush,
   selectLight,
@@ -33,6 +34,7 @@ import {
   setTool,
   setWorldViewTransform,
   suggestWorldName,
+  undoWorld,
 } from '../store/world.js';
 import { useEditor } from '../store/editor.js';
 import { useProject } from '../store/project.js';
@@ -909,23 +911,35 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     // which re-uploads the sprite texture arrays.
   }, [doc.docId, spriteSet]);
 
-  // The `E` key cycles the brush through its available directions
-  // (wrapping; the store action no-ops for single-view brushes). Form
-  // controls keep the key for typing.
+  // World-editor shortcuts, active only while this world tab is focused:
+  // `E` cycles the brush through its available directions (wrapping; the
+  // store action no-ops for single-view brushes); Ctrl/Cmd+Z undoes and
+  // Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y redo the document's world edits. Form
+  // controls keep the keys for typing.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key !== 'e' && e.key !== 'E') return;
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
-      if (
+      const typing =
         tag === 'INPUT' ||
         tag === 'TEXTAREA' ||
         tag === 'SELECT' ||
-        el?.isContentEditable
-      ) {
+        el?.isContentEditable;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && !e.altKey && (e.key === 'z' || e.key === 'Z' || e.key === 'y' || e.key === 'Y')) {
+        if (typing) return;
+        e.preventDefault();
+        if (e.key === 'z' || e.key === 'Z') {
+          if (e.shiftKey) redoWorld(doc.docId);
+          else undoWorld(doc.docId);
+        } else {
+          redoWorld(doc.docId);
+        }
         return;
       }
+      if (e.key !== 'e' && e.key !== 'E') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (typing) return;
       cycleBrushDir(doc.docId);
     };
     window.addEventListener('keydown', onKeyDown);
@@ -1042,6 +1056,20 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           onClick={onSaveWorld}
         >
           Save
+        </button>
+        <button
+          disabled={!doc.history.canUndo}
+          title="Undo the last world edit (Ctrl+Z)"
+          onClick={() => undoWorld(doc.docId)}
+        >
+          Undo
+        </button>
+        <button
+          disabled={!doc.history.canRedo}
+          title="Redo the last undone world edit (Ctrl+Shift+Z)"
+          onClick={() => redoWorld(doc.docId)}
+        >
+          Redo
         </button>
         <button
           className={activeTool === 'eraser' ? '' : 'active'}

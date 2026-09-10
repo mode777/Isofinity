@@ -3,6 +3,7 @@ import type { BakeResult } from '../bake/bake.js';
 import type { GltfSource } from '../bake/gltf.js';
 import type { PtEnvironment, PtImage, PtSettings } from '../bake/pt.js';
 import type { SpriteLayer } from '../runtime/assets.js';
+import type { HistoryStack } from '../runtime/history.js';
 import type { CharacterAsset } from '../runtime/meshAsset.js';
 import type { World } from '../runtime/world.js';
 import type { ViewSlot, Vec3 } from '../shared/iso.js';
@@ -309,6 +310,13 @@ export interface WorldDocument {
    * never written into world files.
    */
   selectedLightId: number | null;
+  /**
+   * Undo/redo history of this document's mutating world operations
+   * (place/erase sprites, meshes, point lights and light edits). Lives
+   * as long as the document (survives tab switches); in-memory editor
+   * state only — never written into world files.
+   */
+  history: HistoryStack;
 }
 
 export type EditorDocument = BakeDocument | WorldDocument;
