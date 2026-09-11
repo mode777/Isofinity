@@ -25,7 +25,23 @@ import {
 } from '../store/world.js';
 import { useProject } from '../store/project.js';
 import { useWorkspace } from '../store/workspace.js';
-import { CheckRow, ColorRow, NumberRow, PreciseNumberRow, Section, SliderRow } from './controls.js';
+import {
+  CheckRow,
+  ColorRow,
+  HEIGHT_SLIDER_MAX,
+  HEIGHT_SLIDER_MIN,
+  HEIGHT_SLIDER_STEP,
+  NumberRow,
+  PreciseNumberRow,
+  Section,
+  SliderRow,
+} from './controls.js';
+
+const HEIGHT_SLIDER = {
+  min: HEIGHT_SLIDER_MIN,
+  max: HEIGHT_SLIDER_MAX,
+  step: HEIGHT_SLIDER_STEP,
+};
 
 function formatHour(v: number): string {
   const h = Math.floor(v);
@@ -89,6 +105,7 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
             <PreciseNumberRow
               label="Height"
               value={doc.heightLevel}
+              slider={HEIGHT_SLIDER}
               onCommit={(v) => setHeightLevel(doc.docId, v)}
             />
           )}
@@ -150,6 +167,7 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
           <PreciseNumberRow
             label="Height"
             value={Number(selectedSprite.y.toFixed(3))}
+            slider={HEIGHT_SLIDER}
             onCommit={(v) => patchSprite(doc.docId, selectedSprite.id, { y: v })}
           />
           <SliderRow
@@ -205,6 +223,7 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
           <PreciseNumberRow
             label="Height"
             value={Number(selectedMesh.y.toFixed(3))}
+            slider={HEIGHT_SLIDER}
             onCommit={(v) => patchMesh(doc.docId, selectedMesh.id, { y: v })}
           />
           <button onClick={() => clearSelection(doc.docId)}>Deselect</button>
@@ -281,12 +300,11 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
             max={99}
             onChange={(v) => setLightPlacement(doc.docId, selectedLight.id, { z: v - 0.5 })}
           />
-          <NumberRow
+          <PreciseNumberRow
             label="Height"
             value={Number(selectedLight.y.toFixed(3))}
-            min={-99}
-            max={99}
-            onChange={(v) => setLightPlacement(doc.docId, selectedLight.id, { y: v })}
+            slider={HEIGHT_SLIDER}
+            onCommit={(v) => setLightPlacement(doc.docId, selectedLight.id, { y: v })}
           />
           <button onClick={() => selectLight(doc.docId, null)}>Deselect</button>
           <p className="hint">pick a light above or click one in the viewport with the Light tool</p>

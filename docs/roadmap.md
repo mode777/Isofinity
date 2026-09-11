@@ -190,6 +190,13 @@ list when a change lands (and prune it — history belongs in the archives).
   drag moves, Light-tool click selects instead of placing, brush clicks
   pass through), with a hover radius-ring preview under the Select and
   Light tools. Editor chrome only — no format impact.
+- Height sliders — the world editor's four height rows (brush, selected
+  sprite, selected character, selected point light) each pair their
+  precise numeric field with a −2…+2 slider (0.1 steps) as a pointer
+  shortcut: typed values still apply exactly (unclamped), out-of-band
+  values park the thumb at the nearer end, and dragging pulls the value
+  back into the band. The light height row joins the other three on the
+  precise-input control. UI-only, no format impact.
 
 ## In progress
 

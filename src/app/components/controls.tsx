@@ -87,11 +87,19 @@ export function NumberRow(props: {
   );
 }
 
+/** Shared slider band for the world editor's height rows (world units). */
+export const HEIGHT_SLIDER_MIN = -2;
+export const HEIGHT_SLIDER_MAX = 2;
+export const HEIGHT_SLIDER_STEP = 0.1;
+
 /**
  * Label + precise numeric text field using the editor's commit
  * conventions: Enter/focus-loss applies the entered finite value
  * (optionally clamped to `min`/`max`, negative values allowed), empty or
- * non-numeric input reverts, Escape cancels editing.
+ * non-numeric input reverts, Escape cancels editing. With `slider`, a
+ * range track sits between label and field, committing each step tick —
+ * a pointer shortcut inside its band only: typed values apply exactly,
+ * and out-of-band values park the thumb at the nearer end.
  */
 export function PreciseNumberRow(props: {
   label: string;
@@ -99,9 +107,10 @@ export function PreciseNumberRow(props: {
   format?: (v: number) => string;
   min?: number;
   max?: number;
+  slider?: { min: number; max: number; step: number };
   onCommit: (v: number) => void;
 }): React.JSX.Element {
-  const { label, value, format, min, max, onCommit } = props;
+  const { label, value, format, min, max, slider, onCommit } = props;
   const [editing, setEditing] = useState<string | null>(null);
   const commit = (): void => {
     if (editing === null) return;
@@ -117,6 +126,17 @@ export function PreciseNumberRow(props: {
   return (
     <label className="row">
       <span className="row-label">{label}</span>
+      {slider ? (
+        <input
+          type="range"
+          min={slider.min}
+          max={slider.max}
+          step={slider.step}
+          value={value}
+          aria-label={`${label} slider`}
+          onChange={(e) => onCommit(Number(e.target.value))}
+        />
+      ) : null}
       <input
         className="value-input"
         type="text"

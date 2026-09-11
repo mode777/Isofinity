@@ -232,8 +232,9 @@ slots (N/E/S/W order; enabled only when the brush is a multi-view sprite)
 and pressing `E` cycles through them with wrap. The ghost immediately
 shows the chosen view; already-placed sprites keep their direction. Brush
 direction is per-document in-memory editor state — never saved. The same
-Brush section holds the brush's placement height and grounding-shadow
-strength, and appears only while the brush tool is active; the toolbar
+Brush section holds the brush's placement height (a precise field with a
+−2…+2 slider) and grounding-shadow strength, and appears only while the brush
+tool is active; the toolbar
 keeps only the icon save/undo/redo buttons, the brush dropdown, and the
 surface-snap toggle (the dropdown and snap hidden outside placement
 mode). The selected-placement section likewise appears only while the
@@ -257,7 +258,9 @@ A selected sprite is outlined by a bounding box around its drawn extent
 facing); a selected character or light keeps the height gizmo or radius
 ring. The properties panel shows the selection's editable properties —
 position, height, grounding shadow, and (for a multi-view sprite) its
-facing — and the `E` key rotates a selected sprite through its available
+facing — each height row pairing its precise field with a −2…+2 slider
+(the selected light's height included) — and the `E` key rotates a
+selected sprite through its available
 directions with wrap (falling back to the active brush's direction when
 no sprite is selected). Dragging a selected placement moves it free-form
 along the ground plane (a sprite or character keeps its height; a light's
@@ -597,7 +600,9 @@ and moving the mouse vertically over the viewport raises/lowers the brush
 height in free-form steps (up = raise, negative heights sink below the
 ground plane), and the properties panel's Brush height field sets it
 exactly (precise-input conventions: Enter/blur commits, negative values
-apply verbatim, invalid input reverts, Escape cancels). The toolbar's
+apply verbatim, invalid input reverts, Escape cancels) with a −2…+2 slider
+alongside as a pointer shortcut (typed values outside the band still apply
+verbatim and park the thumb at the nearer end). The toolbar's
 **surface snap** toggle overrides both —
 the placement then takes its height from the visible surface under the
 cursor, computed CPU-side from the world document's in-memory g-buffers
