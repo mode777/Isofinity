@@ -44,6 +44,15 @@ import { useEditor } from '../store/editor.js';
 import { useProject } from '../store/project.js';
 import { useWorkspace } from '../store/workspace.js';
 import { EditorToolbar } from './EditorToolbar.js';
+import {
+  IconEraser,
+  IconLight,
+  IconPencil,
+  IconRedo,
+  IconSave,
+  IconSelect,
+  IconUndo,
+} from './icons.js';
 import { WorkspaceFileDialog } from './WorkspaceFileDialog.js';
 
 const MARGIN = 8;
@@ -1129,6 +1138,14 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
   const worlds = useProject((s) => s.worlds);
   const setStatus = useEditor((s) => s.setStatus);
   const activeTool = doc.tool;
+  // Placement mode: any tool that places a brush (a primitive/sprite/
+  // character id, or '' while no brush is chosen yet) — every tool except
+  // the three special ones. Only here do the brush dropdown and the snap
+  // toggle apply; hiding them never resets their stored state.
+  const placementMode =
+    activeTool !== 'eraser' &&
+    activeTool !== SELECT_TOOL_ID &&
+    activeTool !== POINT_LIGHT_TOOL_ID;
 
   // Remembers the last pencil brush so the pencil button can switch back
   // from the eraser.
@@ -1225,6 +1242,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       ) : null}
       <EditorToolbar>
         <button
+          className="icon-btn"
           disabled={!connected}
           title={
             connected
@@ -1233,103 +1251,82 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           }
           onClick={onSaveWorld}
         >
-          Save
+          <IconSave />
         </button>
         <button
+          className="icon-btn"
           disabled={!doc.history.canUndo}
           title="Undo the last world edit (Ctrl+Z)"
           onClick={() => undoWorld(doc.docId)}
         >
-          Undo
+          <IconUndo />
         </button>
         <button
+          className="icon-btn"
           disabled={!doc.history.canRedo}
           title="Redo the last undone world edit (Ctrl+Shift+Z)"
           onClick={() => redoWorld(doc.docId)}
         >
-          Redo
+          <IconRedo />
         </button>
-        <button
-          className={activeTool === 'eraser' ? '' : 'active'}
-          title="Placement tool — left-click/drag places the selected brush, right-click erases"
-          onClick={() => setTool(doc.docId, lastBrush.current)}
-        >
-          Pencil
-        </button>
-        <select
-          aria-label="Placement brush"
-          title="Placement brush — built-in primitives and workspace sprites"
-          value={selectedEntry?.value ?? ''}
-          onChange={(e) => {
-            // Release focus: a focused select would both keep the E-key
-            // shortcut ignored and let the browser's select types-ahead
-            // treat E as "jump to the option starting with E".
-            e.currentTarget.blur();
-            const entry = brushEntries.find((b) => b.value === e.target.value);
-            if (!entry) return;
-            lastBrush.current = entry.label;
-            void selectBrush(doc.docId, entry.brush);
-          }}
-        >
-          <option value="">brush…</option>
-          <optgroup label="Primitives">
-            {brushEntries
-              .filter((b) => b.kind === 'primitive')
-              .map((b) => (
-                <option key={b.value} value={b.value}>
-                  {b.label}
-                </option>
-              ))}
-          </optgroup>
-          <optgroup label="Character">
-            {brushEntries
-              .filter((b) => b.kind === 'character')
-              .map((b) => (
-                <option key={b.value} value={b.value}>
-                  {b.label}
-                </option>
-              ))}
-          </optgroup>
-          {connected ? (
-            <optgroup label="Sprites">
-              {brushEntries
-                .filter((b) => b.kind === 'sprite')
-                .map((b) => (
-                  <option key={b.value} value={b.value}>
-                    {b.label}
-                  </option>
-                ))}
-            </optgroup>
-          ) : null}
-        </select>
-        <button
-          className={activeTool === 'eraser' ? 'active' : ''}
-          title="Eraser — left-click/drag removes placements"
-          onClick={() => setTool(doc.docId, 'eraser')}
-        >
-          Eraser
-        </button>
-        <button
-          className={activeTool === POINT_LIGHT_TOOL_ID ? 'active' : ''}
-          title="Point light — click places a light (position, radius, energy, color in the properties panel), click a light to select it, right-click erases"
-          onClick={() => setTool(doc.docId, POINT_LIGHT_TOOL_ID)}
-        >
-          Light
-        </button>
-        <button
-          className={activeTool === SELECT_TOOL_ID ? 'active' : ''}
-          title="Select — click a sprite, character, or light to select it (sprite picks are pixel-accurate); drag to move it, Escape/empty-click to deselect"
-          onClick={() => setTool(doc.docId, SELECT_TOOL_ID)}
-        >
-          Select
-        </button>
-        <button
-          className={doc.surfaceSnap ? 'active' : ''}
-          title="Surface snap — placements take their height from the visible surface under the cursor (off: use the height field / shift+mouse-move height)"
-          onClick={() => setSurfaceSnap(doc.docId, !doc.surfaceSnap)}
-        >
-          Snap
-        </button>
+        <span className="toolbar-separator" aria-hidden="true" />
+        {placementMode ? (
+          <>
+            <select
+              aria-label="Placement brush"
+              title="Placement brush — built-in primitives and workspace sprites"
+              value={selectedEntry?.value ?? ''}
+              onChange={(e) => {
+                // Release focus: a focused select would both keep the E-key
+                // shortcut ignored and let the browser's select types-ahead
+                // treat E as "jump to the option starting with E".
+                e.currentTarget.blur();
+                const entry = brushEntries.find((b) => b.value === e.target.value);
+                if (!entry) return;
+                lastBrush.current = entry.label;
+                void selectBrush(doc.docId, entry.brush);
+              }}
+            >
+              <option value="">brush…</option>
+              <optgroup label="Primitives">
+                {brushEntries
+                  .filter((b) => b.kind === 'primitive')
+                  .map((b) => (
+                    <option key={b.value} value={b.value}>
+                      {b.label}
+                    </option>
+                  ))}
+              </optgroup>
+              <optgroup label="Character">
+                {brushEntries
+                  .filter((b) => b.kind === 'character')
+                  .map((b) => (
+                    <option key={b.value} value={b.value}>
+                      {b.label}
+                    </option>
+                  ))}
+              </optgroup>
+              {connected ? (
+                <optgroup label="Sprites">
+                  {brushEntries
+                    .filter((b) => b.kind === 'sprite')
+                    .map((b) => (
+                      <option key={b.value} value={b.value}>
+                        {b.label}
+                      </option>
+                    ))}
+                </optgroup>
+              ) : null}
+            </select>
+            <button
+              className={doc.surfaceSnap ? 'active' : ''}
+              title="Surface snap — placements take their height from the visible surface under the cursor (off: use the height field / shift+mouse-move height)"
+              onClick={() => setSurfaceSnap(doc.docId, !doc.surfaceSnap)}
+            >
+              Snap
+            </button>
+          </>
+        ) : null}
         <span className="hint">
           {activeTool === 'eraser'
             ? 'eraser'
@@ -1341,6 +1338,36 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         </span>
       </EditorToolbar>
       <div className="world-viewport" ref={viewportRef}>
+        <div className="tool-bar" role="toolbar" aria-label="World editor tools">
+          <button
+            className={`icon-btn${activeTool === SELECT_TOOL_ID ? ' active' : ''}`}
+            title="Select — click a sprite, character, or light to select it (sprite picks are pixel-accurate); drag to move it, Escape/empty-click to deselect"
+            onClick={() => setTool(doc.docId, SELECT_TOOL_ID)}
+          >
+            <IconSelect />
+          </button>
+          <button
+            className={`icon-btn${placementMode ? ' active' : ''}`}
+            title="Placement tool — left-click/drag places the selected brush, right-click erases"
+            onClick={() => setTool(doc.docId, lastBrush.current)}
+          >
+            <IconPencil />
+          </button>
+          <button
+            className={`icon-btn${activeTool === POINT_LIGHT_TOOL_ID ? ' active' : ''}`}
+            title="Point light — click places a light (position, radius, energy, color in the properties panel), click a light to select it, right-click erases"
+            onClick={() => setTool(doc.docId, POINT_LIGHT_TOOL_ID)}
+          >
+            <IconLight />
+          </button>
+          <button
+            className={`icon-btn${activeTool === 'eraser' ? ' active' : ''}`}
+            title="Eraser — left-click/drag removes placements"
+            onClick={() => setTool(doc.docId, 'eraser')}
+          >
+            <IconEraser />
+          </button>
+        </div>
         <canvas ref={canvasRef} />
         <div className="zoom-controls">
           <button title="Zoom out" disabled={!transform} onClick={() => zoomBy(1 / ZOOM_STEP)}>

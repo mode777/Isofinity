@@ -39,7 +39,16 @@ export function App(): React.JSX.Element {
       <aside className="left">
         <ProjectBrowser />
       </aside>
-      <main className={doc?.kind === 'bake' ? 'center center-viewport' : 'center'}>
+      {/* `center-viewport` = "viewport editor, full-bleed center area":
+          shared by the bake and world editors so neither pays the generic
+          document padding. */}
+      <main
+        className={
+          doc?.kind === 'bake' || doc?.kind === 'world'
+            ? 'center center-viewport'
+            : 'center'
+        }
+      >
         {doc?.kind === 'bake' ? <SpriteEditor key={doc.docId} doc={doc} /> : null}
         {doc?.kind === 'world' ? <WorldEditor key={doc.docId} doc={doc} /> : null}
         {!doc ? (

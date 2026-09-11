@@ -174,6 +174,15 @@ list when a change lands (and prune it — history belongs in the archives).
   (position, height, shadow, facing; the light editor for lights) only
   while the Select tool is active; `E` still cycles the brush otherwise.
   Selection is in-memory per ADR 0006; no format impact.
+- World-editor chrome reorganization — the world editor is full-bleed
+  (no double center padding) with compact toolbar/gap spacing. Save,
+  undo, and redo are icon buttons separated by a divider from the
+  tool-contextual controls; the brush dropdown and surface-snap toggle
+  show only while a placement tool is active (hidden for Select/eraser/
+  light without resetting their state). Tool selection moved to a thin
+  vertical icon bar docked inside the viewport's top-left corner
+  (Select, pencil, light, eraser) that overlays the canvas without
+  touching the view transform. Editor chrome only — no format impact.
 
 ## In progress
 

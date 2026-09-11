@@ -468,11 +468,11 @@ canvas {
 .world-editor {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.35rem;
   height: 100%;
   width: 100%;
   min-height: 0;
-  padding: 1rem;
+  padding: 0.35rem;
 }
 
 /* The world viewport: one zoomable panel filling the space between the
@@ -504,9 +504,8 @@ canvas {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 0.45rem 0.75rem;
-  margin-bottom: 0.8rem;
+  gap: 0.35rem;
+  padding: 0.3rem 0.5rem;
   border: 1px solid var(--panel-border);
   border-radius: 6px;
   background: var(--panel);
@@ -515,6 +514,47 @@ canvas {
 .editor-toolbar .hint {
   margin: 0;
   white-space: nowrap;
+}
+
+/* Icon-only toolbar buttons (square, centered glyph). */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+}
+
+/* Vertical rule separating the toolbar's global actions (save, undo,
+   redo) from the active tool's contextual controls. */
+.toolbar-separator {
+  align-self: stretch;
+  width: 1px;
+  margin: 0.1rem 0.2rem;
+  background: var(--panel-border);
+}
+
+/* Thin vertical tool bar docked inside the world viewport (Photoshop
+   style): one icon button per tool, same floating-panel look as the
+   viewport's other corner overlays. */
+.tool-bar {
+  position: absolute;
+  z-index: 2;
+  top: 0.6rem;
+  left: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0.15rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.tool-bar .icon-btn {
+  width: 1.85rem;
+  height: 1.85rem;
 }
 
 

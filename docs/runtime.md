@@ -160,6 +160,20 @@ below. Available placement tools are the document's sprite layers; new
 world documents start with an empty grid. World save/load works against
 the workspace `worlds/` folder as described in Worlds.
 
+The world editor is full-bleed: like the sprite editor it fills the
+center region without the generic document padding, with only a thin
+inset around the toolbar, viewport, and hint line. The toolbar row keeps
+Save, undo, and redo as icon buttons, a divider, then the active tool's
+contextual controls — the brush dropdown and the surface-snap toggle,
+shown only while a placement (pencil) tool is active; hiding them never
+resets the chosen brush or snap state. Tool selection itself lives in a
+thin vertical icon bar docked inside the viewport's top-left corner
+(Photoshop-style): Select, pencil, point light, and eraser, one icon per
+tool with the active tool highlighted. The bar overlays the canvas
+without touching the view transform — canvas input outside the bar is
+unaffected. All of this is editor chrome; the tool, brush, and snap
+state stay per-document in-memory editor state (ADR 0006).
+
 The world viewport is one zoomable panel: it shows the fixed projected
 world image (the bake's isometric projection, CPU-computed once) through
 a 2D view transform — two-finger scroll (or a mouse wheel) pans, pinch
@@ -220,13 +234,14 @@ shows the chosen view; already-placed sprites keep their direction. Brush
 direction is per-document in-memory editor state — never saved. The same
 Brush section holds the brush's placement height and grounding-shadow
 strength, and appears only while the brush tool is active; the toolbar
-keeps only the tool buttons, the brush dropdown, and the surface-snap
-toggle. The selected-placement section likewise appears only while the
+keeps only the icon save/undo/redo buttons, the brush dropdown, and the
+surface-snap toggle (the dropdown and snap hidden outside placement
+mode). The selected-placement section likewise appears only while the
 Select tool is active.
 
 ### Select tool
 
-The toolbar's **Select** tool inspects and moves existing placements.
+The viewport tool bar's **Select** tool inspects and moves existing placements.
 Clicking selects the placement under the cursor — a sprite, a character,
 or a point light — clicking empty space or pressing Escape clears the
 selection, and one placement is selected at a time. Sprite selection is
