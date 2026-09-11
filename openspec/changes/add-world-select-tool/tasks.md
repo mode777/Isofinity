@@ -37,7 +37,7 @@
 
 - [x] 6.1 Run `npm run verify:selection`, `npm run verify:bundles`, `npm run verify:mesh`, and `npm run verify:history` and confirm all pass.
 - [x] 6.2 Run `npm run build` and confirm the production build succeeds (typecheck + Vite).
-- [ ] 6.3 Leave the browser-only checks to the user: with `npm run dev`, confirm selecting sprites pixel-accurately (transparent margins miss), selecting/moving sprites, characters, and lights, one-undo-per-drag, and the Brush/selected-placement panel sections. No bake behavior changed, so `scratch-verify.html` hashes are expected to be unchanged.
+- [x] 6.3 Leave the browser-only checks to the user: with `npm run dev`, confirm selecting sprites pixel-accurately (transparent margins miss), selecting/moving sprites, characters, and lights, one-undo-per-drag, and the Brush/selected-placement panel sections. No bake behavior changed, so `scratch-verify.html` hashes are expected to be unchanged.
 
 ## 7. Follow-up refinements
 
