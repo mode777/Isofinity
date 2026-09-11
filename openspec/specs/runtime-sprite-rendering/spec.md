@@ -81,10 +81,13 @@ and height — to the baked g-buffer depth in the shared global reference
 frame, so occlusion and interpenetration stay pixel-accurate at any
 height: a raised sprite occludes exactly along its baked silhouette
 against the ground and against other placements, whether stacked, sunk
-into, or beside them. Cursor placement and erase keep using ground-
-footprint picking; erase SHALL remove the placement with the greatest
-depth key — the topmost — among the placements whose ground footprint
-contains the cursor.
+into, or beside them. Cursor placement keeps using the cursor's ground
+position. The eraser SHALL use the same pixel-accurate placement pick as
+the Select tool — the placement whose baked g-buffer silhouette and
+per-fragment depth are under the cursor for a sprite, or the nearest by
+screen-space proximity for a mesh or point light — rather than the ground
+footprint, so clicking a sprite's transparent margin erases nothing and
+the visually topmost placement is removed.
 
 #### Scenario: Interpenetrating sprites resolve pixel-accurately
 
@@ -110,10 +113,11 @@ contains the cursor.
 
 #### Scenario: Erase removes the topmost placement
 
-- **WHEN** two placements' ground footprints both contain the cursor and
-  one stands higher than the other
-- **THEN** erasing removes the higher placement first, and a repeat erase
-  removes the lower one
+- **WHEN** two placements' drawn extents cover the cursor and one is drawn
+  over the other
+- **THEN** erasing removes the visibly topmost placement — the one the
+  Select tool would pick at that pixel — and a repeat erase removes the
+  next one
 
 ### Requirement: Ambient light is a per-channel color
 
@@ -182,8 +186,9 @@ exactly at the mouse position that placed it, in every direction. The
 placement ghost SHALL be drawn at the same point so the preview matches
 the landed placement exactly. A bundle without a recorded custom origin
 anchors at its box min corner and SHALL render exactly as before this
-change. Placement direction SHALL NOT change ground footprint picking or
-erase behavior: both operate on the placement's ground footprint as today.
+change. Placement direction SHALL NOT change erase semantics: the eraser
+picks the placement under the cursor from the drawn silhouette and
+per-fragment depth exactly as the Select tool does, whatever the facing.
 
 #### Scenario: Placement draws its direction
 
@@ -200,9 +205,9 @@ erase behavior: both operate on the placement's ground footprint as today.
 
 #### Scenario: Direction does not change picking or erase
 
-- **WHEN** the user right-clicks a spot holding an east-facing placement
-- **THEN** the eraser removes the topmost placement under the cursor
-  regardless of its direction
+- **WHEN** the user erases a spot holding an east-facing placement
+- **THEN** the eraser removes the placement picked under the cursor its
+  east view draws there, regardless of direction
 
 #### Scenario: Custom anchor lands at the placement point
 

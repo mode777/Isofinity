@@ -1,0 +1,298 @@
+# world-editor-selection Specification
+
+## Purpose
+
+Lets a user select an existing world placement — a baked sprite, an animated
+character, or a point light — in order to inspect and adjust it and to move it
+on the ground, with sprite picking resolved pixel-accurately from the baked
+g-buffers.
+
+## Requirements
+
+### Requirement: Select tool selects a placement
+
+The world editor SHALL offer a Select tool. With it active, clicking a
+placement SHALL select that placement, clicking empty space SHALL clear the
+selection, and pressing Escape SHALL clear the selection. At most one placement
+SHALL be selected at a time. Selecting a placement SHALL NOT by itself change
+the world, place anything, or mark the document dirty. The Select tool SHALL be
+mutually exclusive with the pencil, eraser, and point-light tools; switching to
+another tool SHALL NOT move any placement, and MAY clear the selection. A
+left-press that lands on no placement SHALL clear the selection rather than
+falling through to placement.
+
+#### Scenario: Selecting a placed sprite
+
+- **WHEN** the user activates the Select tool and clicks on a placed sprite
+- **THEN** that sprite becomes the selected placement and is highlighted in the
+  viewport
+
+#### Scenario: Clicking empty space deselects
+
+- **WHEN** the user clicks a point with no placement under the cursor while the
+  Select tool is active
+- **THEN** the selection is cleared and no placement is added or removed
+
+#### Scenario: Escape clears the selection
+
+- **WHEN** the user presses Escape while the Select tool has a selection
+- **THEN** the selection is cleared
+
+#### Scenario: Selecting does not dirty the document
+
+- **WHEN** the user selects a placement in a saved world and then clears the
+  selection
+- **THEN** the document is not marked dirty and no history command is recorded
+
+### Requirement: Sprite selection is pixel-accurate
+
+When the Select tool resolves a sprite placement at the cursor, it SHALL test
+the cursor pixel against the placement's baked g-buffer silhouette rather than
+against its ground footprint: a cursor pixel inside the placement's transparent
+margin SHALL NOT select it, while a cursor pixel inside its opaque silhouette
+SHALL. The test SHALL use the document's in-memory sprite g-buffers — the same
+data the surface-snap read uses — and SHALL NOT require a GPU readback or a
+picking framebuffer.
+
+When several sprite placements cover the cursor pixel, the selection SHALL
+resolve to the nearest one by per-fragment depth — the placement's baked
+g-buffer depth plus its world offset — matching the compositor's per-pixel
+occlusion, so the sprite that is visibly on top is the one selected. The
+placement's height SHALL be included, so a raised placement is selected exactly
+where it is drawn.
+
+#### Scenario: Transparent sprite margin is not selectable
+
+- **WHEN** the user clicks a pixel that lies inside a sprite's rectangular
+  bounds but in its baked transparent area, with nothing else under the cursor
+- **THEN** no sprite is selected
+
+#### Scenario: Overlapping sprites resolve to the visually topmost
+
+- **WHEN** two overlapping sprites cover the cursor pixel and one is drawn over
+  the other
+- **THEN** the visible (nearest) sprite is selected, not the one behind it
+
+#### Scenario: Raised sprite is selected where it is drawn
+
+- **WHEN** a sprite is raised above the ground plane and the user clicks a pixel
+  of its drawn silhouette above its ground footprint
+- **THEN** the raised sprite is selected
+
+### Requirement: Character and point-light selection
+
+A character (mesh) placement SHALL be selectable when the cursor is within a
+small screen-space tolerance of the placement's projected ground anchor. A
+point light SHALL be selectable when the cursor is within a small screen-space
+tolerance of its projected emitter point. Candidates from every kind SHALL be
+compared by depth so that, when a cursor is near more than one kind of
+placement, the nearer one is selected, matching the compositor's ordering.
+Selecting a point light SHALL present the same light properties as selecting it
+with the point-light tool.
+
+#### Scenario: Selecting a character
+
+- **WHEN** the user activates the Select tool and clicks on a placed character
+- **THEN** the character becomes the selected placement and is highlighted
+
+#### Scenario: Selecting a point light
+
+- **WHEN** the user activates the Select tool and clicks on a placed point light
+- **THEN** the light becomes the selected placement and its radius, energy,
+  color, and position controls are shown
+
+### Requirement: Eraser uses placement picking
+
+The eraser SHALL remove the placement resolved by the same pixel-accurate
+pick the Select tool uses, rather than by ground footprint: a sprite is
+erasable only where its baked g-buffer silhouette covers the cursor (its
+transparent margin erases nothing), and a mesh or point light is erasable
+near its projected anchor. When placements of different kinds overlap, the
+eraser SHALL remove the one the Select tool would pick at that pixel.
+Erasure SHALL record an undoable removal command (undo restores the exact
+removed placement) and SHALL clear the selection when it targeted the removed
+placement. Dragging the eraser across the viewport SHALL remove each picked
+placement as the cursor passes over it; the eraser's hover SHALL highlight the
+placement a click would remove using the same outline as the selection, and a
+right-click with any other tool SHALL erase by the same rule.
+
+#### Scenario: Transparent margin erases nothing
+
+- **WHEN** the eraser clicks a pixel inside a sprite's rectangular bounds but
+  in its baked transparent area, with nothing else under the cursor
+- **THEN** no placement is removed
+
+#### Scenario: Eraser removes the picked placement
+
+- **WHEN** two overlapping sprites cover the cursor and the eraser clicks there
+- **THEN** the visibly topmost sprite — the one the Select tool would pick — is
+  removed
+
+#### Scenario: Dragging erases successive placements
+
+- **WHEN** the user drags the eraser across several placed sprites
+- **THEN** each placement the cursor passes over is removed in turn
+
+#### Scenario: Undo restores an erased placement
+
+- **WHEN** the user erases a placement and undoes
+- **THEN** the exact removed placement returns at its position, height, facing,
+  and shadow strength
+
+### Requirement: Selection highlight
+
+The viewport SHALL visibly mark the selected placement with an editor-chrome
+highlight anchored to its world position that tracks the viewport's zoom and
+pan, so the selection is identifiable among overlapping placements. For a
+selected sprite the highlight SHALL be a bounding box outlining the sprite
+exactly as it is drawn (the projected extent of the placement's baked view at
+its position, height, and facing), so the box matches the sprite's screen
+silhouette bounds. For a selected character or point light the highlight SHALL
+be an equivalent marker at the placement (the height gizmo, or the light's
+radius ring). The highlight SHALL be overlay chrome: it SHALL NOT be serialized
+into world files and showing it SHALL NOT mark the document dirty.
+
+#### Scenario: Highlight follows zoom and pan
+
+- **WHEN** the user zooms or pans the viewport with a placement selected
+- **THEN** the highlight stays anchored to the selected placement's world
+  position, scaling and moving with the projected image
+
+#### Scenario: Selected sprite shows a bounding box
+
+- **WHEN** the user selects a sprite
+- **THEN** a bounding box outlines the sprite as drawn, moving and resizing with
+  the sprite's position, height, and facing
+
+#### Scenario: Highlight never reaches the saved file
+
+- **WHEN** the user selects a placement, saves the world, and inspects the file
+- **THEN** the file contains the placement's data but no selection or highlight
+  data
+
+### Requirement: Dragging a selected placement moves it
+
+With the Select tool active, pressing the left button on a placement SHALL
+select it, and dragging with the left button held SHALL move that placement
+along the ground plane, free-form in x and z, following the cursor. A sprite or
+character SHALL keep its height while it moves (only x and z change); a point
+light's emitter SHALL follow the cursor. The move SHALL update the placement
+live during the drag. On release, a drag that changed the position SHALL record
+exactly one move command on the document's undo/redo history — the pre-drag
+position for undo and the final position for redo — and SHALL mark the document
+dirty. A press-and-release that did not move SHALL leave the placement
+unchanged and SHALL NOT record a command or mark the document dirty.
+
+#### Scenario: Dragging moves a sprite on the ground
+
+- **WHEN** the user presses on a selected sprite and drags across the viewport
+- **THEN** the sprite follows the cursor's ground position during the drag and
+  stays at the same height
+
+#### Scenario: One undo returns the placement to where the drag began
+
+- **WHEN** the user drags a placement to a new spot and then undoes once
+- **THEN** the placement is back at its pre-drag position, and redo moves it to
+  the dragged position
+
+#### Scenario: Click without dragging records nothing
+
+- **WHEN** the user presses and releases on a placement without moving the
+  pointer
+- **THEN** the placement does not move, no history command is recorded, and the
+  document is not marked dirty
+
+#### Scenario: Dragging a character or a light
+
+- **WHEN** the user drags a selected character or point light
+- **THEN** its ground position follows the cursor and the move is one undoable
+  command
+
+### Requirement: Selected placement property editing
+
+With a placement selected, the properties panel SHALL let the user edit that
+placement's properties: its ground position (x and z) and height for a sprite
+or character, and additionally its grounding-shadow strength (opacity, 0 off to
+1 full) for a sprite. A selected point light SHALL expose its existing light
+properties (radius, energy, color, and position). Every edit SHALL apply to the
+world immediately and SHALL be recorded as an undoable world edit, and it SHALL
+mark the document dirty.
+
+#### Scenario: Editing a selected sprite's height
+
+- **WHEN** the user selects a sprite and changes its height in the properties
+  panel
+- **THEN** the sprite renders at the new height and the edit can be undone
+
+#### Scenario: Editing a selected sprite's shadow opacity
+
+- **WHEN** the user selects a sprite and changes its grounding-shadow strength
+- **THEN** the sprite's baked grounding shadow is composited at the new
+  strength and the edit can be undone
+
+#### Scenario: Editing a selected placement's position
+
+- **WHEN** the user changes the x or z value of a selected sprite, character,
+  or light
+- **THEN** the placement moves to that ground position immediately
+
+### Requirement: Selected sprite facing
+
+A selected sprite's facing SHALL be editable from the properties panel and the
+keyboard. The panel SHALL offer a direction control listing the sprite asset's
+available baked directions (N/E/S/W order), enabled when the asset has more than
+one placeable direction (disabled or absent otherwise, with the placement
+keeping its facing), and choosing a direction SHALL change the placement's
+facing immediately, redraw it from that view, and record an undoable edit. While
+the Select tool is active and a sprite is selected, pressing the `E` key (no
+modifiers, not while typing in a form control) SHALL cycle that placement's
+facing through its available directions with wrap; with no sprite selected, or
+under any other tool, `E` SHALL keep cycling the active brush's direction as
+before. Changing a placement's facing SHALL NOT change its ground position,
+height, or footprint picking.
+
+#### Scenario: Direction dropdown changes a placement's facing
+
+- **WHEN** the user selects a multi-view sprite and picks another direction
+- **THEN** the placement immediately shows that view and the change can be
+  undone
+
+#### Scenario: E cycles the selected sprite's facing
+
+- **WHEN** the Select tool is active with a multi-view sprite selected and the
+  user presses `E`
+- **THEN** the placement advances to its next available direction, wrapping at
+  the end, not the brush's direction
+
+#### Scenario: E still cycles the brush without a selected sprite
+
+- **WHEN** another tool is active, or the Select tool has no sprite selected,
+  and the user presses `E`
+- **THEN** the active brush's direction cycles as before
+
+#### Scenario: Single-view sprite has no facing control
+
+- **WHEN** the selected sprite is a single-view asset
+- **THEN** the direction control is disabled (or absent) and pressing `E` does
+  not change its facing
+
+### Requirement: Selection is in-memory and cleared when stale
+
+Selection SHALL be per-world-document in-memory editor state (ADR 0006):
+preserved across tab switches and view recreation, never serialized into world
+files, and never changing the world file format. When the selected placement no
+longer exists — because it was erased, or because undo/redo removed it — the
+selection SHALL clear. Selecting and deselecting SHALL NOT be recorded on the
+undo/redo history.
+
+#### Scenario: Selection survives a tab switch
+
+- **WHEN** the user selects a placement in one world tab, switches to another
+  tab, and switches back
+- **THEN** the same placement is still selected and the world file contains no
+  selection data
+
+#### Scenario: Stale selection clears after undo
+
+- **WHEN** the user places a sprite, selects it, and undoes the placement
+- **THEN** the selection is cleared because the placement no longer exists

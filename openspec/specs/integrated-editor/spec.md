@@ -169,20 +169,26 @@ workspace assets need a connection.
 
 ### Requirement: Properties panel follows the active editor
 
-The properties panel SHALL show controls matching the active tab's editor
-kind. For a sprite editor it SHALL show — in order — the preset management
-section (save-as-preset, the preset listing, delete, and file import) at the
-top before any rendering settings, the document's source information, model
-scale (when the source is a model), path-trace bake settings, and the
-environment controls (load/rotate/intensity/exposure/saturation). The panel
-SHALL NOT offer bake or render actions: the raster g-buffer bake is implicit
-in the render pass action, and the render pass action lives in the sprite
-editor toolbar. For a world editor it SHALL show the key light controls
-(azimuth, elevation, intensity, color, ambient color, dynamic-light switch)
-and the sun-position controls. The panel SHALL NOT duplicate the per-editor
-toolbar's actions (save, place-in-world, render pass, and placement tool
-selection live in the toolbar). Editing a control SHALL update the active
-document only.
+The properties panel SHALL show controls matching the active tab's editor kind.
+For a sprite editor it SHALL show — in order — the preset management section
+(save-as-preset, the preset listing, delete, and file import) at the top before
+any rendering settings, the document's source information, model scale (when the
+source is a model), path-trace bake settings, and the environment controls
+(load/rotate/intensity/exposure/saturation). The panel SHALL NOT offer bake or
+render actions: the raster g-buffer bake is implicit in the render pass action,
+and the render pass action lives in the sprite editor toolbar. For a world
+editor it SHALL show a **Brush** section (the active brush's placement height,
+grounding-shadow strength, and direction) only while the placement brush tool is
+active, a **selected-placement** section only while the Select tool is active
+with a selection (the selected sprite's or character's ground position and
+height, and for a sprite its grounding-shadow strength and, when the asset has
+more than one placeable direction, a facing control; for a selected point light,
+the light properties — radius, energy, color, and position), and the key light
+controls (azimuth, elevation, intensity, color, ambient color, dynamic-light
+switch) and the sun-position controls. The panel SHALL NOT duplicate the
+per-editor toolbar's actions (save, place-in-world, render pass, undo/redo, and
+placement tool selection live in the toolbar). Editing a control SHALL update
+the active document only.
 
 #### Scenario: Sprite tab shows bake properties
 
@@ -203,11 +209,24 @@ document only.
 - **THEN** the panel offers no raster bake button and no render pass button;
   the only render action is the sprite editor toolbar's
 
+#### Scenario: Brush section appears only with the brush tool
+
+- **WHEN** the user activates a world editor tab and picks a placement brush
+- **THEN** the properties panel shows the Brush section (height, shadow, and
+  direction), and switching to the Select, eraser, or point-light tool hides it
+
+#### Scenario: Selected sprite controls appear only with the Select tool
+
+- **WHEN** the user selects a sprite with the Select tool
+- **THEN** the panel shows that sprite's position, height, grounding-shadow
+  strength, and (for a multi-view asset) its facing control, and switching to
+  another tool hides the sprite section while keeping the selection
+
 #### Scenario: World tab shows light properties
 
-- **WHEN** the user activates a world editor tab
-- **THEN** the properties panel shows the key light and sun-position
-  controls, and no save button or world name field
+- **WHEN** the user activates a world editor tab and selects a point light
+- **THEN** the properties panel shows the light's radius, energy, color, and
+  position controls, and no save button or world name field
 
 #### Scenario: Controls are per document
 
@@ -340,42 +359,53 @@ placement requirement (target an open world tab or create a new world).
 
 ### Requirement: World editor toolbar
 
-A world editor SHALL render a toolbar above its content offering Save, a
-pencil placement tool, an eraser toggle, a surface-snap toggle, and a
-numeric placement-height field. Save
-SHALL prompt for a file name, defaulting to the world's saved name or the
+A world editor SHALL render a toolbar above its content offering Save, undo and
+redo controls, a pencil placement tool, a brush dropdown, an eraser toggle, a
+point-light placement tool, a Select tool, and a surface-snap toggle.
+
+Save SHALL prompt for a file name, defaulting to the world's saved name or the
 next free `world-N`, and SHALL write the world to the workspace's `worlds/`
-folder under the chosen name when a workspace is connected; cancelling
-SHALL abort without writing or clearing the dirty state. The pencil tool
-SHALL be the active placement tool by default; the brush it places is
-chosen from a dropdown grouped into **Primitives** (the built-in test
-primitives) and **Sprites** (the workspace's saved sprite bundles, listed
-when a workspace is connected). Next to the brush dropdown the toolbar
-SHALL offer a direction control listing the active brush's placeable
-directions (N/E/S/W) as specified by the brush-direction requirement.
-Clicking or dragging on the world canvas
-with the pencil places the chosen brush at the pointed cell; the eraser
-toggle (and the right mouse button) removes placements. The surface-snap
-toggle SHALL control whether placements take their height from the visible
-surface under the cursor (on) or from the user-adjusted placement height
-(off), as specified by the placement-height requirement; the height field
-edits that adjusted height as specified there; both SHALL be per-document
-in-memory editor state. The toolbar SHALL replace the
+folder under the chosen name when a workspace is connected; cancelling SHALL
+abort without writing or clearing the dirty state.
+
+The pencil tool SHALL be the active placement tool by default; the brush it
+places is chosen from a dropdown grouped into **Primitives** (the built-in test
+primitives) and **Sprites** (the workspace's saved sprite bundles, listed when a
+workspace is connected). Clicking or dragging on the world canvas with the
+pencil places the chosen brush at the pointed cell; the eraser toggle (and the
+right mouse button) removes placements. The point-light tool places point lights
+as specified by the point-light tool requirement. The Select tool selects and
+moves placements as specified by the world-editor-selection capability.
+
+The surface-snap toggle SHALL control whether placements take their height from
+the visible surface under the cursor (on) or from the user-adjusted placement
+height (off), as specified by the placement-height requirement. The brush's
+placement height, grounding-shadow strength, and direction SHALL be edited in
+the properties panel's Brush section (see the properties-panel requirement),
+not in the toolbar; both the surface-snap toggle and the Brush section values
+SHALL be per-document in-memory editor state. The toolbar SHALL replace the
 previous per-layer tool strip.
 
 #### Scenario: World toolbar offers save, pencil, and brush dropdown
 
 - **WHEN** the user activates a world editor tab
-- **THEN** the toolbar shows Save, a pencil tool marked active, and a brush
-  dropdown whose groups list the built-in primitives and the workspace's
-  saved sprites
+- **THEN** the toolbar shows Save, a pencil tool marked active, a brush
+  dropdown whose groups list the built-in primitives and the workspace's saved
+  sprites, and a Select tool
 
 #### Scenario: Surface-snap toggle and height field are available
 
 - **WHEN** the user activates a world editor tab
-- **THEN** the toolbar shows a surface-snap toggle that can be switched on
-  and off and a numeric height field showing the current placement height,
-  and both persist across tab switches within the session
+- **THEN** the toolbar shows a surface-snap toggle that can be switched on and
+  off and it persists across tab switches within the session, while the
+  placement-height field lives in the properties panel's Brush section
+
+#### Scenario: Brush properties live in the panel
+
+- **WHEN** the user activates a world editor tab with a brush chosen
+- **THEN** the toolbar shows no numeric height field and no direction control,
+  and the properties panel's Brush section offers the placement height,
+  grounding-shadow strength, and (for a multi-view sprite) the direction
 
 #### Scenario: Saving prompts with a sensible default
 
@@ -395,34 +425,37 @@ previous per-layer tool strip.
   right-clicks a placed sprite with the pencil active
 - **THEN** that placement is removed
 
+#### Scenario: Select tool is available
+
+- **WHEN** the user activates a world editor tab
+- **THEN** the toolbar offers a Select tool alongside the pencil, eraser, and
+  point-light tools
+
 ### Requirement: Brush direction selection
 
-A world editor SHALL let the user choose which way the current brush faces
-when the brush is a sprite baked with more than one placeable view slot
-(N/E/S/W). A direction control next to the brush dropdown SHALL list the
-active brush's available directions in N, E, S, W order and SHALL be
-enabled only while the active brush is a multi-view sprite; for
-single-view sprites and primitives it SHALL be disabled (or hidden) and
-the brush faces north. Picking a direction SHALL make subsequent
-placements face that way, and the ghost preview SHALL show the brush as
-that direction's view. Pressing the `E` key (without modifier keys) in the
-world editor SHALL cycle the brush through its available directions in
-N → E → S → W order, wrapping around and skipping directions the sprite
-does not provide; for a single-view brush or while a text field, select,
-or other form control has keyboard focus it SHALL do nothing. The chosen
-brush direction SHALL be per-document in-memory editor state: it SHALL
-never by itself mark the document dirty nor reach a saved file — a
-placement's direction is persisted only when placed, as specified by
-world persistence. Already-placed sprites SHALL keep their direction; the
-eraser SHALL stay direction-independent.
+A world editor SHALL let the user choose which way the current brush faces when
+the brush is a sprite baked with more than one placeable view slot (N/E/S/W). A
+direction control in the properties panel's Brush section SHALL list the active
+brush's available directions in N, E, S, W order and SHALL be enabled only while
+the active brush is a multi-view sprite; for single-view sprites and primitives
+it SHALL be disabled (or hidden) and the brush faces north. Picking a direction
+SHALL make subsequent placements face that way, and the ghost preview SHALL show
+the brush as that direction's view. Pressing the `E` key (without modifier keys)
+in the world editor SHALL cycle the brush through its available directions in
+N → E → S → W order, wrapping around and skipping directions the sprite does not
+provide; for a single-view brush or while a text field, select, or other form
+control has keyboard focus it SHALL do nothing. The chosen brush direction SHALL
+be per-document in-memory editor state: it SHALL never by itself mark the
+document dirty nor reach a saved file — a placement's direction is persisted
+only when placed, as specified by world persistence. Already-placed sprites
+SHALL keep their direction; the eraser SHALL stay direction-independent.
 
 #### Scenario: Multi-view brush offers its directions
 
-- **WHEN** the user picks a sprite whose bundle stores north, east, and
-  west views with render passes
-- **THEN** the direction control next to the brush dropdown lists N, E, and
-  W with east currently placeable, and picking W makes the next placement
-  face west
+- **WHEN** the user picks a sprite whose bundle stores north, east, and west
+  views with render passes
+- **THEN** the direction control in the Brush section lists N, E, and W with
+  east currently placeable, and picking W makes the next placement face west
 
 #### Scenario: Ghost reflects the chosen direction
 
@@ -435,7 +468,7 @@ eraser SHALL stay direction-independent.
 
 - **WHEN** the user presses `E` with a north/east/west brush active
 - **THEN** the brush direction advances N → E → W → N, skipping the absent
-  south view
+  south view, and the Brush section's direction control reflects it
 
 #### Scenario: E key wraps around
 
@@ -446,10 +479,9 @@ eraser SHALL stay direction-independent.
 
 #### Scenario: Single-view brush has no direction choice
 
-- **WHEN** the active brush is a primitive or a single-view sprite and the
-  user opens the direction control or presses `E`
-- **THEN** the control is disabled (or absent) and pressing `E` changes
-  nothing
+- **WHEN** the active brush is a primitive or a single-view sprite and the user
+  opens the direction control or presses `E`
+- **THEN** the control is disabled (or absent) and pressing `E` changes nothing
 
 #### Scenario: E key does not fight text entry
 
@@ -1055,7 +1087,8 @@ NOT affect picking or the placement list, and SHALL NOT mark the
 document dirty. The ghost SHALL be hidden when the eraser is active,
 when no brush is chosen, when the brush's layer is not loaded, and when
 the cursor leaves the viewport — in those states the viewport SHALL fall
-back to the unit-cell hover highlight (eraser) or no highlight.
+back to the eraser's hover highlight of the placement under the cursor
+(if any) or no highlight.
 
 #### Scenario: Ghost follows the cursor
 
@@ -1097,8 +1130,9 @@ back to the unit-cell hover highlight (eraser) or no highlight.
 
 - **WHEN** the user toggles the eraser, or picks no brush, while moving
   the mouse over the viewport
-- **THEN** no ghost sprite is drawn; with the eraser the unit-cell hover
-  highlight shows as before
+- **THEN** no ghost sprite is drawn; with the eraser the placement under
+  the cursor is highlighted with the same outline the Select tool uses
+  (or nothing when no placement is under the cursor)
 
 #### Scenario: Ghost is a preview only
 
@@ -1106,6 +1140,7 @@ back to the unit-cell hover highlight (eraser) or no highlight.
   active
 - **THEN** the document stays clean (no dirty mark) and no placement
   exists until an actual click or drag
+
 ### Requirement: Unclamped placement height control
 
 The world editor SHALL give the current brush a placement height that the
@@ -1117,8 +1152,8 @@ user adjusts in two ways:
   allowed to continue below the ground plane into negative values. The
   viewport SHALL NOT pan or zoom while the height is adjusted this way,
   and ordinary hover tracking SHALL continue.
-- **Manual height input**: the world toolbar SHALL offer a numeric
-  placement-height field following the editor's precise-numeric-input
+- **Manual height input**: the properties panel's Brush section SHALL offer a
+  numeric placement-height field following the editor's precise-numeric-input
   conventions: committing (Enter or focus loss) SHALL apply the entered
   finite value exactly, including negative values below the ground plane;
   input that is empty or not a valid number SHALL be rejected with the
@@ -1137,7 +1172,7 @@ placement whose visible top surface is at world height 1 SHALL yield an
 effective placement height of 1 (within bake/render numeric precision),
 not a value above it — snapping onto a unit cube's top is equivalent to
 entering `1` manually. Over empty ground or nothing at all the height
-SHALL be ground level. While surface snap is on, the toolbar height field
+SHALL be ground level. While surface snap is on, the height field
 SHALL display the height snap read at the current cursor position, so the
 user can see the value snap picked; the display is transient feedback and
 SHALL NOT overwrite the stored brush height, which applies again when snap
@@ -1164,10 +1199,9 @@ made at a non-zero height SHALL mark it dirty.
 
 #### Scenario: Manual height input applies an exact value
 
-- **WHEN** the user types `1.5` into the toolbar height field and presses
-  Enter
-- **THEN** the placement height becomes exactly `1.5` and the ghost shows
-  it
+- **WHEN** the user types `1.5` into the Brush section's height field and
+  presses Enter
+- **THEN** the placement height becomes exactly `1.5` and the ghost shows it
 
 #### Scenario: Manual height input applies negative values
 
@@ -1200,7 +1234,7 @@ made at a non-zero height SHALL mark it dirty.
 
 - **WHEN** surface snap is on and the cursor moves over a surface at
   height 0.5 and then over empty ground
-- **THEN** the toolbar height field shows the snapped height under the
+- **THEN** the height field shows the snapped height under the
   cursor (0.5, then 0), without changing the stored brush height
 
 #### Scenario: Stored height survives a snap session
@@ -1244,6 +1278,7 @@ made at a non-zero height SHALL mark it dirty.
 - **THEN** the raised height is exactly as left across the tab switch,
   and the reopened world starts at ground level with no height data in
   the saved file
+
 ### Requirement: Placement height feedback in the world viewport
 
 The world viewport SHALL make off-ground heights visible without relying
