@@ -183,6 +183,13 @@ list when a change lands (and prune it — history belongs in the archives).
   vertical icon bar docked inside the viewport's top-left corner
   (Select, pencil, light, eraser) that overlays the canvas without
   touching the view transform. Editor chrome only — no format impact.
+- Selectable light icons — every placed point light shows a small
+  constant-size diamond icon at its emitter, tinted with the light's
+  color, visible in every tool mode: the visible click/drag handle for
+  the existing screen-space light pick (Select click selects, Select
+  drag moves, Light-tool click selects instead of placing, brush clicks
+  pass through), with a hover radius-ring preview under the Select and
+  Light tools. Editor chrome only — no format impact.
 
 ## In progress
 

@@ -105,6 +105,11 @@ the pointer for the real semantics.
   transparent margins are not selectable and the visually nearest wins);
   meshes and lights use screen-space proximity. The eraser uses the same
   pick (`src/runtime/selection.ts`, ADR 0012).
+- **Light icon (handle)** — the small constant-size diamond drawn over
+  every placed point light at its projected emitter, tinted with the
+  light's color: the visible face of the light's proximity pick, so
+  lights can be found, clicked (select) and dragged (move) in any tool
+  mode. Editor chrome — never serialized (ADR 0006).
 - **Surface snap** — toolbar toggle: placements take their height from
   the visible surface under the cursor, computed CPU-side from the
   in-memory g-buffers; overrides the shift+wheel height.

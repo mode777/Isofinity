@@ -104,6 +104,29 @@ function toPx(x: number, z: number, y = 0): [number, number] {
 const GROUND_EPSILON = 0.005;
 /** Shadow ellipse segments (a ground-plane circle, projected). */
 const SHADOW_SEGMENTS = 24;
+/** Point-light icon (handle) size: dark outline + light-colored core, CSS px. */
+const LIGHT_ICON_CORE_PX = 4;
+const LIGHT_ICON_OUTLINE_PX = 5.5;
+/**
+ * Screen-space pick radius around a light's projected emitter, in
+ * world-image pixels — shared by every light pick (Select tool, eraser,
+ * point-light tool) and by the icon's hover ring, so the icon is exactly
+ * the visible face of the pick that was always there.
+ */
+const LIGHT_PICK_PX = 14;
+
+/**
+ * A light icon's tint: the placement's sRGB hex as raw 0-1 channels. The
+ * overlay program is unlit and untone-mapped editor chrome, so the picker
+ * color is used directly (unlike the deferred pass, which linearizes).
+ */
+function lightIconRgb(hex: string): [number, number, number] {
+  return [
+    parseInt(hex.slice(1, 3), 16) / 255,
+    parseInt(hex.slice(3, 5), 16) / 255,
+    parseInt(hex.slice(5, 7), 16) / 255,
+  ];
+}
 
 /**
  * Growable triangle-vertex batch for the flat program (x, y, r, g, b, a
@@ -602,6 +625,41 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       overlayBatch.quad(cx - d, cy - d, cx + d, cy - d, cx + d, cy + d, cx - d, cy + d, HIGHLIGHT_COLOR, Math.min(1, alpha + 0.1));
     };
 
+    /**
+     * Point-light icon (handle): a filled diamond centered on the light's
+     * projected emitter, tinted with the light's color over a dark
+     * outline, so every placed light is visible and grabbable in every
+     * tool mode. The overlay batch is in world-image pixels scaled by the
+     * view transform, so the radii divide by zoom to hold a constant CSS
+     * size on screen.
+     */
+    const emitLightIcon = (
+      x: number,
+      y: number,
+      z: number,
+      colorHex: string,
+      zoom: number,
+    ): void => {
+      const [cx, cy] = toPx(x, z, y);
+      const rgb = lightIconRgb(colorHex);
+      const diamond = (r: number, c: [number, number, number], a: number): void => {
+        overlayBatch.vert(cx, cy, c, a);
+        overlayBatch.vert(cx, cy - r, c, a);
+        overlayBatch.vert(cx + r, cy, c, a);
+        overlayBatch.vert(cx, cy, c, a);
+        overlayBatch.vert(cx + r, cy, c, a);
+        overlayBatch.vert(cx, cy + r, c, a);
+        overlayBatch.vert(cx, cy, c, a);
+        overlayBatch.vert(cx - r, cy, c, a);
+        overlayBatch.vert(cx, cy + r, c, a);
+        overlayBatch.vert(cx, cy, c, a);
+        overlayBatch.vert(cx, cy - r, c, a);
+        overlayBatch.vert(cx - r, cy, c, a);
+      };
+      diamond(LIGHT_ICON_OUTLINE_PX / zoom, [0, 0, 0], 0.55);
+      diamond(LIGHT_ICON_CORE_PX / zoom, rgb, 0.95);
+    };
+
     // Axis-aligned rectangle outline (four thin quads) in world-image
     // pixels: the selected sprite's drawn bounds.
     const rectOutline = (x0: number, y0: number, x1: number, y1: number): void => {
@@ -665,6 +723,28 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     }
     if (live.selection) {
       highlightRef(live, live.selection);
+    }
+    // Light-icon hover: with a light-aware tool (Select or point-light), a
+    // cursor resting within the light pick radius of a placed light
+    // previews its radius ring — skipped when the selection ring already
+    // draws for that light. The icons themselves emit last so they stay
+    // crisp over every ring and gizmo.
+    if (hover && (live.tool === SELECT_TOOL_ID || live.tool === POINT_LIGHT_TOOL_ID)) {
+      const selectedLightId = live.selection?.kind === 'light' ? live.selection.id : null;
+      for (const l of placedLights) {
+        const [lx, ly] = toPx(l.x + 0.5, l.z + 0.5, l.y);
+        const dx = lx - hover.px[0];
+        const dy = ly - hover.px[1];
+        if (dx * dx + dy * dy <= LIGHT_PICK_PX * LIGHT_PICK_PX) {
+          if (l.id !== selectedLightId) {
+            lightRing(l.x + 0.5, l.y, l.z + 0.5, l.radius, 0.3);
+          }
+          break;
+        }
+      }
+    }
+    for (const l of placedLights) {
+      emitLightIcon(l.x + 0.5, l.y, l.z + 0.5, l.colorHex, t.zoom);
     }
 
       renderer.render(
@@ -952,13 +1032,12 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         if (live?.kind === 'world' && live.tool === POINT_LIGHT_TOOL_ID) {
           // Clicking on (near) a placed light selects it for the
           // properties panel; clicking elsewhere places a new light.
-          const PICK_PX = 14;
           let picked: number | null = null;
           for (const l of live.world.listLights()) {
             const [lx, ly] = toPx(l.x + 0.5, l.z + 0.5, l.y);
             const dx = lx - pt.px[0];
             const dy = ly - pt.px[1];
-            if (dx * dx + dy * dy <= PICK_PX * PICK_PX) {
+            if (dx * dx + dy * dy <= LIGHT_PICK_PX * LIGHT_PICK_PX) {
               picked = l.id;
               break;
             }

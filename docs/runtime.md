@@ -576,10 +576,13 @@ light pass sampling all three afterwards:
    composite.
 7. **Overlay** — eraser hover target, the height gizmo
    (landing diamond at a raised ghost + plumb line down to the ground
-   cell), the select-tool highlight for the selected placement, and the
-   point-light tool's ghost/selection radius rings, as a
-   per-frame vertex batch drawn unlit over the finished frame. No depth
-   interaction. Editor chrome only.
+   cell), the select-tool highlight for the selected placement, the
+   point-light tool's ghost/selection radius rings, the per-light **light
+   icons** (constant-size diamonds at each emitter, tinted with the
+   light's color — the visible click/drag handle of the light pick), and
+   the light icons' hover radius ring, as a per-frame vertex batch drawn
+   unlit over the finished frame. No depth interaction. Editor chrome
+   only — never serialized (ADR 0006).
 
 ## Input
 
@@ -617,6 +620,13 @@ by proximity — rather than by ground footprint. The **Light** tool places poin
 (click; the emitter rides the cursor's ground point and effective height,
 clicking on a placed light selects it for the properties panel — radius,
 energy, color, position — and its radius ring shows in the viewport).
+Every placed light also shows a **light icon** — a small constant-size
+diamond at its emitter, tinted with the light's color — in every tool
+mode: the visible click/drag handle for the light's screen-space
+proximity pick (Select-tool click selects, Select-drag moves on the
+ground plane; with the Light tool the icon click selects instead of
+placing; with a brush it changes nothing). Hovering an icon with the
+Select or Light tool previews the light's radius ring.
 The **Select** tool's left button selects the placement under the cursor
 and drags it along the ground plane; an empty click or Escape clears the
 selection. Ground picking inverts the shared
