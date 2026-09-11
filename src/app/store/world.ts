@@ -119,6 +119,28 @@ function removalCommand(label: string, world: World, removed: Removed): HistoryC
   };
 }
 
+/**
+ * Inverse of `removalCommand`: used after an erase/delete has already
+ * applied, so undo re-inserts the removed placement and redo removes it
+ * again. (Recording the wrong polarity here made undo of an erase a
+ * no-op.)
+ */
+function eraseCommand(label: string, world: World, removed: Removed): HistoryCommand {
+  return {
+    label,
+    redo: () => {
+      if (removed.kind === 'sprite') world.removeSprite(removed.placement);
+      else if (removed.kind === 'mesh') world.removeMeshById(removed.placement.id);
+      else world.removeLightById(removed.placement.id);
+    },
+    undo: () => {
+      if (removed.kind === 'sprite') world.insertSprite(removed.placement, removed.index);
+      else if (removed.kind === 'mesh') world.insertMesh(removed.placement, removed.index);
+      else world.insertLight(removed.placement, removed.index);
+    },
+  };
+}
+
 function placementCommand(
   label: string,
   world: World,
@@ -961,22 +983,8 @@ export function setWorldViewTransform(
 export function placeAt(docId: string, gx: number, gz: number, y = 0): void {
   const doc = worldDoc(docId);
   if (!doc) return;
-  if (doc.tool === 'eraser') {
-    const removed = doc.world.removeTopAt(gx, gz);
-    if (removed) {
-      recordHistory(
-        docId,
-        removalCommand(
-          `erase ${removed.kind}`,
-          doc.world,
-          removed as Removed,
-        ),
-      );
-      clearStaleSelection(docId);
-      ed().markDirty(docId);
-    }
-    return;
-  }
+  // The eraser is pixel-picked by the caller (`eraseRef`); it never places.
+  if (doc.tool === 'eraser') return;
   if (doc.tool === POINT_LIGHT_TOOL_ID) {
     // The emitter sits at the cursor's ground point; the footprint corner
     // is the cell min corner so erase/pick ride the shared machinery.
@@ -1115,14 +1123,32 @@ export function cycleBrushDir(docId: string): void {
   });
 }
 
-export function eraseAt(docId: string, gx: number, gz: number): void {
+/**
+ * Erase one placement by its picked identity (the same pixel-accurate pick
+ * the Select tool uses), recording an undoable command and dropping the
+ * selection when it targeted the removed placement.
+ */
+export function eraseRef(docId: string, ref: PlacementRef): void {
   const doc = worldDoc(docId);
   if (!doc) return;
-  const removed = doc.world.removeTopAt(gx, gz);
-  if (removed) {
-    recordHistory(docId, removalCommand(`erase ${removed.kind}`, doc.world, removed as Removed));
-    ed().markDirty(docId);
+  let removed: Removed | null = null;
+  if (ref.kind === 'sprite') {
+    const p = doc.world.placementAt(ref.id);
+    if (p) {
+      const r = doc.world.removeSprite(p);
+      if (r) removed = { kind: 'sprite', ...r };
+    }
+  } else if (ref.kind === 'mesh') {
+    const r = doc.world.removeMeshById(ref.id);
+    if (r) removed = { kind: 'mesh', ...r };
+  } else {
+    const r = doc.world.removeLightById(ref.id);
+    if (r) removed = { kind: 'light', ...r };
   }
+  if (!removed) return;
+  recordHistory(docId, eraseCommand(`erase ${removed.kind}`, doc.world, removed));
+  clearStaleSelection(docId);
+  ed().markDirty(docId);
 }
 
 export function setLight(docId: string, patch: Partial<LightState>): void {
@@ -1349,7 +1375,7 @@ export function removeLight(docId: string, id: number): void {
   if (!removed) return;
   update(docId, (d) => {
     d.history.push(
-      removalCommand('delete light', d.world, {
+      eraseCommand('delete light', d.world, {
         kind: 'light',
         placement: removed.placement,
         index: removed.index,

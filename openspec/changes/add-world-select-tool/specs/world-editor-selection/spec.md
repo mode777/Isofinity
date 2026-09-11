@@ -101,6 +101,44 @@ with the point-light tool.
 - **THEN** the light becomes the selected placement and its radius, energy,
   color, and position controls are shown
 
+### Requirement: Eraser uses placement picking
+
+The eraser SHALL remove the placement resolved by the same pixel-accurate
+pick the Select tool uses, rather than by ground footprint: a sprite is
+erasable only where its baked g-buffer silhouette covers the cursor (its
+transparent margin erases nothing), and a mesh or point light is erasable
+near its projected anchor. When placements of different kinds overlap, the
+eraser SHALL remove the one the Select tool would pick at that pixel.
+Erasure SHALL record an undoable removal command (undo restores the exact
+removed placement) and SHALL clear the selection when it targeted the removed
+placement. Dragging the eraser across the viewport SHALL remove each picked
+placement as the cursor passes over it; the eraser's hover SHALL highlight the
+placement a click would remove using the same outline as the selection, and a
+right-click with any other tool SHALL erase by the same rule.
+
+#### Scenario: Transparent margin erases nothing
+
+- **WHEN** the eraser clicks a pixel inside a sprite's rectangular bounds but
+  in its baked transparent area, with nothing else under the cursor
+- **THEN** no placement is removed
+
+#### Scenario: Eraser removes the picked placement
+
+- **WHEN** two overlapping sprites cover the cursor and the eraser clicks there
+- **THEN** the visibly topmost sprite — the one the Select tool would pick — is
+  removed
+
+#### Scenario: Dragging erases successive placements
+
+- **WHEN** the user drags the eraser across several placed sprites
+- **THEN** each placement the cursor passes over is removed in turn
+
+#### Scenario: Undo restores an erased placement
+
+- **WHEN** the user erases a placement and undoes
+- **THEN** the exact removed placement returns at its position, height, facing,
+  and shadow strength
+
 ### Requirement: Selection highlight
 
 The viewport SHALL visibly mark the selected placement with an editor-chrome

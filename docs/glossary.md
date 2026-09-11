@@ -82,7 +82,8 @@ the pointer for the real semantics.
   (`n`/`e`/`s`/`w`, default `n`): the brush's facing at placement time,
   persisted with the placement (omitted in world files when north).
   Rendering resolves the placement's layer via `viewLayerId(asset, dir)`;
-  picking and erase stay direction-independent.
+  the erase pick reads that drawn view's silhouette, so it follows the
+  facing.
 - **Placement** — one instance of a sprite layer at a continuous ground
   position and height; free-form (not grid-snapped), height may be
   negative (sunk below the ground plane).
@@ -102,9 +103,8 @@ the pointer for the real semantics.
 - **Pick (selection)** — resolving the placement under the cursor. Sprites
   use their baked g-buffer silhouette and per-fragment depth (so
   transparent margins are not selectable and the visually nearest wins);
-  meshes and lights use screen-space proximity. Not to be confused with
-  the ground-footprint test erase uses (`src/runtime/selection.ts`,
-  ADR 0012).
+  meshes and lights use screen-space proximity. The eraser uses the same
+  pick (`src/runtime/selection.ts`, ADR 0012).
 - **Surface snap** — toolbar toggle: placements take their height from
   the visible surface under the cursor, computed CPU-side from the
   in-memory g-buffers; overrides the shift+wheel height.

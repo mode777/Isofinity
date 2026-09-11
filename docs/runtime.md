@@ -181,7 +181,7 @@ would place (cursor-centered, like `placeAt`). The ghost is an ordinary
 depth-tested sprite instance slotted into the painter-sorted batch, so
 per-pixel occlusion shows exactly how the placement would sit among its
 neighbors; it is preview-only (never placed, never marks the document
-dirty) and yields the hover feedback to the eraser's unit-cell
+dirty) and yields the hover feedback to the eraser's placement
 highlight. Placement is free-form — there are no cells: the asset's
 origin anchor lands exactly at the mouse position, meaning the anchor's
 world position is `(mouse ground x, brush height, mouse ground z)` —
@@ -193,8 +193,8 @@ height is 0, and the asset's base rides at (brush height − anchor y), so
 an asset anchored above its base (a hook) sinks at height 0 and stands
 on the ground when the brush height equals its anchor y. A sprite
 authored with a ground-center origin pivots around its center when its
-facing changes, while ground-footprint picking and erase stay
-ground-position-based regardless of the anchor (ADR 0008). Per-pixel
+facing changes; placement stays free-form at the cursor's ground
+position regardless of the anchor (ADR 0008). Per-pixel
 occlusion stays truthful for anchored sprites: the baked g-buffer depth
 is measured from the box corner while the image is drawn from the anchor,
 so the compositor subtracts `dot(VIEW_DIR, anchor)` from each instance's
@@ -206,7 +206,8 @@ The toolbar's **character** brush places the built-in animated character
 (Khronos CesiumMan, committed with attribution) as a *mesh placement*:
 place/erase/height behave exactly like a sprite brush (the ghost shows
 the bind pose at the cursor, a contact shadow follows raised
-placements), and erase resolves the topmost placement across kinds.
+placements), and erase resolves the placement picked under the cursor
+across kinds (same pixel pick as Select).
 Characters animate in place, one draw call each; placements are
 editor-session state — never written into world files (ADR 0006) — so a
 saved/reloaded world simply has none.
@@ -558,7 +559,7 @@ light pass sampling all three afterwards:
    once (see Lighting). The **Dynamic light** switch pins the factor to
    identity, which presents RT0·AO unmodified — the pure prerendered
    composite.
-7. **Overlay** — hovered footprint (eraser), the height gizmo
+7. **Overlay** — eraser hover target, the height gizmo
    (landing diamond at a raised ghost + plumb line down to the ground
    cell), the select-tool highlight for the selected placement, and the
    point-light tool's ghost/selection radius rings, as a
@@ -592,10 +593,12 @@ kept and applies again when snap goes off). Height level and snap are
 per-document in-memory editor state, never saved. The **`E` key** cycles the brush
 through its available directions (N → E → S → W, wrapping, skipping
 views the sprite does not provide; no-op for single-view brushes and
-while a form control has focus). Left-click/drag places the selected
-tool, right-click erases the nearest placement whose unit-cube footprint
-contains the cursor — resolving to the **topmost** (greatest depth key)
-— tool buttons or eraser selects. The **Light** tool places point lights
+while a form control has focus, or rotates the selected sprite with the
+Select tool). Left-click/drag places the selected brush; the **eraser**
+(and right-click with any other tool) removes the placement picked under
+the cursor with the same pixel-accurate pick the Select tool uses — a
+sprite only where its drawn silhouette covers the cursor, meshes/lights
+by proximity — rather than by ground footprint. The **Light** tool places point lights
 (click; the emitter rides the cursor's ground point and effective height,
 clicking on a placed light selects it for the properties panel — radius,
 energy, color, position — and its radius ring shows in the viewport).
@@ -623,7 +626,7 @@ left/right placement bindings never move.
 - `src/runtime/meshAsset.ts` — skinned character assets + CPU pose engine (mixer → joint palettes)
 - `src/runtime/shProbe.ts` — environment → SH diffuse-irradiance probe (CPU + GLSL basis twins)
 - `src/runtime/mesh-verify.ts` — Node-runnable mesh checks (`npm run verify:mesh`)
-- `src/runtime/world.ts` — placement state, depth sort, footprint erase
+- `src/runtime/world.ts` — placement state, depth sort, id-keyed removal
 - `src/runtime/history.ts` — undo/redo command-pair stacks (world-edit history; `npm run verify:history`)
 - `src/runtime/selection.ts` — CPU placement picking for the Select tool (g-buffer silhouette + per-fragment depth; `npm run verify:selection`)
 - `src/app/document.ts` — document/tab types and defaults

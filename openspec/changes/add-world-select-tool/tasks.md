@@ -47,3 +47,11 @@
 - [x] 7.4 Replace the selected-sprite gizmo with a bounding box outlining the sprite exactly as drawn (projected quad of the placement's baked view), keeping the height gizmo/radius ring for characters and lights; verify visually in the browser and confirm it adds no serialized state.
 - [x] 7.5 Re-run `npm run verify:selection`, `npm run verify:bundles`, `npm run verify:mesh`, `npm run verify:history`, and `npm run build`; update the relevant docs if behavior text changed.
 
+## 8. Eraser shares the selection pick
+
+- [x] 8.1 Route the eraser (left-click/drag, touch tap, and right-click with any tool) through the same `pickAt` + `eraseRef` path as the Select tool, and replace the unit-cell hover highlight with the picked placement's outline; `eraseRef` removes by kind/id and records an undoable command, clearing a stale selection.
+- [x] 8.2 Fix the erase/delete history polarity: add `eraseCommand` (undo re-inserts, redo removes) and use it for `eraseRef` and `removeLight`, so undo of an erase actually restores the placement.
+- [x] 8.3 Update the `runtime-sprite-rendering`, `runtime-mesh-rendering`, and `integrated-editor` deltas plus the `world-editor-selection` spec for pixel-picked erase, and refresh `docs/runtime.md`, `docs/glossary.md`, `docs/roadmap.md`, and ADR 0012.
+- [x] 8.4 Run `npm run verify:selection`, `npm run verify:bundles`, `npm run verify:mesh`, `npm run verify:history`, and `npm run build` and confirm all pass.
+
+

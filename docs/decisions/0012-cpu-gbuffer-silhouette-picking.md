@@ -33,6 +33,9 @@ readback or extra framebuffer is involved.
 - Pixel-accurate sprite picking with no renderer surface: the picker
   reads the same buffers a frame was drawn from, and cannot drift from
   the compositor's coverage/depth semantics.
+- The eraser uses the same picker as the Select tool (and previews its
+  target with the same outline), so what a click selects is exactly what
+  a click erases; the old ground-footprint erase rule is gone.
 - The pick is deterministic and Node-testable (`npm run verify:selection`)
   against the same data, unlike a GPU readback.
 - The renderer is untouched: no new attachment, no per-object id output

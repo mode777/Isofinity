@@ -137,6 +137,18 @@ const PPU = 1;
   check('removeSprite reports identity + index', removed?.placement === direct);
   w.insertSprite(direct, removed!.index);
   check('insertSprite preserves the id', w.placementAt(direct.id) === direct);
+
+  // Erase/undo round trip for the other kinds (the store's erase command
+  // relies on remove-by-id then insert restoring the exact object).
+  const meshRemoved = w.removeMeshById(meshId);
+  check('removeMeshById reports the placement', meshRemoved?.placement.id === meshId);
+  w.insertMesh(meshRemoved!.placement, meshRemoved!.index);
+  check('insertMesh restores the mesh', w.meshAt(meshId)?.y === 4);
+
+  const lightRemoved = w.removeLightById(light.id);
+  check('removeLightById reports the placement', lightRemoved?.placement.id === light.id);
+  w.insertLight(lightRemoved!.placement, lightRemoved!.index);
+  check('insertLight restores the light', w.lightAt(light.id) === light);
 }
 
 if (failures > 0) {

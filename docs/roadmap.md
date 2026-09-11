@@ -165,7 +165,9 @@ list when a change lands (and prune it — history belongs in the archives).
   one undoable move. Sprite picking is pixel-accurate against the baked
   g-buffer silhouette and per-fragment depth on the CPU (ADR 0012,
   `src/runtime/selection.ts`, `npm run verify:selection`); meshes/lights
-  pick by screen-space proximity. A selected sprite shows a bounding box
+  pick by screen-space proximity. The eraser (and right-click) uses the
+  same pick and previews its target, so a sprite's transparent margin is
+  neither selectable nor erasable. A selected sprite shows a bounding box
   around its drawn extent and can be rotated via the panel or the `E` key.
   The properties panel's Brush section (height, shadow, direction) appears
   only while the brush tool is active and the selected-placement section

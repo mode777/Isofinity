@@ -24,7 +24,7 @@ import {
   commitSelectionMove,
   cycleBrushDir,
   cycleSelectedSpriteDir,
-  eraseAt,
+  eraseRef,
   moveSelectionLive,
   placeAt,
   redoWorld,
@@ -358,6 +358,12 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       return l ? { x: l.x, z: l.z } : null;
     };
 
+    /** Erase the placement picked at a world-image pixel (pixel-accurate). */
+    const erasePicked = (live: WorldDocument, px: [number, number]): void => {
+      const hit = pickAt(live, px);
+      if (hit) eraseRef(doc.docId, hit);
+    };
+
     const renderFrame = (): void => {
       // Read the live document every frame; the rAF loop never stale-locks.
       const live = useEditor.getState().docs[doc.docId];
@@ -598,56 +604,58 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       overlayBatch.quad(x1 - t, y0, x1, y0, x1, y1, x1 - t, y1, HIGHLIGHT_COLOR, a);
     };
 
+    /**
+     * Editor-chrome highlight for one placement: a bounding box around a
+     * sprite's drawn extent, the height gizmo for a character, or the
+     * radius ring for a light. Shared by the Select tool's selection and
+     * the eraser's hover target.
+     */
+    const highlightRef = (live: WorldDocument, ref: PlacementRef, lightAlpha = 0.4): void => {
+      if (ref.kind === 'sprite') {
+        const p = live.world.placementAt(ref.id);
+        if (!p) return;
+        const layerIndex = live.layers.findIndex(
+          (l) => l.id === viewLayerId(p.primId, p.dir),
+        );
+        if (layerIndex < 0) return;
+        const scale = PPU / spriteSet.ppus[layerIndex];
+        const [ox, oy] = spriteSet.origins[layerIndex];
+        const [w, h] = spriteSet.sizes[layerIndex];
+        const [cx, cy] = toPx(p.x, p.z, p.y);
+        const x0 = cx - ox * scale;
+        const y0 = cy - oy * scale;
+        rectOutline(x0, y0, x0 + w * scale, y0 + h * scale);
+      } else if (ref.kind === 'mesh') {
+        const m = live.world.meshAt(ref.id);
+        if (!m) return;
+        const off = live.character?.worldOffset ?? [0, 0, 0];
+        emitGizmo(m.x + off[0], m.y + off[1], m.z + off[2]);
+      } else {
+        const l = live.world.lightAt(ref.id);
+        if (l) lightRing(l.x + 0.5, l.y, l.z + 0.5, l.radius, lightAlpha);
+      }
+    };
+
     // Overlays: the height gizmo for an off-ground ghost (raised or
-    // sunk), else the eraser's unit-cell hover highlight — plus the
-    // point-light tool's ghost ring and the selected light's highlight.
+    // sunk), the eraser's hover target, the point-light tool's ghost ring,
+    // and the selected placement's highlight.
     overlayBatch.reset();
     if (ghost && Math.abs(ghost.y) > GROUND_EPSILON) {
       emitGizmo(ghost.x, ghost.y, ghost.z);
-    } else if (hover && !ghost && live.tool === 'eraser') {
-      const [gx, gz] = hover.ground;
-      const [ax, ay] = toPx(gx - 0.5, gz - 0.5);
-      const [bx, by] = toPx(gx + 0.5, gz - 0.5);
-      const [cx, cy] = toPx(gx + 0.5, gz + 0.5);
-      const [dx, dy] = toPx(gx - 0.5, gz + 0.5);
-      overlayBatch.quad(ax, ay, bx, by, cx, cy, dx, dy, HIGHLIGHT_COLOR, 0.35);
     }
     if (hover && live.tool === POINT_LIGHT_TOOL_ID) {
       const [gx, gz] = hover.ground;
       const y = effectiveHeight(live, hover.px[0], hover.px[1]);
       lightRing(gx, y, gz, DEFAULT_POINT_LIGHT.radius, 0.25);
     }
+    // The eraser previews the placement a click would remove, using the
+    // same pixel-accurate pick the Select tool uses.
+    if (hover && !ghost && live.tool === 'eraser') {
+      const target = pickAt(live, hover.px);
+      if (target) highlightRef(live, target);
+    }
     if (live.selection) {
-      const sel = live.selection;
-      if (sel.kind === 'sprite') {
-        const p = live.world.placementAt(sel.id);
-        if (p) {
-          // Bounding box of the sprite exactly as drawn: the projected
-          // extent of its baked view at the placement's position, height,
-          // and facing (same quad math the sprite instance uses).
-          const layerIndex = live.layers.findIndex(
-            (l) => l.id === viewLayerId(p.primId, p.dir),
-          );
-          if (layerIndex >= 0) {
-            const scale = PPU / spriteSet.ppus[layerIndex];
-            const [ox, oy] = spriteSet.origins[layerIndex];
-            const [w, h] = spriteSet.sizes[layerIndex];
-            const [cx, cy] = toPx(p.x, p.z, p.y);
-            const x0 = cx - ox * scale;
-            const y0 = cy - oy * scale;
-            rectOutline(x0, y0, x0 + w * scale, y0 + h * scale);
-          }
-        }
-      } else if (sel.kind === 'mesh') {
-        const m = live.world.meshAt(sel.id);
-        if (m) {
-          const off = live.character?.worldOffset ?? [0, 0, 0];
-          emitGizmo(m.x + off[0], m.y + off[1], m.z + off[2]);
-        }
-      } else {
-        const l = live.world.lightAt(sel.id);
-        if (l) lightRing(l.x + 0.5, l.y, l.z + 0.5, l.radius, 0.4);
-      }
+      highlightRef(live, live.selection);
     }
 
       renderer.render(
@@ -820,6 +828,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           // Point lights place on tap, not drag (a drag would spam lights).
           const live = useEditor.getState().docs[doc.docId];
           if (live?.kind === 'world' && live.tool === POINT_LIGHT_TOOL_ID) return;
+          // The eraser removes the picked placement as the finger drags.
+          if (live?.kind === 'world' && live.tool === 'eraser') {
+            erasePicked(live, pt.px);
+            return;
+          }
           // The Select tool never places; a touch drag with no pick panned
           // nothing until now, so just track hover.
           if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) return;
@@ -838,6 +851,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         if (live?.kind === 'world' && live.tool === POINT_LIGHT_TOOL_ID) return;
         // The Select tool never places.
         if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) return;
+        // The eraser removes the picked placement along the drag.
+        if (live?.kind === 'world' && live.tool === 'eraser') {
+          erasePicked(live, pt.px);
+          return;
+        }
         const a = anchorAt(pt.px);
         placeAt(doc.docId, a.x, a.z, a.y);
       }
@@ -894,8 +912,9 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         const live = useEditor.getState().docs[doc.docId];
         if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) {
           clearSelection(doc.docId);
-        } else {
-          eraseAt(doc.docId, pt.ground[0], pt.ground[1]);
+        } else if (live?.kind === 'world') {
+          // Right-click is the eraser everywhere: pixel-picked like Select.
+          erasePicked(live, pt.px);
         }
       } else if (e.button === 0) {
         publishSnapHeight(pt.px);
@@ -915,6 +934,10 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           } else {
             clearSelection(doc.docId);
           }
+          return;
+        }
+        if (live?.kind === 'world' && live.tool === 'eraser') {
+          erasePicked(live, pt.px);
           return;
         }
         if (live?.kind === 'world' && live.tool === POINT_LIGHT_TOOL_ID) {
@@ -964,6 +987,10 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
             const hit = pickAt(live, pt.px);
             if (hit) selectPlacement(doc.docId, hit);
             else clearSelection(doc.docId);
+            return;
+          }
+          if (live?.kind === 'world' && live.tool === 'eraser') {
+            erasePicked(live, pt.px);
             return;
           }
           hoverRef.current = pt;
