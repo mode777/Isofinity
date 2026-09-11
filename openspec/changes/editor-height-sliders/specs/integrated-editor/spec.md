@@ -20,15 +20,16 @@ user adjusts in three ways:
   Escape SHALL cancel editing and restore the current value.
 - **Height slider**: the Brush section SHALL additionally offer a slider
   spanning −2 to +2 world units alongside the numeric field, adjusting the
-  same stored brush height. Dragging the slider SHALL apply the dragged
-  value continuously within the slider band. The slider SHALL be a pointer
-  shortcut only: the stored height SHALL NOT be clamped to the slider band,
-  a value outside the band SHALL keep its exact entered value with the
-  slider thumb parked at the nearer end, and dragging the thumb from that
-  end SHALL pull the height back into the band. The slider SHALL follow the
-  height field's edit-state rules: it never marks the document dirty, and
-  while surface snap is on it SHALL be replaced together with the numeric
-  field by the read-only snap display.
+  stored brush height relative to its value at the start of each drag: the
+  thumb SHALL rest centered (no offset), dragging SHALL apply the thumb's
+  offset on top of that drag-start value continuously, and releasing the
+  pointer SHALL recenter the thumb — the next drag re-anchors on the height
+  current then, so repeated drags compound. The slider SHALL be a pointer
+  shortcut only: it SHALL NOT clamp the stored height, typed values SHALL
+  keep applying exactly regardless of the band, and the slider SHALL follow
+  the height field's edit-state rules: it never marks the document dirty,
+  and while surface snap is on it SHALL be replaced together with the
+  numeric field by the read-only snap display.
 
 The placement height SHALL be per-document in-memory
 editor state, defaulting to ground level for a newly opened or created
@@ -92,24 +93,30 @@ dirty; a placement made at a non-zero height SHALL mark it dirty.
 - **THEN** the document is unchanged and the field shows the current
   height again
 
-#### Scenario: Slider drag adjusts the brush height
+#### Scenario: Slider drag adjusts the brush height relative to its value
 
-- **WHEN** the user drags the Brush section's height slider to a position
-  within its band
-- **THEN** the stored brush height follows the dragged value between −2
-  and +2 and the ghost shows it, without marking the document dirty
+- **WHEN** the stored brush height is 6 and the user drags the Brush
+  section's height slider to its +2 end
+- **THEN** the stored brush height follows the drag to exactly 8 and the
+  ghost shows it, without marking the document dirty
+
+#### Scenario: Slider recenters after release
+
+- **WHEN** the user releases a height slider drag
+- **THEN** the thumb returns to its center (no offset) and the brush
+  height keeps the dragged value
+
+#### Scenario: Repeated drags compound
+
+- **WHEN** the brush height is 6, the user drags the slider to its +2 end
+  and releases, then drags to +2 and releases again
+- **THEN** the brush height is 10 after the second release
 
 #### Scenario: Typed value outside the slider band stays exact
 
 - **WHEN** the user types `5` into the height field and commits
 - **THEN** the brush height is exactly `5`, the field shows `5`, and the
-  slider thumb sits parked at its +2 end
-
-#### Scenario: Dragging the slider pulls an out-of-band value into the band
-
-- **WHEN** the brush height is `5` (slider parked at its +2 end) and the
-  user drags the slider thumb down to `1`
-- **THEN** the brush height becomes `1` and follows the drag
+  slider stays centered with no offset
 
 #### Scenario: Height slider hides with the field while surface snap is on
 

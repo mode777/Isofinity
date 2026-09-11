@@ -26,10 +26,11 @@ than typing, while the exact numeric entry stays available for precise work.
   - Selected point light height.
 - The numeric fields keep their exactness and their range rules: typed values
   apply exactly and stay unclamped (brush/sprite/character heights, per the
-  unclamped-height requirement) or keep the light field's existing bounds.
-  The slider is a pointer shortcut inside −2…+2 only; values outside the band
-  remain fully settable by typing, and the slider thumb parks at the nearer
-  end when the value is outside the band.
+  unclamped-height requirement); the light field joins the other three on
+  precise input. The slider is **relative**: it offsets the height current at
+  drag start by −2…+2, the thumb rests centered and recenters on release, and
+  repeated drags compound — stored heights stay unclamped and any value
+  remains reachable by typing.
 - Slider behavior when surface snap is on follows the existing height-field
   rule: the read-only snap display replaces the whole height row, slider
   included.

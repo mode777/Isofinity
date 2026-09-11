@@ -14,3 +14,9 @@
 
 - [x] 3.1 Update `docs/runtime.md` world-editing sections to mention the −2…+2 height sliders (brush + selected placement/light rows) and `docs/roadmap.md` with a Done line. Verify: docs read consistent with the spec deltas; no glossary change needed.
 - [x] 3.2 Run the full gate: `npm run build`. Confirm no verify scripts are affected (no changes under `src/bake/` or `src/runtime/`); leave the browser check notes above to the user if any row could not be exercised locally.
+
+## 4. Relative-slider correction (user feedback)
+
+- [x] 4.1 Rework the height slider in `src/app/components/controls.tsx` as a relative offset control: thumb centered at rest, `pointerdown` freezes the drag-start value as base, each tick commits `base + offset`, `pointerup`/`pointercancel`/`blur` recenter (next drag re-anchors, repeated drags compound; keyboard changes lazily rebase). Verify: `npm run build` passes.
+- [x] 4.2 Update artifacts (proposal, both spec deltas, design decision 3) to the relative contract; replace parked-thumb scenarios with recenter/compound ones. Verify: deltas read consistently.
+- [x] 4.3 Update `docs/runtime.md` (Brush + Select sections) and the `docs/roadmap.md` bullet to the relative wording, then rerun `npm run build`.

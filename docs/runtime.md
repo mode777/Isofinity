@@ -259,7 +259,8 @@ facing); a selected character or light keeps the height gizmo or radius
 ring. The properties panel shows the selection's editable properties —
 position, height, grounding shadow, and (for a multi-view sprite) its
 facing — each height row pairing its precise field with a −2…+2 slider
-(the selected light's height included) — and the `E` key rotates a
+relative to the height at drag start (the selected light's height
+included) — and the `E` key rotates a
 selected sprite through its available
 directions with wrap (falling back to the active brush's direction when
 no sprite is selected). Dragging a selected placement moves it free-form
@@ -601,8 +602,9 @@ height in free-form steps (up = raise, negative heights sink below the
 ground plane), and the properties panel's Brush height field sets it
 exactly (precise-input conventions: Enter/blur commits, negative values
 apply verbatim, invalid input reverts, Escape cancels) with a −2…+2 slider
-alongside as a pointer shortcut (typed values outside the band still apply
-verbatim and park the thumb at the nearer end). The toolbar's
+alongside as a pointer shortcut relative to the height at drag start (the
+thumb rests centered and recenters on release, so repeated drags compound;
+typed values still apply verbatim). The toolbar's
 **surface snap** toggle overrides both —
 the placement then takes its height from the visible surface under the
 cursor, computed CPU-side from the world document's in-memory g-buffers

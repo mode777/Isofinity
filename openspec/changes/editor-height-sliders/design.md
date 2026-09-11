@@ -60,17 +60,24 @@ have.
    - *Alternative: buffer the drag and commit once on release* — rejected for
      this change: requires new plumbing in every consumer action; out of scope
      (see Non-Goals).
-3. **Out-of-band values park the thumb, nothing else.** The range input's own
-   `min`/`max` produce the parked-thumb behavior for free when `value` exceeds
-   the band; the text field stays unclamped (no `min`/`max` passed for the
-   height fields), so typed `5` or `−3` still applies exactly. Dragging from
-   a parked end naturally pulls the value into the band because the first
-   tick emits an in-band value.
+3. **Relative offset slider (user correction).** The thumb displays an
+   offset from the value at drag start: `pointerdown` freezes the current
+   value as the base, each change tick commits `base + offset`, and
+   `pointerup`/`pointercancel`/`blur` recenter the thumb (offset 0, base
+   cleared). A change arriving with no base (keyboard arrows) lazily
+   rebases on the current value, so arrow keys nudge from where things
+   stand.
+   - *Alternative: absolute −2…+2 band with the thumb parked at the nearer
+     end for out-of-band values* — rejected (the original implementation):
+     heights are unbounded, so for a placement at height 6 the absolute
+     band is dead track; the useful adjustment is always "a bit up/down
+     from here", and compounding drags reach any value.
 4. **Shared band constants.** `HEIGHT_SLIDER_MIN = -2`, `HEIGHT_SLIDER_MAX =
    2`, step `0.1` (assumption: fine enough for placement nudges, coarse
    enough to hit exactly; trivially tunable later), exported from
    `controls.tsx` (or a small module-level constant in `WorldProperties.tsx`)
-   so all four rows agree by construction.
+   so all four rows agree by construction. They bound the *offset* from the
+   drag-start value, not the height itself.
 5. **Unify the light height row on the same control.** The light's height
    `NumberRow` (−99…+99, live spinner) is replaced by the slider + precise
    field like the other three heights: commit on Enter/blur, unclamped typed

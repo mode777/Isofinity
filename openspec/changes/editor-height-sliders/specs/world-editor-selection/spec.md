@@ -12,13 +12,14 @@ mark the document dirty.
 
 Each height control — the selected sprite's, the selected character's, and the
 selected point light's — SHALL pair its numeric field with a slider spanning
-−2 to +2 world units, adjusting the same placement height. Dragging the slider
-SHALL apply the dragged value continuously within the band, with each applied
-step recorded through the same edit path as a numeric commit. The slider SHALL
-be a pointer shortcut only: it SHALL NOT clamp the placement's stored height,
-a value outside the band SHALL keep its exact value with the slider thumb
-parked at the nearer end, and dragging the thumb from that end SHALL pull the
-height back into the band.
+−2 to +2 world units, adjusting the placement height relative to its value at
+the start of each drag: the thumb SHALL rest centered (no offset), dragging
+SHALL apply the thumb's offset on top of that drag-start value continuously,
+and releasing SHALL recenter the thumb (the next drag re-anchors on the height
+current then, so repeated drags compound), with each applied step recorded
+through the same edit path as a numeric commit. The slider SHALL be a pointer
+shortcut only: it SHALL NOT clamp the placement's stored height, and typed
+values SHALL keep applying exactly regardless of the band.
 
 #### Scenario: Editing a selected sprite's height
 
@@ -40,30 +41,31 @@ height back into the band.
 
 #### Scenario: Slider adjusts a selected sprite's height
 
-- **WHEN** the user drags the slider next to a selected sprite's height field
-- **THEN** the sprite's height follows the dragged value between −2 and +2
-  live, the move renders as it drags, and undo returns the sprite to its
-  pre-drag height
+- **WHEN** the user selects a sprite at height 0 and drags its height
+  slider to the +2 end
+- **THEN** the sprite's height follows the offset live up to 2 and renders
+  as it drags, the thumb recenters on release, and undo returns the sprite
+  to its pre-drag height
 
 #### Scenario: Slider adjusts a selected character's height
 
 - **WHEN** the user drags the slider next to a selected character's height
   field
-- **THEN** the character's height follows the dragged value between −2 and +2
-  live, and undo returns it to its pre-drag height
+- **THEN** the character's height follows the dragged offset live, and
+  undo returns it to its pre-drag height
 
 #### Scenario: Slider adjusts a selected light's height
 
 - **WHEN** the user drags the slider next to a selected point light's height
   field
-- **THEN** the light's emitter height follows the dragged value between −2
-  and +2 live, its rendered contribution moves with it, and undo returns it
-  to its pre-drag height
+- **THEN** the light's emitter height follows the dragged offset live, its
+  rendered contribution moves with it, and undo returns it to its pre-drag
+  height
 
 #### Scenario: Typed value outside the slider band stays exact
 
 - **WHEN** a selected sprite stands at height 5 and the user looks at its
   height row
-- **THEN** the height field shows exactly 5 and the slider thumb sits parked
-  at its +2 end; typing `-3` into the field still applies exactly −3 with
-  the thumb parked at the −2 end
+- **THEN** the height field shows exactly 5 and the slider sits centered
+  with no offset; typing `-3` into the field still applies exactly −3
+  with the slider staying centered

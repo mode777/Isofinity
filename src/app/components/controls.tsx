@@ -87,7 +87,10 @@ export function NumberRow(props: {
   );
 }
 
-/** Shared slider band for the world editor's height rows (world units). */
+/**
+ * Shared relative slider band for the world editor's height rows
+ * (world-unit offsets from the value at drag start).
+ */
 export const HEIGHT_SLIDER_MIN = -2;
 export const HEIGHT_SLIDER_MAX = 2;
 export const HEIGHT_SLIDER_STEP = 0.1;
@@ -97,9 +100,12 @@ export const HEIGHT_SLIDER_STEP = 0.1;
  * conventions: Enter/focus-loss applies the entered finite value
  * (optionally clamped to `min`/`max`, negative values allowed), empty or
  * non-numeric input reverts, Escape cancels editing. With `slider`, a
- * range track sits between label and field, committing each step tick —
- * a pointer shortcut inside its band only: typed values apply exactly,
- * and out-of-band values park the thumb at the nearer end.
+ * range track sits between label and field acting as a relative offset:
+ * the thumb rests centered (no offset), a drag commits `drag-start value
+ * + thumb offset` per step tick, and releasing (or leaving) the slider
+ * recenters it — the next drag re-anchors on the value current then, so
+ * repeated drags compound. Typed values apply exactly and are never
+ * clamped by the slider band.
  */
 export function PreciseNumberRow(props: {
   label: string;
@@ -112,6 +118,12 @@ export function PreciseNumberRow(props: {
 }): React.JSX.Element {
   const { label, value, format, min, max, slider, onCommit } = props;
   const [editing, setEditing] = useState<string | null>(null);
+  const [sliderBase, setSliderBase] = useState<number | null>(null);
+  const [sliderOffset, setSliderOffset] = useState(0);
+  const recenterSlider = (): void => {
+    setSliderBase(null);
+    setSliderOffset(0);
+  };
   const commit = (): void => {
     if (editing === null) return;
     const text = editing.trim().replace(',', '.');
@@ -132,9 +144,19 @@ export function PreciseNumberRow(props: {
           min={slider.min}
           max={slider.max}
           step={slider.step}
-          value={value}
+          value={sliderOffset}
           aria-label={`${label} slider`}
-          onChange={(e) => onCommit(Number(e.target.value))}
+          title={`relative adjust ±${Math.abs(slider.max - slider.min) / 2}`}
+          onPointerDown={() => setSliderBase(value)}
+          onChange={(e) => {
+            const offset = Number(e.target.value);
+            if (sliderBase === null) setSliderBase(value);
+            onCommit((sliderBase ?? value) + offset);
+            setSliderOffset(offset);
+          }}
+          onPointerUp={recenterSlider}
+          onPointerCancel={recenterSlider}
+          onBlur={recenterSlider}
         />
       ) : null}
       <input
