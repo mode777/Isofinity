@@ -6,6 +6,7 @@ import {
   SELECT_TOOL_ID,
   brushDirections,
   clearSelection,
+  eraseRef,
   patchMesh,
   patchSprite,
   removeLight,
@@ -200,7 +201,23 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
               </select>
             </label>
           ) : null}
-          <button onClick={() => clearSelection(doc.docId)}>Deselect</button>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button
+              style={{ flex: 1 }}
+              onClick={() => clearSelection(doc.docId)}
+            >
+              Deselect
+            </button>
+            <button
+              style={{ flex: 1 }}
+              title="Delete this sprite placement (undoable)"
+              onClick={() =>
+                eraseRef(doc.docId, { kind: 'sprite', id: selectedSprite.id })
+              }
+            >
+              Delete
+            </button>
+          </div>
         </Section>
       ) : null}
 

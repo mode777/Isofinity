@@ -183,6 +183,15 @@ list when a change lands (and prune it — history belongs in the archives).
   vertical icon bar docked inside the viewport's top-left corner
   (Select, pencil, light, eraser) that overlays the canvas without
   touching the view transform. Editor chrome only — no format impact.
+- Editor save/toolbar UX pass — a world or sprite document with a
+  workspace file backing saves in place (no dialog); **Save As** icon
+  buttons in the bake and world editors open the workspace file dialog.
+  The bake editor toolbar converted its text buttons to the shared
+  icon-button style (save, save as, render pass, bake all, remove view,
+  place in world), and the world editor's surface-snap toggle became an
+  icon button. A selected sprite's properties section offers **Delete**
+  next to Deselect — the eraser's undoable erase. Editor chrome only —
+  no format impact.
 - Selectable light icons — every placed point light shows a small
   constant-size diamond icon at its emitter, tinted with the light's
   color, visible in every tool mode: the visible click/drag handle for

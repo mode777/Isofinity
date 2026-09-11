@@ -50,7 +50,9 @@ import {
   IconPencil,
   IconRedo,
   IconSave,
+  IconSaveAs,
   IconSelect,
+  IconSnap,
   IconUndo,
 } from './icons.js';
 import { WorkspaceFileDialog } from './WorkspaceFileDialog.js';
@@ -1270,16 +1272,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
 
   const [saveDialog, setSaveDialog] = useState(false);
 
-  const onSaveWorld = (): void => {
+  /** Disconnected fallback shared by save and save-as: name + prompt save. */
+  const saveViaPrompt = (): void => {
     const suggested = doc.ref
       ? doc.ref.title.replace(/\.json$/i, '')
       : suggestWorldName(worlds);
-    // Connected: navigate folders in the workspace file dialog. Otherwise
-    // keep the plain-name prompt (and no-workspace behavior unchanged).
-    if (connected) {
-      setSaveDialog(true);
-      return;
-    }
     const raw = window.prompt('Save world as', suggested);
     if (raw === null) return;
     const name = raw.trim();
@@ -1288,6 +1285,30 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       return;
     }
     void saveWorld(doc.docId, name);
+  };
+
+  const onSaveWorld = (): void => {
+    // Already backed by a workspace file: write it in place — no dialog.
+    if (connected && doc.ref) {
+      void saveWorld(doc.docId);
+      return;
+    }
+    // Connected but never saved: pick a name/folder in the workspace file
+    // dialog. Otherwise keep the plain-name prompt (and no-workspace
+    // behavior unchanged).
+    if (connected) {
+      setSaveDialog(true);
+      return;
+    }
+    saveViaPrompt();
+  };
+
+  const onSaveWorldAs = (): void => {
+    if (connected) {
+      setSaveDialog(true);
+      return;
+    }
+    saveViaPrompt();
   };
 
   const zoomBy = (factor: number): void => {
@@ -1325,12 +1346,20 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           disabled={!connected}
           title={
             connected
-              ? "Save to the workspace's worlds/ folder"
+              ? "Save — write an already-saved world back to its workspace file, otherwise pick a location in the workspace's worlds/ folder"
               : 'Connect a workspace to save the world'
           }
           onClick={onSaveWorld}
         >
           <IconSave />
+        </button>
+        <button
+          className="icon-btn"
+          disabled={!connected}
+          title="Save as — pick a name and folder in the workspace's worlds/ folder"
+          onClick={onSaveWorldAs}
+        >
+          <IconSaveAs />
         </button>
         <button
           className="icon-btn"
@@ -1398,11 +1427,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
               ) : null}
             </select>
             <button
-              className={doc.surfaceSnap ? 'active' : ''}
+              className={`icon-btn${doc.surfaceSnap ? ' active' : ''}`}
               title="Surface snap — placements take their height from the visible surface under the cursor (off: use the height field / shift+mouse-move height)"
               onClick={() => setSurfaceSnap(doc.docId, !doc.surfaceSnap)}
             >
-              Snap
+              <IconSnap />
             </button>
           </>
         ) : null}

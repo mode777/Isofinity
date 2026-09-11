@@ -45,6 +45,14 @@ import {
 import { useEditor } from '../store/editor.js';
 import { useWorkspace } from '../store/workspace.js';
 import { EditorToolbar } from './EditorToolbar.js';
+import {
+  IconBakeAll,
+  IconPlaceWorld,
+  IconRemoveView,
+  IconRender,
+  IconSave,
+  IconSaveAs,
+} from './icons.js';
 import { RealtimeCanvas } from './RealtimeCanvas.js';
 import { WorkspaceFileDialog } from './WorkspaceFileDialog.js';
 
@@ -84,13 +92,8 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
   const [saveDialog, setSaveDialog] = useState(false);
   const connected = useWorkspace((s) => s.state.kind) === 'connected';
 
-  const onSave = (): void => {
-    // Connected: navigate folders in the workspace file dialog. Otherwise
-    // keep the plain-name prompt and the download fallback.
-    if (connected) {
-      setSaveDialog(true);
-      return;
-    }
+  /** Disconnected fallback shared by save and save-as: name + download. */
+  const saveViaPrompt = (): void => {
     const raw = window.prompt('Save sprite as', doc.title);
     if (raw === null) return;
     const name = raw.trim();
@@ -99,6 +102,29 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
       return;
     }
     void saveSprite(doc.docId, name);
+  };
+
+  const onSave = (): void => {
+    // Already backed by a workspace file: write it in place — no dialog.
+    if (connected && doc.ref) {
+      void saveSprite(doc.docId, doc.ref.title);
+      return;
+    }
+    // Connected but never saved: pick a name/folder in the workspace file
+    // dialog. Otherwise the plain-name prompt and the download fallback.
+    if (connected) {
+      setSaveDialog(true);
+      return;
+    }
+    saveViaPrompt();
+  };
+
+  const onSaveAs = (): void => {
+    if (connected) {
+      setSaveDialog(true);
+      return;
+    }
+    saveViaPrompt();
   };
 
   // Source geometry for the Realtime 3D view; identity is stable across
@@ -341,43 +367,56 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
       ) : null}
       <EditorToolbar>
         <button
+          className="icon-btn"
           disabled={!doc.result}
-          title="Save to the workspace's sprites/ folder — downloads the bundle when no workspace is connected"
+          title="Save — write an already-saved sprite back to its workspace file; picks a name (download when no workspace is connected) otherwise"
           onClick={onSave}
         >
-          Save
+          <IconSave />
         </button>
         <button
+          className="icon-btn"
+          disabled={!doc.result}
+          title="Save as — pick a name and folder in the workspace (downloads under a new name when no workspace is connected)"
+          onClick={onSaveAs}
+        >
+          <IconSaveAs />
+        </button>
+        <button
+          className="icon-btn"
           disabled={doc.viewOnly || doc.busy}
-          title={`Bake the g-buffer from the current source, then render the lit pass with the current environment — into the ${SLOT_LABELS[slot]} view`}
+          title={`Render pass — bake the g-buffer from the current source, then render the lit pass with the current environment — into the ${SLOT_LABELS[slot]} view (disabled while rendering)`}
           onClick={() => void runRenderPass(doc.docId, slot)}
         >
-          {doc.busy ? 'Rendering…' : passes?.render ? 'Re-render pass' : 'Render pass'}
+          <IconRender />
         </button>
         <button
+          className="icon-btn"
           disabled={doc.viewOnly || doc.busy}
-          title="Batch-bake all four view slots in N, E, S, W order — missing views are created, existing ones re-baked"
+          title="Bake all — batch-bake all four view slots in N, E, S, W order — missing views are created, existing ones re-baked"
           onClick={() => void bakeAll(doc.docId)}
         >
-          Bake all
+          <IconBakeAll />
         </button>
         <button
+          className="icon-btn"
           disabled={slot === 'n' || !passes || doc.viewOnly || doc.busy}
           title={
             slot === 'n'
               ? 'The north view is the default and cannot be removed'
-              : `Discard the baked passes of the ${SLOT_LABELS[slot]} view`
+              : `Remove view — discard the baked passes of the ${SLOT_LABELS[slot]} view`
           }
           onClick={() => removeView(doc.docId, slot)}
         >
-          Remove view
+          <IconRemoveView />
         </button>
         <button
+          className="icon-btn"
           disabled={!doc.result || !doc.render}
-          title="Place this sprite into a world document (in memory)"
+          title="Place in world — place this sprite into a world document (in memory)"
           onClick={() => placeInWorld(doc.docId)}
         >
-          Place in world
+          <IconPlaceWorld />
         </button>
       </EditorToolbar>
       {doc.viewOnly ? (

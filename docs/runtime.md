@@ -59,7 +59,7 @@ sprite documents.
 
 ### Workspace file dialog
 
-With a workspace connected, the sprite and world **Save** buttons open a
+With a workspace connected, the sprite and world **Save As** buttons open a
 custom modal (`src/app/components/WorkspaceFileDialog.tsx`) modeled on
 native file dialogs: a folder tree on the left, the current folder's files
 on the right, a breadcrumb, and a name field in save mode (accept is
@@ -67,8 +67,11 @@ disabled while the name is empty). Accepting a save writes to
 `<folder>/<subfolders>/<name>`, creating missing subfolders on demand;
 double-activating a file in load mode opens it. The last-used folder per
 convention folder is remembered in memory only — it is editor chrome and
-never serialized (ADR 0006). Without a workspace the previous
-prompt/download fallbacks are unchanged.
+never serialized (ADR 0006). The plain **Save** button opens the same
+dialog only for a document that has no workspace file backing yet; an
+already-saved (or opened) document is written back to its backing file in
+place, with no dialog. Without a workspace both buttons keep the previous
+prompt/download fallbacks unchanged.
 
 ## Sprite editing
 
@@ -117,12 +120,13 @@ disabled when the document is view-only.
   `originPx` re-projects immediately on edit (the passes themselves never
   depend on the anchor, so no re-bake is needed). A scale change rescales
   the anchor with the box.
-- The panel has no bake or render buttons: the sprite editor toolbar holds
-  the render pass action (plus **Bake All** over N→E→S→W and **Remove
-  view** for non-N slots), which implicitly re-bakes the raster g-buffer
-  from the current source and settings before accumulating, so both passes
-  stay current and pixel-aligned. Opening a model auto-bakes the raster
-  pass; the render pass runs from the toolbar.
+- The panel has no bake or render buttons: the sprite editor toolbar —
+  icon buttons like the world editor — holds save and save as, the render
+  pass action (plus **Bake All** over N→E→S→W and **Remove view** for
+  non-N slots), and **Place in world**. The render action implicitly
+  re-bakes the raster g-buffer from the current source and settings before
+  accumulating, so both passes stay current and pixel-aligned. Opening a
+  model auto-bakes the raster pass; the render pass runs from the toolbar.
 - A picked preset applies immediately — a failed application (missing
   HDRI, unknown format) reports a named error and reverts the dropdown.
 
@@ -163,9 +167,10 @@ the workspace `worlds/` folder as described in Worlds.
 The world editor is full-bleed: like the sprite editor it fills the
 center region without the generic document padding, with only a thin
 inset around the toolbar, viewport, and hint line. The toolbar row keeps
-Save, undo, and redo as icon buttons, a divider, then the active tool's
-contextual controls — the brush dropdown and the surface-snap toggle,
-shown only while a placement (pencil) tool is active; hiding them never
+Save, save as, undo, and redo as icon buttons, a divider, then the active
+tool's contextual controls — the brush dropdown and the surface-snap
+toggle (an icon button whose highlighted state shows snap is on), shown
+only while a placement (pencil) tool is active; hiding them never
 resets the chosen brush or snap state. Tool selection itself lives in a
 thin vertical icon bar docked inside the viewport's top-left corner
 (Photoshop-style): Select, pencil, point light, and eraser, one icon per
@@ -235,10 +240,10 @@ direction is per-document in-memory editor state — never saved. The same
 Brush section holds the brush's placement height (a precise field with a
 −2…+2 slider) and grounding-shadow strength, and appears only while the brush
 tool is active; the toolbar
-keeps only the icon save/undo/redo buttons, the brush dropdown, and the
-surface-snap toggle (the dropdown and snap hidden outside placement
-mode). The selected-placement section likewise appears only while the
-Select tool is active.
+keeps only the icon save/save-as/undo/redo buttons, the brush dropdown,
+and the surface-snap toggle (the dropdown and snap hidden outside
+placement mode). The selected-placement section likewise appears only
+while the Select tool is active.
 
 ### Select tool
 
@@ -263,7 +268,9 @@ relative to the height at drag start (the selected light's height
 included) — and the `E` key rotates a
 selected sprite through its available
 directions with wrap (falling back to the active brush's direction when
-no sprite is selected). Dragging a selected placement moves it free-form
+no sprite is selected). A selected sprite's section also offers **Delete**
+next to Deselect: the same undoable erase the eraser performs, without
+switching tools. Dragging a selected placement moves it free-form
 along the ground plane (a sprite or character keeps its height; a light's
 emitter follows the cursor); the drag is one undoable command. Selection
 is per-document in-memory editor state (ADR 0006) — never serialized —
