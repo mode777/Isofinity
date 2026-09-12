@@ -15,7 +15,8 @@ the pointer for the real semantics.
   alpha. Required before a sprite can be placed into a world.
 - **View slot** — one bake facing: `n`/`e`/`s`/`w` at 90° azimuth steps.
   All slots render from the one fixed camera with the model yaw-rotated
-  (ADR 0005). Worlds consume only `n` today.
+  (ADR 0005). Worlds consume `n` plus every extra slot that carries a
+  render pass (one placeable direction each).
 - **Slot yaw** — a non-N slot's model rotation: `slotYawDeg(slot)`
   (`src/shared/iso.ts`).
 - **`BakeResult`** — in-memory g-buffer of one slot: size, `pxPerUnit`,
@@ -113,7 +114,8 @@ the pointer for the real semantics.
   mode. Editor chrome — never serialized (ADR 0006).
 - **Surface snap** — toolbar toggle: placements take their height from
   the visible surface under the cursor, computed CPU-side from the
-  in-memory g-buffers; overrides the shift+wheel height.
+  in-memory g-buffers; overrides the shift+mouse height and the height
+  field.
 - **Mesh placement** — one instance of the built-in skinned character at
   a continuous ground position, height and yaw. Editor-session state:
   never serialized into world files (ADR 0006) — saving/loading a world
@@ -158,10 +160,10 @@ the pointer for the real semantics.
 ## Runtime
 
 - **Compositor** — `src/runtime/renderer.ts`: two-phase frame — a
-  geometry pass (ground, contact shadows, meshes, instanced sprite quads)
-  into an offscreen MRT target set, the deferred light pass, then the
-  unlit overlay; fixed orthographic camera, no scene graph, projection on
-  CPU (`src/shared/iso.ts`).
+  geometry pass (ground/material plane, contact shadows, meshes,
+  instanced sprite quads) into an offscreen MRT target set, the deferred
+  light pass, then the unlit overlay; fixed orthographic camera, no scene
+  graph, projection on CPU (`src/shared/iso.ts`).
 - **Screen-space g-buffer** — the geometry pass's offscreen targets:
   RT0 (RGBA8 display texel = albedo·AO), RT1 (RGBA16F: world normal +
   linear depth — the per-sprite bake g-buffer layout), RT2 (RGBA16F: linear depth in r,

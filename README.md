@@ -16,8 +16,20 @@ while applying real-time dynamic lighting on top of them.
 Early inception — API and architecture under active design. The bake tool
 and runtime editor live in one integrated React editor (`index.html`,
 `src/app/`): open or create sprite assets and worlds from the project
-browser, bake passes with a GPU path tracer, and place sprites into
-dynamically lit isometric worlds.
+browser, bake passes with a GPU path tracer, and place sprites, characters
+and point lights into dynamically lit isometric worlds.
+
+A build is deployed on every push to `main`:
+https://mode777.github.io/Isofinity/
+
+## Development
+
+- `npm install`, then `npm run dev` — dev server
+- `npm run build` — typecheck + production build to `dist/`
+- `npm run preview` — serve the built `dist/`
+- `npm run verify:bundles` / `verify:mesh` / `verify:history` /
+  `verify:selection` — Node-runnable checks (no test framework; these plus
+  `npm run build` are the gates)
 
 ## Documentation
 

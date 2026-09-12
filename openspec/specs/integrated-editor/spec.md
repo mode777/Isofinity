@@ -10,7 +10,7 @@ context-sensitive properties panel, and a status bar.
 
 ### Requirement: Integrated editor shell layout
 
-The editor SHALL render as a single page with five regions: a top bar (host
+The editor SHALL render as a single page with six regions: a top bar (host
 name, version, and the workspace control), a tab bar below it, a project
 browser on the left, a properties panel on the right, a center editor area,
 and a status bar at the bottom. The editor area SHALL show a per-editor
@@ -358,7 +358,7 @@ downloading the bundle.
 - **WHEN** the user saves a sprite document with no workspace connected
 - **THEN** the bundle downloads as a `.sprite` file instead of failing
 
-#### Scenario: Place in world from the toolbar
+#### Scenario: No place-in-world handoff
 
 - **WHEN** the user looks for the removed place-in-world handoff on a
   baked sprite document's toolbar
@@ -1611,9 +1611,9 @@ The bake editor's and world editor's main toolbars SHALL use icon-only
 buttons (inline SVG glyphs) with a tooltip describing each action, in a
 shared visual style; the bake editor toolbar SHALL NOT use text buttons
 for actions that exist as icons. The bake toolbar SHALL offer, as icon
-buttons: save, save as, render pass, bake all views, remove the active
-view, and place in world — each keeping its existing enable/disable
-conditions and existing action. The world toolbar SHALL offer save and
+buttons: save, save as, render pass, bake all views, and remove the
+active view — each keeping its existing enable/disable conditions and
+existing action. The world toolbar SHALL offer save and
 save as as icon buttons, and its surface-snap toggle SHALL be an icon
 button that keeps the active-state highlight while snap is on and its
 existing tooltip. Tooltips remain the discoverable name of every icon
@@ -1623,8 +1623,7 @@ action.
 
 - **WHEN** a bake editor document is open
 - **THEN** its toolbar shows icon buttons for save, save as, render pass,
-  bake all, remove view, and place in world, each with a tooltip naming
-  the action
+  bake all, and remove view, each with a tooltip naming the action
 
 #### Scenario: Save As is available in both editors
 

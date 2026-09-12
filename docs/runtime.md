@@ -9,7 +9,7 @@ batches, occlusion, lighting math) still apply and are described below.
 
 ## Shell layout
 
-Five regions: the **top bar** (app name, build version, workspace
+Six regions: the **top bar** (app name, build version, workspace
 connect/reconnect/disconnect control), the **tab bar**, the **project
 browser** on the left, the context-sensitive **properties panel** on the
 right, the **editor area** in the center, and the **status bar** at the
@@ -317,51 +317,33 @@ workspace control explains its absence and dialogs/downloads keep working.
 ### Worlds
 
 **Save world** writes `worlds/<name>.json` (name defaults to the first
-free `world-<n>`): the format marker `isoinfinity-world/7`, every placement
-(asset id + continuous ground position + height, always written; facing
-direction and grounding-shadow strength, each written only when not the
-default — north and full strength), every **point light placement**
-(emitter ground position, optional height, radius, energy, color —
-the `/6` additive fields), and the
-full light state — manual azimuth/elevation, intensity, key and ambient
-colors, dynamic-light switch, plus the sun-position values. A `/4` file
-also records additive optional ground state — the ground material's file
-name in `materials/` (omitted when none) and the ground tile scale
-(omitted at the default one tile per world unit) — and a user-selected
-world environment HDRI (`env.hdri`, omitted when the environment is
-inherited from sprite bake provenance). `/7` adds the ground plane's
-`width`/`depth` to the same `ground` object (omitted together at the
-default 12 × 12). The strength rides the same
-optional-field pattern: placements added in `/5` record `shadow` only
-when the placement differs from full strength, and the per-placement
-value is set from the toolbar's shadow field before placing (like the
-height field). Saving an
-existing name overwrites it. Loading a world validates the file completely
-first (format marker `isoinfinity-world/7` or the older
-`/1`+`/2`+`/3`+`/4`+`/5`+`/6`,
-placements with optional finite height, optional direction
-(`n`/`e`/`s`/`w`), optional shadow strength in [0, 1], optional point
-lights (finite position/radius/energy, `#rrggbb` color — a malformed
-light entry rejects the file), light/sun fields,
-optional ground/env state — a ground size that is not a pair of finite
-positive numbers rejects the file; `/6`-and-older files restore the
-ground at the default 12 × 12) so a corrupt
-file fails with
-a named error and opens nothing; `/1` placements and `/2` placements
-without a height restore at ground level, placements without a
-direction restore facing north, and placements without a shadow value
-restore at full strength; `/5` and older files carry no lights. A valid
-file then restores the
-sun values, recomputes the sun, re-applies the saved manual angles (so
-hand-tweaked directions round-trip), loads every referenced sprite bundle
-from `sprites/` (each stored view slot with a render pass loads as a
-placeable direction of that asset; views without a render pass are
-skipped with a note, and a placement whose saved direction has no loaded
-view restores facing north), places the sprites whose asset ids
-loaded — placements referencing missing bundles are skipped and named in
-the status line — and resolves the saved ground material against
-`materials/` (a material that is missing or fails to parse is skipped
-with a notice while the rest of the scene loads).
+free `world-<n>`; saving an existing name overwrites it) as
+`isoinfinity-world/7`: every placement (asset id + continuous ground
+position + height, always written; facing direction and grounding-shadow
+strength, each only when not the default — north and full strength), every
+point light (emitter position, optional height, radius, energy, color —
+the `/6` additive fields), the full light state (manual azimuth/elevation,
+intensity, key and ambient colors, dynamic-light switch, sun-position
+values), and the additive optional ground state — ground material file
+name + tile scale and a user-selected world HDRI (`/4`), plus the ground
+plane's `width`/`depth` (`/7`, all omitted at their defaults; the shadow
+strength rides the same optional-field pattern, set per placement from
+the toolbar's shadow field before placing).
+
+Loading validates the file completely first — a corrupt file fails with a
+named error and opens nothing. Formats `/7` back to `/1` are accepted;
+missing fields restore defaults (placements at ground level, facing
+north, full shadow strength; `/5`-and-older files carry no lights, `/6`-and-older
+grounds at 12 × 12); a malformed light entry or a non-finite ground size
+rejects the file. A valid file then restores the sun values (re-applying
+the saved manual angles, so hand-tweaked directions round-trip), loads
+every referenced sprite bundle from `sprites/` (each stored view slot
+with a render pass becomes a placeable direction of that asset; views
+without one are skipped with a note, a placement whose saved direction
+has no loaded view restores facing north; placements referencing missing
+bundles are skipped and named in the status line) and resolves the ground
+material against `materials/` (missing or unparseable = skipped with a
+notice while the rest of the scene loads).
 
 ### Loading sprite bundles
 
@@ -632,30 +614,15 @@ per-document in-memory editor state, never saved. The **`E` key** cycles the bru
 through its available directions (N → E → S → W, wrapping, skipping
 views the sprite does not provide; no-op for single-view brushes and
 while a form control has focus, or rotates the selected sprite with the
-Select tool). Left-click/drag places the selected brush; the **eraser**
-(and right-click with any other tool) removes the placement picked under
-the cursor with the same pixel-accurate pick the Select tool uses — a
-sprite only where its drawn silhouette covers the cursor, meshes/lights
-by proximity — rather than by ground footprint. The **Light** tool places point lights
-(click; the emitter rides the cursor's ground point and effective height,
-clicking on a placed light selects it for the properties panel — radius,
-energy, color, position — and its radius ring shows in the viewport).
-Every placed light also shows a **light icon** — a small constant-size
-diamond at its emitter, tinted with the light's color — in every tool
-mode: the visible click/drag handle for the light's screen-space
-proximity pick (Select-tool click selects, Select-drag moves on the
-ground plane; with the Light tool the icon click selects instead of
-placing; with a brush it changes nothing). Hovering an icon with the
-Select or Light tool previews the light's radius ring.
-The **Select** tool's left button selects the placement under the cursor
-and drags it along the ground plane; an empty click or Escape clears the
-selection. Ground picking inverts the shared
-projection analytically (`screenToGround`) after inverting the viewport's
-zoom/pan transform, no hit-testing. The checkerboard is a visual
-reference only. Viewport navigation: two-finger scroll pans, pinch
-(ctrl+wheel) zooms around the cursor, middle-drag pans; on touch screens
-three fingers pan (one finger paints/taps, two are neutral); the
-left/right placement bindings never move.
+Select tool). Left-click/drag places the selected brush. The **eraser**
+(and right-click with any other tool), the **Light** tool, the
+**Select** tool, and the light icons use the pick and behave as described
+in the World editor and Select tool sections above. Ground picking
+inverts the shared projection analytically (`screenToGround`) after
+inverting the viewport's zoom/pan transform, no hit-testing. The
+checkerboard is a visual reference only. Viewport navigation mirrors the
+sprite viewport (see World editor above); the left/right placement
+bindings never move.
 
 ## Source layout
 
@@ -664,16 +631,19 @@ left/right placement bindings never move.
 - `src/shared/workspace.ts` — workspace folder binding (File System Access
   connection lifecycle, IndexedDB handle persistence, convention folders,
   list/read/write helpers, `.sprite` constant)
+- `src/shared/sun.ts` — NOAA-style sun azimuth/elevation from local solar
+  time (dependency-free, shared style with `iso.ts`)
 - `src/runtime/assets.ts` — `SpriteLayer` type, bundle loading (with
   provenance), procedural environment, layer-set padding/normalization
 - `src/runtime/renderer.ts` — WebGL2 batches, per-pixel occlusion + shading,
   `dispose()` for tab teardown
 - `src/runtime/meshAsset.ts` — skinned character assets + CPU pose engine (mixer → joint palettes)
 - `src/runtime/shProbe.ts` — environment → SH diffuse-irradiance probe (CPU + GLSL basis twins)
-- `src/runtime/mesh-verify.ts` — Node-runnable mesh checks (`npm run verify:mesh`)
+- `src/runtime/surfaceSnap.ts` — CPU surface-height read under the cursor for surface snap
 - `src/runtime/world.ts` — placement state, depth sort, id-keyed removal
 - `src/runtime/history.ts` — undo/redo command-pair stacks (world-edit history; `npm run verify:history`)
 - `src/runtime/selection.ts` — CPU placement picking for the Select tool (g-buffer silhouette + per-fragment depth; `npm run verify:selection`)
+- `src/runtime/*-verify.ts` — Node check entry points (`npm run verify:mesh/history/selection`)
 - `src/app/document.ts` — document/tab types and defaults
 - `src/app/store/` — Zustand stores: editor (tabs + documents + status),
   workspace adapter, project listings, bake actions, world actions
@@ -683,5 +653,12 @@ left/right placement bindings never move.
   bake's fixed iso frame, box overlay)
 - `src/app/bundleView.ts` — bundle → in-memory pass buffers (decoder
   conventions above)
+- `src/app/presets.ts` — bake-setting preset format + strict parser
+- `src/app/worldFile.ts` — world JSON payload: `isoinfinity-world/7`
+  save/parse/validate (pure, Node-checkable)
+- `src/app/groundMaterial.ts` — `.material` zip parsing (diff/arm/nor_gl slots)
+- `src/app/light.ts` — light state → compositor uniforms (sRGB → linear, identity when off)
+- `src/app/hdr.ts` — equirect HDRI decode (`.hdr`/`.exr`) for the SH probe
+- `src/app/mesh-debug.ts` — the `/mesh-debug.html` staged mesh diagnostic
 - `src/app/components/` — shell, tab bar, project browser, properties
   panels, sprite/world editors

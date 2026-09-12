@@ -51,14 +51,19 @@ it as the reference architecture; design against it.
   extraction, pose-engine palettes, SH probe vs a numerical integral).
   Run after touching `src/runtime/meshAsset.ts` or
   `src/runtime/shProbe.ts`.
+- `npm run verify:history` — Node-runnable undo/redo checks
+  (`src/runtime/history-verify.ts`: inverse-delta command pairs, id
+  stability, stack behavior). Run after touching
+  `src/runtime/history.ts`.
 - `npm run verify:selection` — Node-runnable world-editor selection checks
   (`src/runtime/selection-verify.ts`: sprite g-buffer silhouette picking,
   mesh/light proximity, placement id/update bookkeeping). Run after
   touching `src/runtime/selection.ts` or `src/runtime/world.ts`.
-- Browser harness: `npm run dev` → `/scratch-verify.html` — bake/GL
-  checks and primitive bundle hashes for regression diffs. Needs a
-  browser: update it when bake behavior changes, but leave the actual
-  browser run to the user.
+- Browser harnesses (need a browser — update when behavior changes, but
+  leave the browser run to the user): `npm run dev` →
+  `/scratch-verify.html` (bake/GL checks, primitive bundle hashes for
+  regression diffs) and `/mesh-debug.html` (staged dynamic-mesh
+  diagnostic).
 - No test framework or lint setup; the Node verifiers above plus
   `npm run build` are the gates.
 - `openspec` is not on PATH; run it via `npx openspec ...` (verified:
@@ -128,23 +133,26 @@ file + a row in its index). Full design/process records stay in
   view slots, view-independent `provenance` so sprites re-bake in place;
   `/4`+`/5` open view-only/N-only). Worlds consume the N view. Pipeline
   details: `docs/bake-pipeline.md`.
-- World size: new worlds get their ground plane's width × depth from a
-  dialog (1–128 whole units, defaults 12 × 12); existing worlds resize
-  from the properties panel — the origin corner stays fixed and
-  out-of-bounds placements are kept, never removed. Ground size persists
-  in `isoinfinity-world/7` (optional, omitted at 12 × 12).
 - Workspace binding (File System Access API, `src/shared/workspace.ts`;
-  convention: `hdri/`, `models/`, `sprites/`, `worlds/`, `presets/`) is surfaced
-  through the top bar, project browser and panels, with dialogs/downloads
-  as fallback. Worlds (placements + light state) save/load as
-  `isoinfinity-world/7` JSON in the workspace's `worlds/` folder.
-- Raw WebGL2 compositor (`src/runtime/renderer.ts`) with per-pixel sprite
-  occlusion, deferred-style directional lighting (key + ambient, shades
-  the baked render image by the g-buffer normals — multiplicatively, see
-  `docs/decisions/0003`), a global dynamic-light switch, and a dynamic
-  mesh batch (skinned character among sprites; three.js as CPU-side
-  libraries, SH-irradiance ambient — see `docs/decisions/0007`). Mesh
-  placements are in-memory editor state; serialization, locomotion and
-  terrain are open follow-ons.
+  convention: `hdri/`, `models/`, `sprites/`, `worlds/`, `presets/`,
+  `materials/`) is surfaced through the top bar, project browser and
+  panels, with dialogs/downloads as fallback.
+- World editor: free-form cursor-anchored placements (sprites, the built-in
+  skinned character, point lights) with heights, surface snap, N/E/S/W
+  facing, a Select tool with pixel-accurate picking (ADR 0012), undo/redo,
+  and per-world ground size (new-world dialog + panel resize, 1–128
+  units). Worlds (placements + lights + ground state) save/load as
+  `isoinfinity-world/7` JSON in the workspace's `worlds/` folder
+  (`/1`–`/6` tolerated).
+- Raw WebGL2 compositor (`src/runtime/renderer.ts`), two-phase per ADR
+  0011: a geometry pass draws ground, meshes and sprites into a
+  screen-space g-buffer, then one deferred light pass applies the ADR 0003
+  multiplicative factor to every surface kind (ambient + key directional +
+  up to 16 point lights; the global dynamic-light switch pins identity).
+  Per-pixel sprite occlusion, baked grounding shadows (ADR 0010), and a
+  dynamic mesh batch (skinned character among sprites; three.js as
+  CPU-side libraries, SH-irradiance ambient — ADR 0007). Mesh placements
+  are in-memory editor state; serialization, locomotion and terrain are
+  open follow-ons.
 - No released API: expect breaking changes while the architecture is under
   design.
