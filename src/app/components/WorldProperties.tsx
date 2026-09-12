@@ -4,7 +4,9 @@ import type { WorldDocument } from '../document.js';
 import {
   POINT_LIGHT_TOOL_ID,
   SELECT_TOOL_ID,
+  TERRAIN_PAINT_TOOL_ID,
   brushDirections,
+  clearGroundMaterial,
   clearSelection,
   eraseRef,
   patchMesh,
@@ -19,6 +21,7 @@ import {
   setHeightLevel,
   setLight,
   setLightPlacement,
+  setPaintBrush,
   setShadowLevel,
   setSpriteDir,
   setSun,
@@ -84,10 +87,60 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
     doc.tool === '' ||
     doc.tool === 'eraser' ||
     doc.tool === SELECT_TOOL_ID ||
-    doc.tool === POINT_LIGHT_TOOL_ID;
+    doc.tool === POINT_LIGHT_TOOL_ID ||
+    doc.tool === TERRAIN_PAINT_TOOL_ID;
 
   return (
     <>
+      {doc.tool === TERRAIN_PAINT_TOOL_ID ? (
+        <Section title="Paint">
+          <p className="hint">
+            {doc.ground.materials[doc.paintSlot]
+              ? `active slot ${doc.paintSlot + 1}: ${doc.ground.materials[doc.paintSlot]}`
+              : `active slot ${doc.paintSlot + 1} has no material`}
+          </p>
+          <SliderRow
+            label="Radius"
+            value={doc.paintRadius}
+            min={0.25}
+            max={16}
+            step={0.05}
+            format={(v) => `${v.toFixed(2)} u`}
+            onChange={(v) => setPaintBrush(doc.docId, { radius: v })}
+          />
+          <SliderRow
+            label="Hardness"
+            value={doc.paintHardness}
+            min={0}
+            max={1}
+            step={0.01}
+            format={(v) => v.toFixed(2)}
+            onChange={(v) => setPaintBrush(doc.docId, { hardness: v })}
+          />
+          <label className="row">
+            <span className="row-label">Slot</span>
+            <select
+              aria-label="Paint material slot"
+              title="The material slot the brush paints"
+              value={doc.paintSlot}
+              onChange={(e) => {
+                e.currentTarget.blur();
+                setPaintBrush(doc.docId, { slot: Number(e.target.value) });
+              }}
+            >
+              {doc.ground.materials.map((m, slot) => (
+                <option key={slot} value={slot}>
+                  {`Slot ${slot + 1}${m ? `: ${m}` : ' (none)'}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          {!doc.ground.materials.some((m) => !!m) ? (
+            <p className="hint">bind a material in the Ground section first</p>
+          ) : null}
+        </Section>
+      ) : null}
+
       {!noBrush ? (
         <Section title="Brush">
           <p className="hint">brush: {doc.tool}</p>
@@ -467,25 +520,33 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
           origin corner and never removes placements
         </p>
         {connected ? (
-          <select
-            title="Workspace materials"
-            value={doc.ground.material ?? ''}
-            onChange={(e) => {
-              const name = e.target.value;
-              if (name) void selectGroundMaterial(name, doc.docId);
-            }}
-          >
-            <option value="">(checkerboard)</option>
-            {materials.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
+          <>
+            {doc.ground.materials.map((name, slot) => (
+              <label className="row" key={slot}>
+                <span className="row-label">{`Material ${slot + 1}`}</span>
+                <select
+                  title={`Workspace material for slot ${slot + 1}`}
+                  value={name ?? ''}
+                  onChange={(e) => {
+                    const picked = e.target.value;
+                    if (picked) void selectGroundMaterial(picked, doc.docId, slot);
+                    else clearGroundMaterial(doc.docId, slot);
+                  }}
+                >
+                  <option value="">(none)</option>
+                  {materials.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </label>
             ))}
-          </select>
+          </>
         ) : (
           <>
             <button onClick={() => materialInput.current?.click()}>
-              Load material file…
+              Load material file… (slot 1)
             </button>
             <input
               ref={materialInput}
@@ -506,16 +567,13 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
           min={0.01}
           max={100}
           onChange={(v) => setGroundTileScale(doc.docId, v)}
-          disabled={!doc.ground.maps}
+          disabled={!doc.ground.maps.some((m) => !!m)}
         />
-        {doc.ground.material ? (
-          <p className="hint">material: {doc.ground.material}</p>
-        ) : (
-          <p className="hint">
-            pick a .material zip from materials/ — diffuse required (diff or
-            diffuse), normal and AO optional
-          </p>
-        )}
+        <p className="hint">
+          {doc.ground.materials.some((m) => !!m)
+            ? 'paint extra coverage with the terrain-paint tool; seams blend by displacement maps'
+            : 'pick a .material zip from materials/ for any slot — diffuse required (diff or diffuse), normal/AO/displacement optional'}
+        </p>
       </Section>
     </>
   );

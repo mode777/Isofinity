@@ -334,32 +334,37 @@ workspace control explains its absence and dialogs/downloads keep working.
 
 **Save world** writes `worlds/<name>.json` (name defaults to the first
 free `world-<n>`; saving an existing name overwrites it) as
-`isoinfinity-world/7`: every placement (asset id + continuous ground
+`isoinfinity-world/8`: every placement (asset id + continuous ground
 position + height, always written; facing direction and grounding-shadow
 strength, each only when not the default — north and full strength), every
 point light (emitter position, optional height, radius, energy, color —
 the `/6` additive fields), the full light state (manual azimuth/elevation,
 intensity, key and ambient colors, dynamic-light switch, sun-position
-values), and the additive optional ground state — ground material file
-name + tile scale and a user-selected world HDRI (`/4`), plus the ground
-plane's `width`/`depth` (`/7`, all omitted at their defaults; the shadow
-strength rides the same optional-field pattern, set per placement from
-the toolbar's shadow field before placing).
+values), and the additive optional ground state — up to four material slot
+bindings + tile scale and a user-selected world HDRI (`/4`), the ground
+plane's `width`/`depth` (`/7`), and the painted-coverage descriptor
+(`/8`, the sidecar PNG written first beside the JSON), all omitted at
+their defaults; the shadow strength rides the same optional-field pattern,
+set per placement from the toolbar's shadow field before placing.
 
 Loading validates the file completely first — a corrupt file fails with a
-named error and opens nothing. Formats `/7` back to `/1` are accepted;
+named error and opens nothing. Formats `/8` back to `/1` are accepted;
 missing fields restore defaults (placements at ground level, facing
 north, full shadow strength; `/5`-and-older files carry no lights, `/6`-and-older
-grounds at 12 × 12); a malformed light entry or a non-finite ground size
-rejects the file. A valid file then restores the sun values (re-applying
+grounds at 12 × 12, `/7`-and-older ground materials load as slot 0); a
+malformed light entry, a non-finite ground size, a malformed material-slot
+array, or a malformed coverage descriptor rejects the file. A valid file
+then restores the sun values (re-applying
 the saved manual angles, so hand-tweaked directions round-trip), loads
 every referenced sprite bundle from `sprites/` (each stored view slot
 with a render pass becomes a placeable direction of that asset; views
 without one are skipped with a note, a placement whose saved direction
 has no loaded view restores facing north; placements referencing missing
 bundles are skipped and named in the status line) and resolves the ground
-material against `materials/` (missing or unparseable = skipped with a
-notice while the rest of the scene loads).
+material slots against `materials/` (missing or unparseable = skipped with
+a notice while the rest of the scene loads), and restores painted coverage
+from its PNG beside the JSON (missing/unreadable = fall back to slot 0
+over everything with a notice).
 
 ### Loading sprite bundles
 
@@ -489,23 +494,42 @@ on one driver while all diagnostics showed the data exact.
 
 The world spans a flat ground plane (`y = 0`, world extent = the ground
 plane's width × depth, chosen at creation and resizable in the panel).
-Without a material it is the flat checkerboard batch (below); with a
-ground material selected it becomes a real world-space quad drawn by its
-own program: lean PBR shading — linearized diffuse albedo, tangent-space
-normal-map perturbation (gl convention, analytic plane tangents), arm-map
-red channel as ambient occlusion — with the SH ambient probe, ACES fit
-and display saturation baked into its albedo·AO texel; the deferred light
-pass applies the same dynamic factor the meshes and sprites receive.
-Roughness/metal are decoded but not applied yet; specular and reflections
-are later work. Ground materials are zip files with a `.material`
+Without any bound material it is the flat checkerboard batch (below); with
+one to four **material slots** bound it becomes a real world-space quad
+drawn by its own program, blending the slots per pixel. Each slot samples a
+layer of four `TEXTURE_2D_ARRAY`s (diffuse/normal/arm/displacement, four
+layers each) plus the RGBA **coverage splat** — five texture units, so the
+ground never exceeds WebGL2's guaranteed fragment sampler budget. Shading
+is lean PBR: linearized diffuse albedo, tangent-space normal-map
+perturbation (gl convention, analytic plane tangents), arm-map red channel
+as ambient occlusion, composited by the coverage weights; the SH ambient
+probe, ACES fit and display saturation bake into the albedo·AO texel, and
+the deferred light pass applies the same dynamic factor the meshes and
+sprites receive. Roughness/metal are decoded but not applied yet; specular
+and reflections are later work.
+
+The coverage splat stores the four material weights: rgb are slots 0–2 and
+alpha is slot 3 (derived as `1 - r - g - b`, so the weights sum to 1). The
+**terrain paint tool** (viewport tool bar) paints them with a
+cursor-anchored brush — adjustable radius (world units) and hardness (soft
+to hard edge) — as a normalized replace (painting a material over another
+replaces it), one undoable command per stroke. Where coverages meet, each
+material's optional `disp`/`displace`/`displacement` map is used as a
+per-pixel surface height and the higher material wins the seam (no geometry
+moves). Coverage is persisted as a PNG beside the world JSON in `worlds/`
+(the engine keeps a CPU mirror as the source of truth for painting, undo,
+save and resize) and restored on load; the plane writes the shared linear
+depth (`gl_FragDepth`, same mapping as meshes), so sprites occlude against
+it per pixel. It is backdrop only — never pickable or erasable. Tiling is
+one shared world-unit scale (tiles per world unit, REPEAT wrap), adjustable
+in the properties panel. Ground materials are zip files with a `.material`
 extension in the workspace's `materials/` folder; maps are identified by
-`<name>_(diff|diffuse|arm|nor_gl)_*.(exr|png|jpg)` (diffuse required —
-`diffuse` is an alias for `diff`, which takes precedence; the rest
-degrade with a notice; module `src/app/groundMaterial.ts`). The plane
-writes the shared linear depth (`gl_FragDepth`, same mapping as meshes),
-so sprites occlude against it per pixel; it is backdrop only — never
-pickable or erasable. Tiling is in world units (tiles per world unit,
-REPEAT wrap), adjustable in the properties panel. The world environment
+`<name>_(diff|diffuse|arm|nor_gl|disp|displace|displacement)_*.(exr|png|jpg)`
+(diffuse required — `diffuse` is an alias for `diff`, which takes
+precedence; the rest degrade with a notice; module
+`src/app/groundMaterial.ts`). All maps of all bound slots are normalized to
+one size and RGBA8 so they fit the texture arrays (EXR diffuse is
+converted, an accepted loss). The world environment
 (pickers in the properties panel: workspace `hdri/` or a raw `.hdr`/
 `.exr` file) sets the ambient probe for meshes and ground; note the
 one-way relationship: baked sprite texels keep the environment they were
@@ -555,11 +579,13 @@ light pass sampling all three afterwards:
    LEQUAL test then resolves every character/sprite interpenetration
    pixel-accurately. With no character placed the batch is skipped and
    the frame is unchanged.
-4. **Ground material plane** (when a material is selected) — a world-space
-   quad with lean PBR shading baked into its RT0 texel (linearized
-   diffuse albedo, arm AO, SH ambient through the ACES fit), surface
-   normal (normal-map perturbation) into RT1, and the shared window depth
-   (`gl_FragDepth`), so sprites occlude against it per pixel.
+4. **Ground material plane** (when any slot is bound) — a world-space
+   quad that samples the four material texture arrays plus the coverage
+   splat, height-blends the slots (displacement seam), and composites
+   their diffuse/normal/AO into its RT0 texel (linearized albedo, AO, SH
+   ambient through the ACES fit), the blended surface normal into RT1, and
+   the shared window depth (`gl_FragDepth`), so sprites occlude against it
+   per pixel.
 5. **Sprites** — one instanced quad per placed object (per-instance quad
    size + sprite texel size, 8 floats per instance; a ninth float carries
    the placement height for grounding-shadow suppression), painter-sorted by
@@ -670,9 +696,14 @@ bindings never move.
 - `src/app/bundleView.ts` — bundle → in-memory pass buffers (decoder
   conventions above)
 - `src/app/presets.ts` — bake-setting preset format + strict parser
-- `src/app/worldFile.ts` — world JSON payload: `isoinfinity-world/7`
+- `src/app/worldFile.ts` — world JSON payload: `isoinfinity-world/8`
   save/parse/validate (pure, Node-checkable)
-- `src/app/groundMaterial.ts` — `.material` zip parsing (diff/arm/nor_gl slots)
+- `src/app/groundMaterial.ts` — `.material` zip parsing (diff/arm/nor_gl/disp
+  slots)
+- `src/shared/splat.ts` — pure coverage-splat math (resolution, brush stamp,
+  resample, derived alpha)
+- `src/shared/png.ts` — raw-channel PNG codec for the coverage sidecar
+  (canvas premultiplies, so data textures cannot round-trip through it)
 - `src/app/light.ts` — light state → compositor uniforms (sRGB → linear, identity when off)
 - `src/app/hdr.ts` — equirect HDRI decode (`.hdr`/`.exr`) for the SH probe
 - `src/app/mesh-debug.ts` — the `/mesh-debug.html` staged mesh diagnostic

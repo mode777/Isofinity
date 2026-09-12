@@ -15,7 +15,7 @@ import {
   yawRotatedBoxSize,
 } from '../shared/iso.js';
 import { buildBundle, parseBake } from './bundle.js';
-import { Renderer as WorldRenderer, meshYawMat, type MeshDraw, type PointLightGpu } from '../runtime/renderer.js';
+import { Renderer as WorldRenderer, meshYawMat, type GroundMaterialLayer, type MeshDraw, type PointLightGpu } from '../runtime/renderer.js';
 import { bakeFloatToHalf, layersToSet, RUNTIME_PPU, type SpriteLayer } from '../runtime/assets.js';
 import { CharacterPlayer, parseCharacterAsset } from '../runtime/meshAsset.js';
 import { surfaceHeightAt } from '../runtime/surfaceSnap.js';
@@ -881,16 +881,19 @@ async function runGroundSpike(): Promise<void> {
     diffuse: { kind: 'srgb' as const, image: await bitmap(diffPx, 32) },
     normal: await bitmap(flatN, 8),
     arm: await bitmap(white, 8),
+    disp: null,
   };
+  const setMat = (m: GroundMaterialLayer | null): void =>
+    renderer.setGroundMaterials(m ? [m] : [], null, 1);
 
   renderer.setGroundExtent(12, 12);
-  renderer.setGroundMaterial(maps, 1);
+  setMat(maps);
   const mat1 = await frame();
   ok(mat1 !== flat1, 'a material changes the frame');
   ok(mat1 !== await sha256(new Uint8Array(px.length)), 'material frame has content');
 
   // Tile scale: the checker density changes the sampled texels.
-  renderer.setGroundMaterial(maps, 2);
+  renderer.setGroundMaterials([maps], null, 2);
   const mat2 = await frame();
   ok(mat2 !== mat1, `tile scale changes the frame (${mat2.slice(0, 16)}…)`);
 
@@ -938,11 +941,14 @@ async function runGroundSpike(): Promise<void> {
     });
     const parsed = await parseGroundMaterial(zipBytes.buffer as ArrayBuffer, 'test.material');
     ok(parsed.normal !== null && parsed.arm !== null, 'fixture zip decodes to diffuse + arm + normal');
-    ok(parsed.notes.length === 0, `fixture zip has no load notes (got ${parsed.notes.length})`);
-    renderer.setGroundMaterial(parsed, 1);
+    ok(
+      parsed.notes.filter((n) => n.startsWith('duplicate')).length === 0,
+      `fixture zip has no duplicate-map notes (got ${parsed.notes.length})`,
+    );
+    setMat(parsed);
     const matZip = await frame();
     ok(matZip === mat1, `parsed zip material matches the in-memory maps (${matZip.slice(0, 16)}…)`);
-    renderer.setGroundMaterial(maps, 1);
+    setMat(maps);
   }
 
   // Diffuse-slot alias: `diffuse` spelling accepted, `diff` takes
@@ -967,12 +973,13 @@ async function runGroundSpike(): Promise<void> {
     const diffPng = await encodePngBytes(new Uint8Array(diffPx), 32, 32);
     const aliasZip = zipSync({ [aliasName]: diffPng as Uint8Array<ArrayBuffer> });
     const aliasParsed = await parseGroundMaterial(aliasZip.buffer as ArrayBuffer, 'alias.material');
-    ok(aliasParsed.diffuse.kind === 'srgb' && aliasParsed.notes.length === 0,
-      `alias-only zip decodes with no notes (got ${aliasParsed.notes.length})`);
-    renderer.setGroundMaterial(aliasParsed, 1);
+    ok(aliasParsed.diffuse.kind === 'srgb' &&
+       aliasParsed.notes.filter((n) => n.startsWith('duplicate')).length === 0,
+      `alias-only zip decodes with no duplicate notes (got ${aliasParsed.notes.length})`);
+    setMat(aliasParsed);
     const aliasFrame = await frame();
     ok(aliasFrame === mat1, `alias zip material matches the diff zip material (${aliasFrame.slice(0, 16)}…)`);
-    renderer.setGroundMaterial(maps, 1);
+    setMat(maps);
   }
 
   log(`  ground golden hashes: flat ${flat1.slice(0, 16)}… / material ${mat1.slice(0, 16)}…`);

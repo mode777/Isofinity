@@ -106,18 +106,24 @@ void main() {
 }
 `;
 
-// Lean PBR, geometry stage: the ground writes its env-lit tonemapped texel
-// (albedo·AO·SH ambient — its "prerender" equivalent) plus surface normal
-// and depth; the deferred light pass adds the dynamic lights on top.
+// Lean PBR, geometry stage: the ground blends up to four materials' env-lit
+// tonemapped texels (albedo·AO·SH ambient — its "prerender" equivalent) by
+// their painted coverage, weighted by each material's displacement height,
+// then writes the composited surface normal and depth; the deferred light
+// pass adds the dynamic lights on top.
 const GROUND_FRAG = `#version 300 es
 precision highp float;
-uniform sampler2D uDiffuse;
-uniform sampler2D uNormal;
-uniform sampler2D uArm;
+precision highp sampler2DArray;
+uniform sampler2DArray uDiffuse;
+uniform sampler2DArray uNormal;
+uniform sampler2DArray uArm;
+uniform sampler2DArray uDisp;
+uniform sampler2D uSplat;
+uniform vec2 uExtent;         // ground extent (world units)
 uniform float uTileScale;     // tiles per world unit
-uniform float uDiffuseLinear; // 1.0 = float EXR radiance (already linear)
-uniform float uHasNormal;
-uniform float uHasArm;
+uniform vec4 uSlotBound;      // 1.0 for slots with a bound material
+uniform float uHeightScale;   // displacement seam strength
+uniform vec4 uHeightBias;     // per-slot height bias
 uniform float uDepthA;
 uniform float uDepthB;
 uniform float uSaturation;
@@ -131,17 +137,37 @@ ${SH_IRRADIANCE_GLSL}
 ${ISO_GLSL}
 void main() {
   vec2 uv = vWorldPos.xz * uTileScale;
-  vec4 diff = texture(uDiffuse, uv);
-  vec3 albedo = uDiffuseLinear > 0.5 ? diff.rgb : srgbToLinear(diff.rgb);
-  vec3 N = vec3(0.0, 1.0, 0.0);
-  if (uHasNormal > 0.5) {
-    vec3 n = texture(uNormal, uv).xyz * 2.0 - 1.0;
-    // gl tangent convention: xy tangent (+X/+Z world), +Z blue is up ->
-    // world +Y. The plane's tangents are analytic, no per-vertex data.
-    N = normalize(vec3(n.x, n.z, n.y));
-  }
-  float ao = uHasArm > 0.5 ? texture(uArm, uv).r : 1.0;
-  vec3 hdr = albedo * ao * max(shIrradiance(N), vec3(0.0));
+  // Coverage: rgb = slots 0-2, slot 3 is the derived remainder.
+  vec4 s = texture(uSplat, vWorldPos.xz / max(uExtent, vec2(1.0)));
+  vec3 w3 = clamp(s.rgb, 0.0, 1.0);
+  vec4 w = vec4(w3, max(0.0, 1.0 - (w3.r + w3.g + w3.b))) * uSlotBound;
+  if (dot(w, vec4(1.0)) < 1e-4) w = uSlotBound;
+  // Displacement height seam: absent maps sample as 1.0 (neutral).
+  vec4 h = vec4(
+    texture(uDisp, vec3(uv, 0.0)).r,
+    texture(uDisp, vec3(uv, 1.0)).r,
+    texture(uDisp, vec3(uv, 2.0)).r,
+    texture(uDisp, vec3(uv, 3.0)).r);
+  vec4 wf = w * max(vec4(1.0) + (h - vec4(0.5)) * uHeightScale + uHeightBias, vec4(0.0));
+  wf = wf / max(dot(wf, vec4(1.0)), 1e-4);
+  vec4 d0 = texture(uDiffuse, vec3(uv, 0.0));
+  vec4 d1 = texture(uDiffuse, vec3(uv, 1.0));
+  vec4 d2 = texture(uDiffuse, vec3(uv, 2.0));
+  vec4 d3 = texture(uDiffuse, vec3(uv, 3.0));
+  vec3 albedo = d0.rgb * wf.r + d1.rgb * wf.g + d2.rgb * wf.b + d3.rgb * wf.a;
+  vec3 n0 = texture(uNormal, vec3(uv, 0.0)).xyz * 2.0 - 1.0;
+  vec3 n1 = texture(uNormal, vec3(uv, 1.0)).xyz * 2.0 - 1.0;
+  vec3 n2 = texture(uNormal, vec3(uv, 2.0)).xyz * 2.0 - 1.0;
+  vec3 n3 = texture(uNormal, vec3(uv, 3.0)).xyz * 2.0 - 1.0;
+  vec3 n = normalize(n0 * wf.r + n1 * wf.g + n2 * wf.b + n3 * wf.a);
+  // gl tangent convention: xy tangent (+X/+Z world), +Z blue is up ->
+  // world +Y. The plane's tangents are analytic, no per-vertex data.
+  vec3 N = normalize(vec3(n.x, n.z, n.y));
+  float ao = texture(uArm, vec3(uv, 0.0)).r * wf.r
+           + texture(uArm, vec3(uv, 1.0)).r * wf.g
+           + texture(uArm, vec3(uv, 2.0)).r * wf.b
+           + texture(uArm, vec3(uv, 3.0)).r * wf.a;
+  vec3 hdr = srgbToLinear(albedo) * ao * max(shIrradiance(N), vec3(0.0));
   vec3 texel = linearToSrgb(ACESFilmic(hdr));
   float lum = dot(texel, vec3(0.2126, 0.7152, 0.0722));
   outAlbedo = vec4(mix(vec3(lum), texel, uSaturation), 1.0);
@@ -598,6 +624,85 @@ export function meshYawMat(yawRad: number, out: Float32Array = new Float32Array(
 /** Scene background clear color (also the light pass's backdrop). */
 const CLEAR_COLOR: [number, number, number] = [0.078, 0.086, 0.102];
 
+/** Default displacement seam strength (see `GROUND_FRAG`). */
+const DEFAULT_HEIGHT_SCALE = 0.6;
+
+/** Structural material layer: mirrors the app-side `GroundMaterialMaps`. */
+export interface GroundMaterialLayer {
+  diffuse:
+    | { kind: 'srgb'; image: ImageBitmap }
+    | { kind: 'linear'; data: Float32Array; width: number; height: number };
+  normal: ImageBitmap | null;
+  arm: ImageBitmap | null;
+  disp: ImageBitmap | null;
+}
+
+/** A splat coverage mirror (RGBA8, top-down rows; row 0 = world z 0). */
+export interface SplatImage {
+  data: Uint8Array;
+  width: number;
+  height: number;
+}
+
+/**
+ * The square texel size the four material arrays are built at: the first
+ * bound material's diffuse size, clamped to `maxSize`. Mirrors the pure
+ * `groundMaterialArraySize` in `src/app/groundMaterial.ts`.
+ */
+function materialArraySize(
+  materials: readonly (GroundMaterialLayer | null)[],
+  maxSize: number,
+): number {
+  for (const m of materials) {
+    if (!m) continue;
+    const width =
+      m.diffuse.kind === 'srgb' ? m.diffuse.image.width : m.diffuse.width;
+    const height =
+      m.diffuse.kind === 'srgb' ? m.diffuse.image.height : m.diffuse.height;
+    return Math.max(1, Math.min(maxSize, Math.min(width, height)));
+  }
+  return 1;
+}
+
+function linearToSrgbByte(v: number): number {
+  const c = Math.min(1, Math.max(0, v));
+  const s = c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+  return Math.round(s * 255);
+}
+
+/** Resample a float EXR radiance diffuse to 8-bit sRGB bytes (nearest). */
+function linearDiffuseToRgba(
+  data: Float32Array,
+  width: number,
+  height: number,
+  size: number,
+): Uint8Array {
+  const out = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    const sy = Math.min(height - 1, Math.floor((y / size) * height));
+    for (let x = 0; x < size; x++) {
+      const sx = Math.min(width - 1, Math.floor((x / size) * width));
+      const s = (sy * width + sx) * 4;
+      const d = (y * size + x) * 4;
+      out[d] = linearToSrgbByte(data[s]);
+      out[d + 1] = linearToSrgbByte(data[s + 1]);
+      out[d + 2] = linearToSrgbByte(data[s + 2]);
+      out[d + 3] = 255;
+    }
+  }
+  return out;
+}
+
+/** Read an ImageBitmap as top-down RGBA8 bytes, resampling to `size`. */
+function bitmapToRgba(src: ImageBitmap, size: number): Uint8Array {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  ctx.drawImage(src, 0, 0, size, size);
+  return new Uint8Array(ctx.getImageData(0, 0, size, size).data);
+}
+
 export class Renderer {
   private gl: WebGL2RenderingContext;
   private flatGroundProg: WebGLProgram;
@@ -633,24 +738,28 @@ export class Renderer {
   private groundProg: WebGLProgram;
   private groundTexVao: WebGLVertexArrayObject;
   private groundTexVbo: WebGLBuffer;
-  private groundDiffuseTex: WebGLTexture | null = null;
-  private groundNormalTex: WebGLTexture | null = null;
-  private groundArmTex: WebGLTexture | null = null;
+  // Four 4-layer texture arrays (one layer per material slot) + the painted
+  // coverage splat. Five units total.
+  private groundDiffuseArr: WebGLTexture | null = null;
+  private groundNormalArr: WebGLTexture | null = null;
+  private groundArmArr: WebGLTexture | null = null;
+  private groundDispArr: WebGLTexture | null = null;
+  private groundSplatTex: WebGLTexture | null = null;
   private groundMatTiles = false;
+  private splatW = 0;
+  private splatH = 0;
   /** Display saturation of the env the baked renders were produced with. */
   private envSaturation = 1;
   /** Display exposure of the env the baked renders were produced with. */
-  private envExposure = 1;
   private groundUniforms: {
     res: WebGLUniformLocation;
     view: WebGLUniformLocation;
     proj: WebGLUniformLocation;
     extent: WebGLUniformLocation;
     tileScale: WebGLUniformLocation;
-    diffuseLinear: WebGLUniformLocation;
-    hasNormal: WebGLUniformLocation;
-    hasArm: WebGLUniformLocation;
-    exposure: WebGLUniformLocation;
+    slotBound: WebGLUniformLocation;
+    heightScale: WebGLUniformLocation;
+    heightBias: WebGLUniformLocation;
     saturation: WebGLUniformLocation;
     depthA: WebGLUniformLocation;
     depthB: WebGLUniformLocation;
@@ -882,10 +991,9 @@ export class Renderer {
       proj: gu('uProj'),
       extent: gu('uExtent'),
       tileScale: gu('uTileScale'),
-      diffuseLinear: gu('uDiffuseLinear'),
-      hasNormal: gu('uHasNormal'),
-      hasArm: gu('uHasArm'),
-      exposure: gu('uExposure'),
+      slotBound: gu('uSlotBound'),
+      heightScale: gu('uHeightScale'),
+      heightBias: gu('uHeightBias'),
       saturation: gu('uSaturation'),
       depthA: gu('uDepthA'),
       depthB: gu('uDepthB'),
@@ -894,9 +1002,13 @@ export class Renderer {
     gl.useProgram(this.groundProg);
     gl.uniform1f(this.groundUniforms.depthA, -1 / (2 * DEPTH_LINEAR_RANGE));
     gl.uniform1f(this.groundUniforms.depthB, 0.5);
+    gl.uniform1f(this.groundUniforms.heightScale, DEFAULT_HEIGHT_SCALE);
+    gl.uniform4f(this.groundUniforms.heightBias, 0, 0, 0, 0);
     gl.uniform1i(gu('uDiffuse'), 0);
     gl.uniform1i(gu('uNormal'), 1);
     gl.uniform1i(gu('uArm'), 2);
+    gl.uniform1i(gu('uDisp'), 3);
+    gl.uniform1i(gu('uSplat'), 4);
     this.groundTexVao = gl.createVertexArray()!;
     this.groundTexVbo = gl.createBuffer()!;
     gl.bindVertexArray(this.groundTexVao);
@@ -1138,7 +1250,6 @@ export class Renderer {
   /** Display-referred env parameters that shaped the baked render texels. */
   setEnvDisplay(exposure: number, saturation: number): void {
     this.envSaturation = saturation;
-    this.envExposure = exposure;
     const gl = this.gl;
     for (const [mode, u] of [
       ['gpu', this.meshUniforms.gpu],
@@ -1254,72 +1365,214 @@ export class Renderer {
   }
 
   /**
-   * Set the textured ground plane's material maps (null = none: the flat
-   * batch draws instead) and tile scale (tiles per world unit). Structural
-   * counterpart of the app-side `GroundMaterialMaps`.
+   * Set the textured ground plane's material slots (all null = none: the
+   * flat batch draws instead), the painted coverage splat, and the shared
+   * tile scale (tiles per world unit). Builds four 4-layer texture arrays
+   * (one layer per slot) plus the splat — five texture units. Structural
+   * counterpart of the app-side `GroundMaterialMaps[]`.
    */
-  setGroundMaterial(
-    maps: {
-      diffuse:
-        | { kind: 'srgb'; image: ImageBitmap }
-        | { kind: 'linear'; data: Float32Array; width: number; height: number };
-      normal: ImageBitmap | null;
-      arm: ImageBitmap | null;
-    } | null,
+  setGroundMaterials(
+    materials: readonly (GroundMaterialLayer | null)[],
+    splat: SplatImage | null,
     tileScale: number,
   ): void {
     const gl = this.gl;
     this.deleteGroundTextures();
-    this.groundMatTiles = maps !== null;
+    this.groundMatTiles = materials.some((m) => m !== null);
     gl.useProgram(this.groundProg);
     gl.uniform1f(this.groundUniforms.tileScale, tileScale);
-    if (!maps) return;
-    const floatLinear = !!gl.getExtension('OES_texture_float_linear');
-    // Ground UVs derive from world xz (REPEAT, no flip): orientation only
-    // mirrors the material, which is irrelevant for a seamless tile.
-    this.groundDiffuseTex = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.groundDiffuseTex);
-    if (maps.diffuse.kind === 'srgb') {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, maps.diffuse.image);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.generateMipmap(gl.TEXTURE_2D);
-      gl.uniform1f(this.groundUniforms.diffuseLinear, 0);
-    } else {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, maps.diffuse.width, maps.diffuse.height, 0, gl.RGBA, gl.FLOAT, maps.diffuse.data);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, floatLinear ? gl.LINEAR : gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, floatLinear ? gl.LINEAR : gl.NEAREST);
-      gl.uniform1f(this.groundUniforms.diffuseLinear, 1);
-    }
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-    const byteMap = (image: ImageBitmap, unit: number): WebGLTexture => {
-      const tex = gl.createTexture();
-      gl.activeTexture(gl.TEXTURE0 + unit);
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-      gl.generateMipmap(gl.TEXTURE_2D);
+    const bound: [number, number, number, number] = [0, 0, 0, 0];
+    for (let i = 0; i < 4; i++) if (materials[i]) bound[i] = 1;
+    gl.uniform4f(this.groundUniforms.slotBound, ...bound);
+    if (!this.groundMatTiles) return;
+
+    const size = materialArraySize(materials, 2048);
+    const makeArray = (): WebGLTexture => {
+      const tex = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+      gl.texImage3D(
+        gl.TEXTURE_2D_ARRAY,
+        0,
+        gl.RGBA8,
+        size,
+        size,
+        4,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        null,
+      );
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
       return tex;
     };
-    this.groundNormalTex = maps.normal ? byteMap(maps.normal, 1) : null;
-    this.groundArmTex = maps.arm ? byteMap(maps.arm, 2) : null;
-    gl.uniform1f(this.groundUniforms.hasNormal, maps.normal ? 1 : 0);
-    gl.uniform1f(this.groundUniforms.hasArm, maps.arm ? 1 : 0);
+    this.groundDiffuseArr = makeArray();
+    this.groundNormalArr = makeArray();
+    this.groundArmArr = makeArray();
+    this.groundDispArr = makeArray();
+
+    const defaultLayer = (r: number, g: number, b: number, a: number): Uint8Array => {
+      const bytes = new Uint8Array(size * size * 4);
+      for (let i = 0; i < size * size; i++) {
+        bytes[i * 4] = r;
+        bytes[i * 4 + 1] = g;
+        bytes[i * 4 + 2] = b;
+        bytes[i * 4 + 3] = a;
+      }
+      return bytes;
+    };
+    // Absent maps degrade to neutrals: flat normal (+Z), no AO, unit
+    // displacement (the shader's height seam is centered on 1.0).
+    const diffuseDefault = defaultLayer(0, 0, 0, 255);
+    const normalDefault = defaultLayer(128, 128, 255, 255);
+    const armDefault = defaultLayer(255, 255, 255, 255);
+    const dispDefault = defaultLayer(255, 255, 255, 255);
+
+    const uploadLayer = (
+      tex: WebGLTexture,
+      layer: number,
+      src: ImageBitmap | Uint8Array,
+    ): void => {
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+      if (src instanceof Uint8Array) {
+        gl.texSubImage3D(
+          gl.TEXTURE_2D_ARRAY,
+          0,
+          0,
+          0,
+          layer,
+          size,
+          size,
+          1,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          src,
+        );
+      } else {
+        gl.texSubImage3D(
+          gl.TEXTURE_2D_ARRAY,
+          0,
+          0,
+          0,
+          layer,
+          size,
+          size,
+          1,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          src,
+        );
+      }
+    };
+    const mapSource = (
+      src: ImageBitmap | null,
+      fallback: Uint8Array,
+    ): ImageBitmap | Uint8Array =>
+      !src ? fallback : src.width === size && src.height === size ? src : bitmapToRgba(src, size);
+
+    for (let i = 0; i < 4; i++) {
+      const m = materials[i];
+      if (!m) {
+        uploadLayer(this.groundDiffuseArr, i, diffuseDefault);
+        uploadLayer(this.groundNormalArr, i, normalDefault);
+        uploadLayer(this.groundArmArr, i, armDefault);
+        uploadLayer(this.groundDispArr, i, dispDefault);
+        continue;
+      }
+      const diffuse =
+        m.diffuse.kind === 'linear'
+          ? linearDiffuseToRgba(m.diffuse.data, m.diffuse.width, m.diffuse.height, size)
+          : mapSource(m.diffuse.image, diffuseDefault);
+      uploadLayer(this.groundDiffuseArr, i, diffuse);
+      uploadLayer(this.groundNormalArr, i, mapSource(m.normal, normalDefault));
+      uploadLayer(this.groundArmArr, i, mapSource(m.arm, armDefault));
+      uploadLayer(this.groundDispArr, i, mapSource(m.disp, dispDefault));
+    }
+    for (const tex of [
+      this.groundDiffuseArr,
+      this.groundNormalArr,
+      this.groundArmArr,
+      this.groundDispArr,
+    ]) {
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+      gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
+    }
+    this.setSplat(splat);
+  }
+
+  /**
+   * Upload (or re-upload) the painted coverage splat. Sizes may change on a
+   * ground resize; tracks the current size so `updateSplatRect` can fall
+   * back to a full upload.
+   */
+  setSplat(splat: SplatImage | null): void {
+    const gl = this.gl;
+    if (this.groundSplatTex) gl.deleteTexture(this.groundSplatTex);
+    this.groundSplatTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.groundSplatTex);
+    const img = splat ?? { data: new Uint8Array([255, 0, 0, 255]), width: 1, height: 1 };
+    this.splatW = img.width;
+    this.splatH = img.height;
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA8,
+      img.width,
+      img.height,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      img.data,
+    );
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  }
+
+  /** Clip-and-upload one changed rectangle of the coverage splat. */
+  updateSplatRect(
+    splat: SplatImage,
+    rect: { x: number; y: number; w: number; h: number },
+  ): void {
+    if (!this.groundSplatTex || this.splatW !== splat.width || this.splatH !== splat.height) {
+      this.setSplat(splat);
+      return;
+    }
+    const x = Math.max(0, Math.min(splat.width - 1, rect.x));
+    const y = Math.max(0, Math.min(splat.height - 1, rect.y));
+    const w = Math.max(1, Math.min(splat.width - x, rect.w));
+    const h = Math.max(1, Math.min(splat.height - y, rect.h));
+    const sub = new Uint8Array(w * h * 4);
+    for (let row = 0; row < h; row++) {
+      const srcOff = ((y + row) * splat.width + x) * 4;
+      sub.set(splat.data.subarray(srcOff, srcOff + w * 4), row * w * 4);
+    }
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.groundSplatTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, sub);
   }
 
   private deleteGroundTextures(): void {
     const gl = this.gl;
-    if (this.groundDiffuseTex) gl.deleteTexture(this.groundDiffuseTex);
-    if (this.groundNormalTex) gl.deleteTexture(this.groundNormalTex);
-    if (this.groundArmTex) gl.deleteTexture(this.groundArmTex);
-    this.groundDiffuseTex = null;
-    this.groundNormalTex = null;
-    this.groundArmTex = null;
+    for (const tex of [
+      this.groundDiffuseArr,
+      this.groundNormalArr,
+      this.groundArmArr,
+      this.groundDispArr,
+      this.groundSplatTex,
+    ]) {
+      if (tex) gl.deleteTexture(tex);
+    }
+    this.groundDiffuseArr = null;
+    this.groundNormalArr = null;
+    this.groundArmArr = null;
+    this.groundDispArr = null;
+    this.groundSplatTex = null;
+    this.splatW = 0;
+    this.splatH = 0;
   }
 
   // --- deferred geometry targets -------------------------------------------
@@ -1443,7 +1696,6 @@ export class Renderer {
     gl.uniform4f(this.groundUniforms.view, view.zoom, view.zoom, view.panX, view.panY);
     gl.uniform3f(this.groundUniforms.proj, this.meshFrame[0], this.meshFrame[1], this.meshFrame[2]);
     gl.uniform1f(this.groundUniforms.saturation, this.envSaturation);
-    gl.uniform1f(this.groundUniforms.exposure, this.envExposure);
 
     // 1. Ground: opaque. The flat batch keeps today's no-depth behavior
     //    (sprites always composite over it) but now writes the g-buffer's
@@ -1461,11 +1713,15 @@ export class Renderer {
       gl.enable(gl.DEPTH_TEST);
       gl.useProgram(this.groundProg);
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this.groundDiffuseTex);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.groundDiffuseArr);
       gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, this.groundNormalTex);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.groundNormalArr);
       gl.activeTexture(gl.TEXTURE2);
-      gl.bindTexture(gl.TEXTURE_2D, this.groundArmTex);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.groundArmArr);
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.groundDispArr);
+      gl.activeTexture(gl.TEXTURE4);
+      gl.bindTexture(gl.TEXTURE_2D, this.groundSplatTex);
       gl.bindVertexArray(this.groundTexVao);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       gl.disable(gl.DEPTH_TEST);

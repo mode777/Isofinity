@@ -22,6 +22,7 @@ holds only what stays true after a change is archived.
 | [0010](0010-transparent-pixel-depth-rule.md) | Accepted | Transparent compositing layers write the depth of the surface they lie on (grounding shadows) |
 | [0011](0011-unified-deferred-lighting.md) | Accepted | Unified deferred lighting: the dynamic factor is applied once, in the light pass, for every surface kind |
 | [0012](0012-cpu-gbuffer-silhouette-picking.md) | Accepted | World-editor selection picks from the in-memory g-buffers on the CPU |
+| [0013](0013-ground-material-splat.md) | Accepted | Ground material splat: four slots, one RGBA coverage texture, displacement seams |
 
 ## Adding a decision
 

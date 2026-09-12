@@ -141,6 +141,17 @@ export function IconRemoveView(): React.JSX.Element {
   );
 }
 
+/** Paint brush (terrain material painting). */
+export function IconPaint(): React.JSX.Element {
+  return icon(
+    <>
+      <path d="M10.8 2.2l3 3-6.1 6.1-3-3z" />
+      <path d="M4.7 8.3l3 3" />
+      <path d="M4.6 11.2c-1.1.4-1.8 1.2-2.1 2.6 1.4-.3 2.2-1 2.6-2.1" />
+    </>,
+  );
+}
+
 /** Horseshoe magnet (surface snap). */
 export function IconSnap(): React.JSX.Element {
   return icon(

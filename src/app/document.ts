@@ -202,21 +202,55 @@ export interface EnvDisplayParams {
   saturation: number;
 }
 
+/** Number of material slots the ground binds and paints at once. */
+export const GROUND_MATERIAL_SLOTS = 4;
+
 /**
- * The ground plane's material state. `material` (file name in the
- * workspace's materials/ folder), `tileScale` (tiles per world unit), and
- * `width`/`depth` (the ground plane's extent in world units, from the
- * fixed origin corner toward +x/+z) persist in world files; `maps` is the
- * decoded material (engine object, never serialized) the renderer uploads.
+ * Painted-coverage persistence descriptor. `file` is the coverage PNG's
+ * name in the workspace's worlds/ folder (null until the world is saved);
+ * `texelsPerUnit` fixes the splat resolution to world units. Persisted in
+ * `isoinfinity-world/8`; the pixel data itself is the engine mirror below.
+ */
+export interface GroundPaintState {
+  file: string | null;
+  texelsPerUnit: number;
+}
+
+/**
+ * The ground plane's material state. `materials` (up to four file names in
+ * the workspace's materials/ folder, one per slot), `tileScale` (tiles per
+ * world unit), `width`/`depth` (the ground plane's extent in world units,
+ * from the fixed origin corner toward +x/+z), and `paint` persist in world
+ * files; `maps` (decoded materials) and the splat mirror are engine objects
+ * the renderer uploads — never serialized (ADR 0006).
  */
 export interface GroundState {
-  material: string | null;
+  /** Bound material file names, one per slot (`null` = unbound). */
+  materials: (string | null)[];
   tileScale: number;
   /** Ground extent in world units along +x, from the origin corner. */
   width: number;
   /** Ground extent in world units along +z, from the origin corner. */
   depth: number;
-  maps: import('./groundMaterial.js').GroundMaterialMaps | null;
+  /** Decoded materials, in slot order (engine objects, never serialized). */
+  maps: (import('./groundMaterial.js').GroundMaterialMaps | null)[];
+  /** Coverage persistence descriptor, or null before anything is painted. */
+  paint: GroundPaintState | null;
+  /**
+   * CPU coverage mirror (RGBA8, `splatWidth * splatHeight * 4`): rgb =
+   * material slots 0-2, alpha = slot 3. Engine object — the source of truth
+   * for painting, undo, save, and resize; never serialized (ADR 0006).
+   */
+  splat: Uint8Array | null;
+  splatWidth: number;
+  splatHeight: number;
+  /** Bumped on every splat change so the renderer re-uploads. */
+  splatRevision: number;
+  /**
+   * Dirty texel rectangle of the last splat change ({x, y, w, h}), or null
+   * when the renderer is in sync. Engine bookkeeping — never serialized.
+   */
+  splatDirty: { x: number; y: number; w: number; h: number } | null;
 }
 
 /** Default tiling: one material tile per 10 world units. */
@@ -225,6 +259,15 @@ export const DEFAULT_GROUND_TILE_SCALE = 0.1;
 /** Default ground extent (the historical 12 × 12 grid). */
 export const DEFAULT_GROUND_WIDTH = 12;
 export const DEFAULT_GROUND_DEPTH = 12;
+
+// Coverage-splat math lives in `src/shared/splat.ts` (pure, Node-verifiable)
+// and is re-exported here for the editor's convenience.
+export {
+  DEFAULT_PAINT_TEXELS_PER_UNIT,
+  MAX_SPLAT_DIM,
+  defaultSplatBytes,
+  splatDimensions,
+} from '../shared/splat.js';
 
 /**
  * Clamp a ground-size axis to the accepted range: whole world units in
@@ -237,11 +280,17 @@ export function clampGroundSize(value: number, fallback: number): number {
 
 export function defaultGroundState(): GroundState {
   return {
-    material: null,
+    materials: new Array<string | null>(GROUND_MATERIAL_SLOTS).fill(null),
     tileScale: DEFAULT_GROUND_TILE_SCALE,
     width: DEFAULT_GROUND_WIDTH,
     depth: DEFAULT_GROUND_DEPTH,
-    maps: null,
+    maps: new Array(GROUND_MATERIAL_SLOTS).fill(null),
+    paint: null,
+    splat: null,
+    splatWidth: 0,
+    splatHeight: 0,
+    splatRevision: 0,
+    splatDirty: null,
   };
 }
 
@@ -309,8 +358,17 @@ export interface WorldDocument {
   /** Ground plane material state (see `GroundState`). */
   ground: GroundState;
   /**
+   * Terrain paint brush radius in world units. In-memory editor state only
+   * — never written into world files (ADR 0006).
+   */
+  paintRadius: number;
+  /** Terrain paint brush hardness in [0, 1] (0 soft, 1 hard). In-memory. */
+  paintHardness: number;
+  /** Material slot the paint brush paints (0-3). In-memory editor state. */
+  paintSlot: number;
+  /**
    * Active placement tool: '' = pencil with no brush chosen, a brush id
-   * (sprite layer id or primitive id), or 'eraser'.
+   * (sprite layer id or primitive id), a special tool id, or 'eraser'.
    */
   tool: string;
   /**

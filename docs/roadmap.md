@@ -40,14 +40,19 @@ each line below has a full record there).
   lighting (ADR 0011: ambient + key directional + up to 16 point lights
   over a screen-space g-buffer; world position from depth, ADR 0001), and
   skinned animated characters in the compositor (ADR 0007, `verify:mesh`).
+- **Terrain material painting** — up to four ground material slots blended
+  by an RGBA coverage splat, a radius/hardness paint brush with a
+  normalized-replace stamp and per-stroke undo, displacement height-seam
+  blending, and the splat persisted as a PNG beside the world JSON
+  (`isoinfinity-world/8`, `verify:terrain`; ADR 0013).
 - **World editor** — viewport navigation (scroll-pan/pinch-zoom/
   middle-drag, three-finger touch), depth-tested brush ghost, light tool +
   selectable light icons, Select tool with pixel-accurate g-buffer picking
-  (ADR 0012, `verify:selection`), undo/redo (`verify:history`), per-world
-  ground size (new-world dialog + panel resize, 1–128 units;
-  `isoinfinity-world/7`), tool-gated panels/chrome, a viewport
-  layer-visibility dropdown (top-right) hiding/showing the ground, sprite,
-  and mesh layers (transient per-document state; hidden layers stop
+  (ADR 0012, `verify:selection`), terrain paint tool, undo/redo
+  (`verify:history`), per-world ground size (new-world dialog + panel
+  resize, 1–128 units; `isoinfinity-world/7`), tool-gated panels/chrome, a
+  viewport layer-visibility dropdown (top-right) hiding/showing the ground,
+  sprite, and mesh layers (transient per-document state; hidden layers stop
   rendering, picking, and snapping). **Removed:** the
   sprite editor's "Place in world" hand-off — sprites reach a world by
   saving to `sprites/` and picking as a brush; worlds are created only
@@ -60,7 +65,7 @@ Nothing in flight.
 ## Planned
 
 - Dynamic-mesh follow-ons: mesh placement serialization, locomotion,
-  terrain / dynamic ground (the same batch, unskinned), multi-character
+  dynamic-ground geometry (the same batch, unskinned), multi-character
   instancing.
 - Real shadow mapping — placement heights made per-pixel world positions
   reconstructable from the composited depth, which a light-space occluder

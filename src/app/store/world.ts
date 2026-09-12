@@ -5,6 +5,13 @@ import {
   readWorkspaceFile,
   writeWorkspaceFile,
 } from '../../shared/workspace.js';
+import { decodePngRgba, encodePngRgba } from '../../shared/png.js';
+import {
+  resampleSplat,
+  stampSplatDab,
+  unionRect,
+  withDerivedAlpha,
+} from '../../shared/splat.js';
 import {
   loadBundleViews,
   orderedViewSlots,
@@ -28,6 +35,7 @@ import {
 } from '../../runtime/shProbe.js';
 import characterAssetUrl from '../assets/CesiumMan.glb?url';
 import type {
+  GroundState,
   LightState,
   PlacementRef,
   PrimitiveKind,
@@ -48,13 +56,18 @@ import {
   DEFAULT_GROUND_DEPTH,
   DEFAULT_GROUND_TILE_SCALE,
   DEFAULT_GROUND_WIDTH,
+  DEFAULT_PAINT_TEXELS_PER_UNIT,
   DEFAULT_POINT_LIGHT,
   defaultGroundState,
+  defaultSplatBytes,
+  GROUND_MATERIAL_SLOTS,
+  splatDimensions,
 } from '../document.js';
 import { parseGroundMaterial } from '../groundMaterial.js';
 import { equirectFromHdrBuffer } from '../hdr.js';
 import { buildWorldFile, parseWorldFile } from '../worldFile.js';
 import { nextDocId, useEditor, type EditorState } from './editor.js';
+import { useWorkspace } from './workspace.js';
 import { bakePrimitiveLayer, anyBakeBusy } from './bake.js';
 import { SPRITE_EXTS, useProject } from './project.js';
 
@@ -315,6 +328,9 @@ export function newWorldDoc(
       width: clampGroundSize(width, DEFAULT_GROUND_WIDTH),
       depth: clampGroundSize(depth, DEFAULT_GROUND_DEPTH),
     },
+    paintRadius: 2,
+    paintHardness: 0.5,
+    paintSlot: 0,
     tool: '',
     heightLevel: 0,
     surfaceSnap: false,
@@ -396,6 +412,9 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       shProbe: null,
       userEnv: null,
       ground: defaultGroundState(),
+      paintRadius: 2,
+      paintHardness: 0.5,
+      paintSlot: 0,
       tool: '',
       heightLevel: 0,
       surfaceSnap: false,
@@ -483,29 +502,53 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     }
 
     // Ground + user-selected environment (/4): names restore immediately,
-    // the material's maps load best-effort after the doc opens. The
-    // ground size (/7) clamps into the editor's accepted range.
-    doc.userEnv = data.envHdri ? { kind: 'hdri', fileName: data.envHdri } : null;
-    const groundMaterial = data.groundMaterial ?? null;
-    const groundTileScale = data.groundTileScale ?? DEFAULT_GROUND_TILE_SCALE;
+    // the material maps load best-effort after the doc opens. The ground
+    // size (/7) clamps into the editor's accepted range; /8 adds the
+    // material slot array and the painted-coverage descriptor.
+    doc.userEnv = data.env?.hdri ? { kind: 'hdri', fileName: data.env.hdri } : null;
+    const groundSection = data.ground;
+    const legacyMaterial = groundSection?.material ?? null;
+    const boundMaterials = (groundSection?.materials ?? []).slice();
+    while (boundMaterials.length < GROUND_MATERIAL_SLOTS) boundMaterials.push(null);
+    if (legacyMaterial && !boundMaterials[0]) boundMaterials[0] = legacyMaterial;
+    const groundTileScale = groundSection?.tileScale ?? DEFAULT_GROUND_TILE_SCALE;
+    const groundWidth = clampGroundSize(
+      groundSection?.width ?? DEFAULT_GROUND_WIDTH,
+      DEFAULT_GROUND_WIDTH,
+    );
+    const groundDepth = clampGroundSize(
+      groundSection?.depth ?? DEFAULT_GROUND_DEPTH,
+      DEFAULT_GROUND_DEPTH,
+    );
     doc.ground = {
-      material: groundMaterial,
+      materials: boundMaterials.slice(0, GROUND_MATERIAL_SLOTS),
       tileScale: groundTileScale,
-      width: clampGroundSize(
-        data.groundWidth ?? DEFAULT_GROUND_WIDTH,
-        DEFAULT_GROUND_WIDTH,
-      ),
-      depth: clampGroundSize(
-        data.groundDepth ?? DEFAULT_GROUND_DEPTH,
-        DEFAULT_GROUND_DEPTH,
-      ),
-      maps: null,
+      width: groundWidth,
+      depth: groundDepth,
+      maps: new Array(GROUND_MATERIAL_SLOTS).fill(null),
+      paint: groundSection?.paint
+        ? { file: groundSection.paint.file, texelsPerUnit: groundSection.paint.texelsPerUnit }
+        : null,
+      splat: null,
+      splatWidth: 0,
+      splatHeight: 0,
+      splatRevision: 0,
+      splatDirty: null,
     };
+    // A default coverage mirror exists as soon as any material is bound
+    // (or coverage is referenced), so the brush can paint immediately.
+    if (boundMaterials.some((m) => !!m)) {
+      ensureSplatState(doc.ground);
+    }
 
     ed().addDoc(doc);
     void updateShProbe(doc.docId);
-    if (groundMaterial) {
-      void applyGroundMaps(doc.docId, groundMaterial);
+    for (let slot = 0; slot < GROUND_MATERIAL_SLOTS; slot++) {
+      const name = doc.ground.materials[slot];
+      if (name) void applyGroundMaps(doc.docId, name, slot);
+    }
+    if (doc.ground.paint?.file) {
+      void loadGroundPaint(doc.docId, doc.ground.paint.file);
     }
     const placed = data.sprites.length - skippedCount(data.sprites, skipped);
     ed().setStatus(
@@ -543,25 +586,105 @@ function skippedCount(
 // --- ground & environment ---------------------------------------------------
 
 /**
- * Load and decode a ground material from materials/ and attach it to the
- * document. Failures keep the previous material and are reported.
+ * Load and decode one ground material slot from materials/ and attach it.
+ * Failures clear the slot and are reported; other slots are unaffected.
  */
-async function applyGroundMaps(docId: string, fileName: string): Promise<void> {
+async function applyGroundMaps(docId: string, fileName: string, slot: number): Promise<void> {
   try {
     const file = await readWorkspaceFile('materials', fileName);
     const maps = await parseGroundMaterial(await file.arrayBuffer(), fileName);
     const note = maps.notes.length > 0 ? ` (${maps.notes.join('; ')})` : '';
     update(docId, (d) => {
-      if (d.ground.material !== fileName) return;
-      d.ground.maps = maps;
+      if (d.ground.materials[slot] !== fileName) return;
+      d.ground.maps[slot] = maps;
     });
-    ed().setStatus(`Ground material "${fileName}" applied${note}`);
+    ed().setStatus(`Ground material "${fileName}" applied to slot ${slot + 1}${note}`);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     update(docId, (d) => {
-      if (d.ground.material === fileName) d.ground.material = null;
+      if (d.ground.materials[slot] === fileName) {
+        d.ground.materials[slot] = null;
+        d.ground.maps[slot] = null;
+      }
     });
-    ed().setStatus(`Ground material "${fileName}" skipped — ${reason}`);
+    ed().setStatus(
+      `Ground material "${fileName}" (slot ${slot + 1}) skipped — ${reason}`,
+    );
+  }
+}
+
+const clampSlot = (slot: number): number =>
+  Math.max(0, Math.min(GROUND_MATERIAL_SLOTS - 1, Math.round(slot)));
+
+/** Coverage resolution (texels per world unit) in effect for a ground. */
+function paintTexelsPerUnit(ground: GroundState): number {
+  return ground.paint?.texelsPerUnit ?? DEFAULT_PAINT_TEXELS_PER_UNIT;
+}
+
+/**
+ * Ensure the coverage mirror exists at the current ground size and
+ * resolution. A fresh mirror is material slot 0 everywhere. Engine state —
+ * never serialized (ADR 0006).
+ */
+function ensureSplatState(ground: GroundState): void {
+  const { width, height } = splatDimensions(
+    ground.width,
+    ground.depth,
+    paintTexelsPerUnit(ground),
+  );
+  if (ground.splat && ground.splatWidth === width && ground.splatHeight === height) return;
+  ground.splat = defaultSplatBytes(width, height);
+  ground.splatWidth = width;
+  ground.splatHeight = height;
+  ground.splatRevision++;
+  ground.splatDirty = { x: 0, y: 0, w: width, h: height };
+}
+
+/** Nearest-resample the coverage mirror to the ground's new texel size. */
+function resampleSplatState(ground: GroundState): void {
+  if (!ground.splat || ground.splatWidth === 0 || ground.splatHeight === 0) return;
+  const { width, height } = splatDimensions(
+    ground.width,
+    ground.depth,
+    paintTexelsPerUnit(ground),
+  );
+  if (ground.splatWidth === width && ground.splatHeight === height) return;
+  ground.splat = resampleSplat(
+    { data: ground.splat, width: ground.splatWidth, height: ground.splatHeight },
+    width,
+    height,
+  );
+  ground.splatWidth = width;
+  ground.splatHeight = height;
+  ground.splatRevision++;
+  ground.splatDirty = { x: 0, y: 0, w: width, h: height };
+}
+
+/** Decode and attach a saved coverage PNG from the workspace's worlds/. */
+async function loadGroundPaint(docId: string, fileName: string): Promise<void> {
+  try {
+    const file = await readWorkspaceFile('worlds', fileName);
+    const decoded = decodePngRgba(new Uint8Array(await file.arrayBuffer()));
+    update(docId, (d) => {
+      d.ground.splat = decoded.data;
+      d.ground.splatWidth = decoded.width;
+      d.ground.splatHeight = decoded.height;
+      d.ground.splatRevision++;
+      d.ground.splatDirty = { x: 0, y: 0, w: decoded.width, h: decoded.height };
+    });
+    ed().setStatus(`Ground coverage "${fileName}" restored`);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    update(docId, (d) => {
+      d.ground.splat = null;
+      d.ground.splatWidth = 0;
+      d.ground.splatHeight = 0;
+      d.ground.paint = null;
+      ensureSplatState(d.ground);
+    });
+    ed().setStatus(
+      `Ground coverage "${fileName}" missing/unreadable (${reason}) — using slot 0`,
+    );
   }
 }
 
@@ -578,22 +701,40 @@ function resolveWorldDoc(docId?: string): WorldDocument | null {
 }
 
 /**
- * Select the ground plane's material (a `.material` zip in the workspace's
- * materials/ folder). The maps load and decode async; the selection is
- * stored up front and the maps attach when ready.
+ * Bind a `.material` zip from the workspace to one ground slot. The maps
+ * load and decode async; the binding is stored up front and the maps attach
+ * when ready. Rebinding keeps the slot's painted coverage.
  */
-export async function selectGroundMaterial(fileName: string, docId?: string): Promise<void> {
+export async function selectGroundMaterial(
+  fileName: string,
+  docId?: string,
+  slot = 0,
+): Promise<void> {
   const doc = resolveWorldDoc(docId);
   if (!doc) {
     ed().setStatus('Ground material: open a world document first');
     return;
   }
+  const s = clampSlot(slot);
   update(doc.docId, (d) => {
-    d.ground.material = fileName;
-    d.ground.maps = null;
+    d.ground.materials[s] = fileName;
+    d.ground.maps[s] = null;
+    ensureSplatState(d.ground);
   });
   ed().markDirty(doc.docId);
-  await applyGroundMaps(doc.docId, fileName);
+  await applyGroundMaps(doc.docId, fileName, s);
+}
+
+/** Clear one ground slot's material binding (its coverage is reset later). */
+export function clearGroundMaterial(docId: string, slot: number): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  const s = clampSlot(slot);
+  update(docId, (d) => {
+    d.ground.materials[s] = null;
+    d.ground.maps[s] = null;
+  });
+  ed().markDirty(docId);
 }
 
 /** Set the ground material's tiling (tiles per world unit; finite, > 0). */
@@ -611,8 +752,9 @@ export function setGroundTileScale(docId: string, tileScale: number): void {
  * Resize the ground plane in place (whole world units, 1–128 per axis;
  * out-of-range input clamps, non-finite keeps the current value). The
  * origin corner stays fixed — the plane grows and shrinks toward +x/+z —
- * placements are never touched, the view refits, and the change is dirty
- * but not undoable (like the other ground-state edits).
+ * placements are never touched, painted coverage is resampled, the view
+ * refits, and the change is dirty but not undoable (like the other
+ * ground-state edits).
  */
 export function setGroundSize(docId: string, width: number, depth: number): void {
   const doc = worldDoc(docId);
@@ -623,6 +765,7 @@ export function setGroundSize(docId: string, width: number, depth: number): void
   update(docId, (state) => {
     state.ground.width = w;
     state.ground.depth = d;
+    resampleSplatState(state.ground);
     // The world image re-anchors with the frame; fit reveals the plane.
     state.viewTransform = null;
   });
@@ -677,31 +820,32 @@ export async function setWorldEnvFile(file: File, docId?: string): Promise<void>
 }
 
 /**
- * Select the ground plane's material from a raw file (the no-workspace
- * fallback). The selection is session-only: without materials/ it cannot
+ * Bind the ground slot to a raw `.material` file (the no-workspace
+ * fallback). The binding is session-only: without materials/ it cannot
  * restore when the world reloads.
  */
-export async function selectGroundMaterialFile(file: File, docId?: string): Promise<void> {
+export async function selectGroundMaterialFile(
+  file: File,
+  docId?: string,
+  slot = 0,
+): Promise<void> {
   const doc = resolveWorldDoc(docId);
   if (!doc) {
     ed().setStatus('Ground material: open a world document first');
     return;
   }
+  const s = clampSlot(slot);
   try {
     const maps = await parseGroundMaterial(await file.arrayBuffer(), file.name);
     update(doc.docId, (d) => {
-      d.ground = {
-        material: file.name,
-        tileScale: d.ground.tileScale,
-        width: d.ground.width,
-        depth: d.ground.depth,
-        maps,
-      };
+      d.ground.materials[s] = file.name;
+      d.ground.maps[s] = maps;
+      ensureSplatState(d.ground);
     });
     ed().markDirty(doc.docId);
     const note = maps.notes.length > 0 ? ` (${maps.notes.join('; ')})` : '';
     ed().setStatus(
-      `Ground material "${file.name}" applied${note} — with no workspace it will not restore on reload`,
+      `Ground material "${file.name}" applied to slot ${s + 1}${note} — with no workspace it will not restore on reload`,
     );
   } catch (err) {
     ed().setStatus(
@@ -709,6 +853,183 @@ export async function selectGroundMaterialFile(file: File, docId?: string): Prom
     );
     console.error(err);
   }
+}
+
+// --- terrain paint ----------------------------------------------------------
+
+/** The terrain paint tool's id (its own viewport toolbar tool). */
+export const TERRAIN_PAINT_TOOL_ID = 'terrain-paint';
+
+/** Left drags between these marks one undoable paint stroke's snapshot. */
+const paintStrokeSnapshots = new Map<string, { before: Uint8Array; w: number; h: number }>();
+
+/** Set the terrain paint brush's radius, hardness, and active slot. */
+export function setPaintBrush(
+  docId: string,
+  patch: { radius?: number; hardness?: number; slot?: number },
+): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  update(docId, (d) => {
+    if (patch.radius !== undefined && Number.isFinite(patch.radius)) {
+      d.paintRadius = Math.max(0.1, Math.min(64, patch.radius));
+    }
+    if (patch.hardness !== undefined && Number.isFinite(patch.hardness)) {
+      d.paintHardness = Math.max(0, Math.min(1, patch.hardness));
+    }
+    if (patch.slot !== undefined) d.paintSlot = clampSlot(patch.slot);
+  });
+}
+
+/** Begin a paint stroke: snapshot the mirror and report unusable slots. */
+export function beginPaintStroke(docId: string): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  if (!doc.ground.materials.some((m) => !!m)) {
+    ed().setStatus('Terrain paint: bind a material to a slot first');
+    return;
+  }
+  if (!doc.ground.materials[doc.paintSlot]) {
+    ed().setStatus(
+      `Terrain paint: slot ${doc.paintSlot + 1} has no material — pick a bound slot`,
+    );
+    return;
+  }
+  if (useWorkspace.getState().state.kind !== 'connected') {
+    ed().setStatus('Terrain paint is session-only without a workspace');
+  }
+  update(docId, (d) => ensureSplatState(d.ground));
+  const g = worldDoc(docId)?.ground;
+  if (!g?.splat) return;
+  paintStrokeSnapshots.set(docId, {
+    before: g.splat.slice(),
+    w: g.splatWidth,
+    h: g.splatHeight,
+  });
+}
+
+/** Paint one dab at a world ground position; called along a drag. */
+export function paintDab(docId: string, wx: number, wz: number): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  if (!doc.ground.materials[doc.paintSlot]) return;
+  update(docId, (d) => {
+    ensureSplatState(d.ground);
+    if (!d.ground.paint) {
+      d.ground.paint = {
+        file: null,
+        texelsPerUnit: DEFAULT_PAINT_TEXELS_PER_UNIT,
+      };
+    }
+    const rect = stampSplatDab(
+      {
+        data: d.ground.splat!,
+        width: d.ground.splatWidth,
+        height: d.ground.splatHeight,
+      },
+      d.ground.width,
+      d.ground.depth,
+      wx,
+      wz,
+      d.paintRadius,
+      d.paintHardness,
+      d.paintSlot,
+    );
+    if (rect) {
+      d.ground.splatRevision++;
+      d.ground.splatDirty = unionRect(d.ground.splatDirty, rect);
+    }
+  });
+  ed().markDirty(docId);
+}
+
+/** Bounding box of the pixels that differ between two mirrors. */
+function diffRect(
+  before: Uint8Array,
+  after: Uint8Array,
+  w: number,
+  h: number,
+): { x: number; y: number; w: number; h: number } | null {
+  let minX = w;
+  let minY = h;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 4;
+      if (
+        before[o] !== after[o] ||
+        before[o + 1] !== after[o + 1] ||
+        before[o + 2] !== after[o + 2] ||
+        before[o + 3] !== after[o + 3]
+      ) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+
+function extractRect(
+  data: Uint8Array,
+  width: number,
+  rect: { x: number; y: number; w: number; h: number },
+): Uint8Array {
+  const out = new Uint8Array(rect.w * rect.h * 4);
+  for (let row = 0; row < rect.h; row++) {
+    const src = ((rect.y + row) * width + rect.x) * 4;
+    out.set(data.subarray(src, src + rect.w * 4), row * rect.w * 4);
+  }
+  return out;
+}
+
+function writeSplatRect(
+  docId: string,
+  bytes: Uint8Array,
+  rect: { x: number; y: number; w: number; h: number },
+): void {
+  update(docId, (d) => {
+    const g = d.ground;
+    if (!g.splat) return;
+    for (let row = 0; row < rect.h; row++) {
+      const dst = ((rect.y + row) * g.splatWidth + rect.x) * 4;
+      g.splat.set(
+        bytes.subarray(row * rect.w * 4, (row + 1) * rect.w * 4),
+        dst,
+      );
+    }
+    g.splatRevision++;
+    g.splatDirty = unionRect(g.splatDirty, rect);
+  });
+  ed().markDirty(docId);
+}
+
+/** End a paint stroke: record one undoable command for the changed rect. */
+export function commitPaintStroke(docId: string): void {
+  const snap = paintStrokeSnapshots.get(docId);
+  paintStrokeSnapshots.delete(docId);
+  const doc = worldDoc(docId);
+  if (!snap || !doc?.ground.splat) return;
+  const g = doc.ground;
+  if (g.splatWidth !== snap.w || g.splatHeight !== snap.h) return;
+  const splat = g.splat;
+  if (!splat) return;
+  const rect = diffRect(snap.before, splat, snap.w, snap.h);
+  if (!rect) return;
+  const beforeRect = extractRect(snap.before, snap.w, rect);
+  const afterRect = extractRect(splat, snap.w, rect);
+  const cmd: HistoryCommand = {
+    label: 'paint',
+    redo: () => writeSplatRect(docId, afterRect, rect),
+    undo: () => writeSplatRect(docId, beforeRect, rect),
+  };
+  update(docId, (d) => {
+    d.history.push(cmd);
+  });
 }
 
 // --- save -----------------------------------------------------------------
@@ -759,6 +1080,25 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
   try {
     const placements = doc.world.list();
     const lights = doc.world.listLights();
+    // Painted coverage: write the PNG sidecar (derived slot-3 alpha)
+    // before the JSON that references it, so a failed write never leaves a
+    // JSON pointing at a missing file.
+    let paintFile: string | null = null;
+    let groundForSave = doc.ground;
+    if (doc.ground.paint && doc.ground.splat && doc.ground.splatWidth > 0) {
+      paintFile = `${name}.paint.png`;
+      const rgba = withDerivedAlpha(
+        doc.ground.splat,
+        doc.ground.splatWidth,
+        doc.ground.splatHeight,
+      );
+      const png = encodePngRgba(rgba, doc.ground.splatWidth, doc.ground.splatHeight);
+      await writeWorkspaceFile('worlds', paintFile, png);
+      groundForSave = {
+        ...doc.ground,
+        paint: { file: paintFile, texelsPerUnit: paintTexelsPerUnit(doc.ground) },
+      };
+    }
     const worldFile = buildWorldFile({
       name,
       savedAt: new Date().toISOString(),
@@ -766,7 +1106,7 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
       lights,
       light: doc.light,
       sun: doc.sun,
-      ground: doc.ground,
+      ground: groundForSave,
       userEnv: doc.userEnv,
     });
     const json = JSON.stringify(worldFile, null, 2);
@@ -774,6 +1114,7 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
     update(docId, (d) => {
       d.ref = { key: `world:${file}`, title: file };
       d.title = name;
+      if (paintFile && d.ground.paint) d.ground.paint.file = paintFile;
     });
     ed().markDirty(docId, false);
     const missing = unbackedAssets(placements.map((p) => p.primId));

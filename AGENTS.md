@@ -59,6 +59,12 @@ it as the reference architecture; design against it.
   (`src/runtime/selection-verify.ts`: sprite g-buffer silhouette picking,
   mesh/light proximity, placement id/update bookkeeping). Run after
   touching `src/runtime/selection.ts` or `src/runtime/world.ts`.
+- `npm run verify:terrain` — Node-runnable terrain material-painting checks
+  (`src/app/terrain-verify.ts`: `disp` slot aliases, splat resolution and
+  the normalized-replace stamp, the raw PNG codec, and the
+  `isoinfinity-world/8` ground round trip). Run after touching
+  `src/app/groundMaterial.ts`, `src/app/worldFile.ts`, `src/shared/splat.ts`,
+  or `src/shared/png.ts`.
 - Browser harnesses (need a browser — update when behavior changes, but
   leave the browser run to the user): `npm run dev` →
   `/scratch-verify.html` (bake/GL checks, primitive bundle hashes for
@@ -139,11 +145,13 @@ file + a row in its index). Full design/process records stay in
   panels, with dialogs/downloads as fallback.
 - World editor: free-form cursor-anchored placements (sprites, the built-in
   skinned character, point lights) with heights, surface snap, N/E/S/W
-  facing, a Select tool with pixel-accurate picking (ADR 0012), undo/redo,
-  and per-world ground size (new-world dialog + panel resize, 1–128
-  units). Worlds (placements + lights + ground state) save/load as
-  `isoinfinity-world/7` JSON in the workspace's `worlds/` folder
-  (`/1`–`/6` tolerated).
+  facing, a Select tool with pixel-accurate picking (ADR 0012), a terrain
+  paint tool for up to four ground material slots (radius/hardness brush,
+  displacement height-seam blending; ADR 0013), undo/redo, and per-world
+  ground size (new-world dialog + panel resize, 1–128 units). Worlds
+  (placements + lights + ground state) save/load as `isoinfinity-world/8`
+  JSON in the workspace's `worlds/` folder, with a painted-coverage PNG
+  sidecar (`/1`–`/7` tolerated).
 - Raw WebGL2 compositor (`src/runtime/renderer.ts`), two-phase per ADR
   0011: a geometry pass draws ground, meshes and sprites into a
   screen-space g-buffer, then one deferred light pass applies the ADR 0003

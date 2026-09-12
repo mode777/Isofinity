@@ -70,16 +70,29 @@ the pointer for the real semantics.
 ## World
 
 - **World** — placements + light state + ground size, saved as
-  `isoinfinity-world/7` JSON in `worlds/` (`/1`+`/2`+`/3`+`/4`+`/5`+`/6`
-  still load; missing heights = ground level, missing directions = north,
-  missing ground/env/size fields = defaults, older files carry no point
-  lights).
+  `isoinfinity-world/8` JSON in `worlds/` (`/1`–`/7` still load; missing
+  heights = ground level, missing directions = north, missing
+  ground/env/size fields = defaults, older files carry no point lights,
+  and a `/7` single ground material loads as slot 0).
 - **Ground material** — a zip file with a `.material` extension in
   `materials/` holding diffuse (`diff`, with `diffuse` accepted as an
   alias; `diff` wins when both are present), AO/Roughness/Metal (`arm`,
-  channels in rgb) and gl-convention normal (`nor_gl`) maps, identified
+  channels in rgb), gl-convention normal (`nor_gl`), and an optional
+  displacement (`disp`, aliases `displace`/`displacement`) map, identified
   by `<name>_<slot>_*.(exr|png|jpg)`; the ground plane tiles it in world
   units (`tileScale` = tiles per world unit).
+- **Material slot** — one of up to four ground material bindings (0–3) the
+  ground blends and paints at once. Each slot samples one layer of the
+  material texture arrays.
+- **Splat (coverage)** — the world-space RGBA texture holding the four
+  material-slot coverages: rgb = slots 0–2, alpha = slot 3 (derived as
+  `1 - r - g - b`). Persisted as a PNG beside the world JSON.
+- **Displacement map** — an optional material map used as a per-pixel
+  surface height in the ground blend; not geometry displacement.
+- **Height-seam blend** — weighting each material's coverage by its
+  displacement height (centered on 1, so a missing map is neutral) so the
+  boundary between materials follows surface detail instead of a straight
+  fade.
 - **Sprite layer** — a world's loaded sprite asset: padded passes in two
   texture arrays (render RGBA8 + g-buffer RGBA16F) plus per-layer size/
   origin (`src/runtime/assets.ts`). A multi-view asset loads one layer

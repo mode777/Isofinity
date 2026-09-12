@@ -19,13 +19,17 @@ import {
   CHARACTER_BRUSH_ID,
   POINT_LIGHT_TOOL_ID,
   SELECT_TOOL_ID,
+  TERRAIN_PAINT_TOOL_ID,
+  beginPaintStroke,
   brushDirections,
   clearSelection,
+  commitPaintStroke,
   commitSelectionMove,
   cycleBrushDir,
   cycleSelectedSpriteDir,
   eraseRef,
   moveSelectionLive,
+  paintDab,
   placeAt,
   redoWorld,
   saveWorld,
@@ -49,6 +53,7 @@ import {
   IconEraser,
   IconLayers,
   IconLight,
+  IconPaint,
   IconPencil,
   IconRedo,
   IconSave,
@@ -531,18 +536,45 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       const envParams = live.envParams;
       renderer.setEnvDisplay(envParams?.exposure ?? 1, envParams?.saturation ?? 1);
 
-      // Ground: apply when the material/tile selection, the decoded maps,
-      // or the ground size changes; none selected = the flat batch draws.
-      // Size participates in the key so the checkerboard batch, the
-      // material quad's extent, and the frame all re-apply on resize.
-      const groundKey = `${live.ground.material ?? ''}|${live.ground.tileScale}|${
-        live.ground.maps ? 'maps' : 'nomaps'
+      // Ground: apply when the material bindings/maps, tile scale, or
+      // ground size changes; no bound slot = the flat batch draws. Size
+      // participates in the key so the checkerboard batch, the material
+      // quad's extent, and the frame all re-apply on resize. The splat is
+      // uploaded separately (full on material apply, dirty-rect while
+      // painting) so strokes never rebuild the material arrays.
+      const mapsKey = live.ground.maps.map((m) => (m ? '1' : '0')).join('');
+      const groundKey = `${live.ground.materials.join(',')}|${mapsKey}|${
+        live.ground.tileScale
       }|${live.ground.width}x${live.ground.depth}`;
       if (groundKey !== appliedGroundKey) {
         appliedGroundKey = groundKey;
         renderer.setGround(groundBatch(live.ground.width, live.ground.depth));
         renderer.setGroundExtent(live.ground.width, live.ground.depth);
-        renderer.setGroundMaterial(live.ground.maps, live.ground.tileScale);
+        renderer.setGroundMaterials(
+          live.ground.maps,
+          live.ground.splat
+            ? {
+                data: live.ground.splat,
+                width: live.ground.splatWidth,
+                height: live.ground.splatHeight,
+              }
+            : null,
+          live.ground.tileScale,
+        );
+      }
+      // Painted coverage: upload just the changed rectangle. `splatDirty`
+      // is engine bookkeeping (not React state) and is safe to clear here.
+      const splatDirty = live.ground.splatDirty;
+      if (splatDirty && live.ground.splat) {
+        renderer.updateSplatRect(
+          {
+            data: live.ground.splat,
+            width: live.ground.splatWidth,
+            height: live.ground.splatHeight,
+          },
+          splatDirty,
+        );
+        live.ground.splatDirty = null;
       }
 
       // Animation playback: advance every live character by the frame
@@ -826,6 +858,15 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       const y = effectiveHeight(live, hover.px[0], hover.px[1]);
       lightRing(gx, y, gz, DEFAULT_POINT_LIGHT.radius, 0.25);
     }
+    // Terrain paint gizmo: outer radius ring + inner hardness ring on the
+    // ground under the cursor (only when at least one slot is bound).
+    if (hover && live.tool === TERRAIN_PAINT_TOOL_ID && live.ground.materials.some((m) => !!m)) {
+      const [gx, gz] = hover.ground;
+      lightRing(gx, 0, gz, live.paintRadius, 0.6);
+      if (live.paintHardness > 0.001) {
+        lightRing(gx, 0, gz, live.paintRadius * live.paintHardness, 0.3);
+      }
+    }
     // The eraser previews the placement a click would remove, using the
     // same pixel-accurate pick the Select tool uses.
     if (hover && !ghost && live.tool === 'eraser') {
@@ -962,6 +1003,18 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       from: { x: number; z: number };
     } | null = null;
 
+    // Terrain paint stroke in progress (one undoable command on release).
+    let painting = false;
+
+    /** Stamp a paint dab at a pointer's ground position (in-bounds only). */
+    const paintAt = (pt: { ground: [number, number] }): void => {
+      const live = useEditor.getState().docs[doc.docId];
+      if (!live || live.kind !== 'world') return;
+      const [gx, gz] = pt.ground;
+      if (gx < 0 || gz < 0 || gx > live.ground.width || gz > live.ground.depth) return;
+      paintDab(doc.docId, gx, gz);
+    };
+
     // Touch state machine: 1 finger = left button (drag paints, release
     // without movement taps), 2 fingers = neutral pre-gesture, 3 fingers
     // = pan by centroid from the transform captured at gesture start.
@@ -1010,6 +1063,21 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           );
         }
         return;
+      }
+      // An in-progress terrain paint stroke: stamp along the drag. A second
+      // touch finger ends the stroke (the gesture becomes a pan).
+      if (painting) {
+        if (e.pointerType === 'touch' && touchPts.size > 1) {
+          painting = false;
+          commitPaintStroke(doc.docId);
+        } else {
+          const pt = pointerPoint(e);
+          if (pt) {
+            hoverRef.current = pt;
+            paintAt(pt);
+          }
+          return;
+        }
       }
       // Shift + vertical mouse move adjusts the placement height (up
       // raises, down lowers, below the ground plane included): free-form,
@@ -1094,6 +1162,15 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           touchPan = t ? { cx, cy, t } : null;
         } else if (touchPts.size === 1) {
           const live = useEditor.getState().docs[doc.docId];
+          if (live?.kind === 'world' && live.tool === TERRAIN_PAINT_TOOL_ID) {
+            const pt = pointerPoint(e);
+            if (pt) {
+              hoverRef.current = pt;
+              beginPaintStroke(doc.docId);
+              painting = true;
+              paintAt(pt);
+            }
+          }
           if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) {
             const pt = pointerPoint(e);
             if (pt) {
@@ -1125,7 +1202,9 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       if (!pt) return;
       if (e.button === 2) {
         const live = useEditor.getState().docs[doc.docId];
-        if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) {
+        if (live?.kind === 'world' && live.tool === TERRAIN_PAINT_TOOL_ID) {
+          // The paint tool leaves right-click free (no accidental erasing).
+        } else if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) {
           clearSelection(doc.docId);
         } else if (live?.kind === 'world') {
           // Right-click is the eraser everywhere: pixel-picked like Select.
@@ -1134,6 +1213,13 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       } else if (e.button === 0) {
         publishSnapHeight(pt.px);
         const live = useEditor.getState().docs[doc.docId];
+        if (live?.kind === 'world' && live.tool === TERRAIN_PAINT_TOOL_ID) {
+          beginPaintStroke(doc.docId);
+          painting = true;
+          paintAt(pt);
+          canvas.setPointerCapture(e.pointerId);
+          return;
+        }
         if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) {
           // Select the placement under the cursor (pixel-accurate for
           // sprites); an empty click clears the selection. A hit starts a
@@ -1178,6 +1264,15 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       }
     };
     const onUp = (e: PointerEvent): void => {
+      // A terrain paint stroke ends: record one undoable command.
+      if (painting && e.pointerType !== 'touch') {
+        painting = false;
+        commitPaintStroke(doc.docId);
+        if (canvas.hasPointerCapture(e.pointerId)) {
+          canvas.releasePointerCapture(e.pointerId);
+        }
+        return;
+      }
       // A select drag ends: record exactly one move command (no-op when
       // the pointer never moved the placement).
       if (selectDrag) {
@@ -1192,6 +1287,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       if (e.pointerType === 'touch') {
         const tp = touchPts.get(e.pointerId);
         touchEnd(e);
+        if (painting) {
+          painting = false;
+          commitPaintStroke(doc.docId);
+          return;
+        }
         // Tap: place the brush, or select/deselect with the Select tool.
         if (tp && !tp.moved && touchPts.size === 0) {
           const live = useEditor.getState().docs[doc.docId];
@@ -1222,6 +1322,10 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       }
     };
     const onCancel = (e: PointerEvent): void => {
+      if (painting) {
+        painting = false;
+        commitPaintStroke(doc.docId);
+      }
       if (e.pointerType === 'touch') touchEnd(e);
     };
     const onLeave = (): void => {
@@ -1345,12 +1449,13 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
   const activeTool = doc.tool;
   // Placement mode: any tool that places a brush (a primitive/sprite/
   // character id, or '' while no brush is chosen yet) — every tool except
-  // the three special ones. Only here do the brush dropdown and the snap
+  // the special ones. Only here do the brush dropdown and the snap
   // toggle apply; hiding them never resets their stored state.
   const placementMode =
     activeTool !== 'eraser' &&
     activeTool !== SELECT_TOOL_ID &&
-    activeTool !== POINT_LIGHT_TOOL_ID;
+    activeTool !== POINT_LIGHT_TOOL_ID &&
+    activeTool !== TERRAIN_PAINT_TOOL_ID;
 
   // Remembers the last pencil brush so the pencil button can switch back
   // from the eraser.
@@ -1564,9 +1669,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
             ? 'eraser'
             : activeTool === SELECT_TOOL_ID
               ? 'select'
-              : activeTool === ''
-                ? 'no brush'
-                : `${activeTool}${dirLabel}`}
+              : activeTool === TERRAIN_PAINT_TOOL_ID
+                ? `paint (slot ${doc.paintSlot + 1})`
+                : activeTool === ''
+                  ? 'no brush'
+                  : `${activeTool}${dirLabel}`}
         </span>
       </EditorToolbar>
       <div className="world-viewport" ref={viewportRef}>
@@ -1591,6 +1698,13 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
             onClick={() => setTool(doc.docId, POINT_LIGHT_TOOL_ID)}
           >
             <IconLight />
+          </button>
+          <button
+            className={`icon-btn${activeTool === TERRAIN_PAINT_TOOL_ID ? ' active' : ''}`}
+            title="Terrain paint — drag over the ground to paint the active material slot (radius, hardness, and slots in the properties panel)"
+            onClick={() => setTool(doc.docId, TERRAIN_PAINT_TOOL_ID)}
+          >
+            <IconPaint />
           </button>
           <button
             className={`icon-btn${activeTool === 'eraser' ? ' active' : ''}`}
@@ -1664,9 +1778,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           ? 'tool: eraser — left-click/drag erases'
           : activeTool === SELECT_TOOL_ID
             ? 'tool: select — click a placement to select, drag to move, Escape/empty-click deselects'
-            : activeTool === ''
-              ? 'pick a brush above — left-click/drag places it, right-click erases'
-              : `tool: ${activeTool}${dirLabel} — left-click/drag places, right-click erases`}
+            : activeTool === TERRAIN_PAINT_TOOL_ID
+              ? 'tool: terrain paint — left-click/drag paints the active material slot; radius/hardness/slots live in the properties panel'
+              : activeTool === ''
+                ? 'pick a brush above — left-click/drag places it, right-click erases'
+                : `tool: ${activeTool}${dirLabel} — left-click/drag places, right-click erases`}
         {' — E cycles the brush direction, shift+move sets the placement height, brush height/shadow/direction live in the properties panel, scroll pans, pinch zooms, middle-drag pans'}
       </p>
     </div>
