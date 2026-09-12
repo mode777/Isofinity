@@ -62,6 +62,10 @@ the pointer for the real semantics.
 - **Undo stack** — per world document, in-memory only (ADR 0006): undo/
   redo walks it with Ctrl+Z / Ctrl+Shift+Z; a new command drops the redo
   end; it never reaches a world file.
+- **Layer visibility** — the world viewport's per-document in-memory
+  hide/show state for the ground, sprite, and mesh layers (ADR 0006):
+  hidden layers are not drawn, not pickable, and supply no surface-snap
+  heights; never saved, never dirty, never undoable.
 
 ## World
 

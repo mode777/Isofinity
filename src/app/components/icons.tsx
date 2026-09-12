@@ -120,6 +120,17 @@ export function IconBakeAll(): React.JSX.Element {
   );
 }
 
+/** Stacked layers (viewport layer visibility). */
+export function IconLayers(): React.JSX.Element {
+  return icon(
+    <>
+      <path d="M8 2.5l5.5 3-5.5 3-5.5-3z" />
+      <path d="M2.5 8.2l5.5 3 5.5-3" />
+      <path d="M2.5 11l5.5 3 5.5-3" />
+    </>,
+  );
+}
+
 /** Square with an × (discard the active view's baked passes). */
 export function IconRemoveView(): React.JSX.Element {
   return icon(

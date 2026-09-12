@@ -177,6 +177,22 @@ without touching the view transform — canvas input outside the bar is
 unaffected. All of this is editor chrome; the tool, brush, and snap
 state stay per-document in-memory editor state (ADR 0006).
 
+The viewport's top-right corner mirrors the tool bar with a
+**layer-visibility control**: an icon button opening a small dropdown of
+three check rows — Ground, Sprites, Meshes. Toggling a row hides/shows
+that whole layer immediately: hidden placements (and their baked grounding
+shadows) stop being drawn, a hidden ground also empties the contact-shadow
+stage (no floor remains), and hidden placements stop participating in
+picking (Select/eraser pass through them) and surface snap. Point lights
+are not a layer and stay visible; ghost previews stay visible (they
+preview the next action, not world content). A selection on a hidden layer
+is kept but its highlight only draws while the layer is visible. Visibility
+is per-document in-memory editor state — never saved, never dirty, never
+undoable, all layers visible by default (ADR 0006). Implementation note:
+sprites/meshes are gated by simply not emitting them into the frame's
+batches, while the ground stage takes a per-frame `groundVisible` flag on
+`Renderer.render()` so the ground-apply cache stays untouched.
+
 The world viewport is one zoomable panel: it shows the fixed projected
 world image (the bake's isometric projection, CPU-computed once) through
 a 2D view transform — two-finger scroll (or a mouse wheel) pans, pinch

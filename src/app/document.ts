@@ -251,6 +251,26 @@ export interface PlacementRef {
   id: number;
 }
 
+/** The world layers the viewport can hide/show individually. */
+export type WorldLayer = 'ground' | 'sprites' | 'meshes';
+
+/**
+ * Per-layer viewport visibility. In-memory editor state only — never
+ * written into world files and never undoable (ADR 0006).
+ */
+export interface LayerVisibility {
+  ground: boolean;
+  sprites: boolean;
+  meshes: boolean;
+}
+
+/** All layers visible — the default for new and opened worlds. */
+export const ALL_LAYERS_VISIBLE: LayerVisibility = {
+  ground: true,
+  sprites: true,
+  meshes: true,
+};
+
 export interface WorldDocument {
   kind: 'world';
   docId: string;
@@ -334,6 +354,13 @@ export interface WorldDocument {
    * state only — never written into world files.
    */
   viewTransform: ViewTransform | null;
+  /**
+   * Which world layers the viewport hides (ground, sprites, meshes).
+   * Hidden layers are not drawn, not pickable, and supply no surface-snap
+   * heights; hiding changes no world content. In-memory editor state
+   * only — never written into world files and never undoable (ADR 0006).
+   */
+  layerVisibility: LayerVisibility;
   /**
    * The placement the Select tool (or the point-light tool's click) has
    * selected: a sprite, mesh, or point light by stable placement id; null

@@ -34,8 +34,10 @@ import type {
   SunState,
   ViewTransform,
   WorldDocument,
+  WorldLayer,
 } from '../document.js';
 import {
+  ALL_LAYERS_VISIBLE,
   DEFAULT_LIGHT,
   DEFAULT_SUN,
   PRIMITIVE_KINDS,
@@ -320,6 +322,7 @@ export function newWorldDoc(
     brushDir: 'n',
     shadowLevel: 1,
     viewTransform: null,
+    layerVisibility: { ...ALL_LAYERS_VISIBLE },
     selection: null,
     history: new HistoryStack(),
   };
@@ -400,6 +403,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       brushDir: 'n',
     shadowLevel: 1,
       viewTransform: null,
+      layerVisibility: { ...ALL_LAYERS_VISIBLE },
       selection: null,
       history: new HistoryStack(),
     };
@@ -912,6 +916,24 @@ export function setSurfaceSnap(docId: string, on: boolean): void {
     d.surfaceSnap = on;
     // Turning snap off drops the eyedropper read with it.
     if (!on) d.snappedHeight = null;
+  });
+}
+
+/**
+ * Show or hide one whole viewport layer (ground, sprites, or meshes).
+ * Editor-only state: never marks the document dirty, never reaches a
+ * saved world file, and never lands on the undo stack.
+ */
+export function setLayerVisibility(
+  docId: string,
+  layer: WorldLayer,
+  visible: boolean,
+): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  if (doc.layerVisibility[layer] === visible) return;
+  update(docId, (d) => {
+    d.layerVisibility = { ...d.layerVisibility, [layer]: visible };
   });
 }
 

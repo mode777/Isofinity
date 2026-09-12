@@ -33,6 +33,7 @@ import {
   selectLight,
   selectPlacement,
   setHeightLevel,
+  setLayerVisibility,
   setSnappedHeight,
   setSurfaceSnap,
   setTool,
@@ -46,6 +47,7 @@ import { useWorkspace } from '../store/workspace.js';
 import { EditorToolbar } from './EditorToolbar.js';
 import {
   IconEraser,
+  IconLayers,
   IconLight,
   IconPencil,
   IconRedo,
@@ -252,6 +254,32 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
   );
   const [panel, setPanel] = useState<{ w: number; h: number } | null>(null);
 
+  // The layer dropdown's open state (per-component chrome, not per-document
+  // state: which layer is hidden lives in the document, whether the menu is
+  // open does not).
+  const [layersOpen, setLayersOpen] = useState(false);
+  const layerPanelRef = useRef<HTMLDivElement>(null);
+  // Close on an outside click or Escape. Escape stops propagation so the
+  // world-editor window shortcut (which deselects on Escape) does not also
+  // fire; the listener lives on `document`, which bubbles before `window`.
+  useEffect(() => {
+    if (!layersOpen) return;
+    const onDocPointerDown = (e: PointerEvent): void => {
+      if (!layerPanelRef.current?.contains(e.target as Node)) setLayersOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      setLayersOpen(false);
+    };
+    document.addEventListener('pointerdown', onDocPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onDocPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [layersOpen]);
+
   // Latest resolved transform for the native listeners and the rAF loop
   // (avoids re-binding per frame).
   const liveRef = useRef({
@@ -384,12 +412,16 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
      */
     const effectiveHeight = (live: WorldDocument, wx: number, wy: number): number => {
       if (!live.surfaceSnap) return live.heightLevel;
-      const placements = live.world.list().map((p) => ({
-        x: p.x,
-        y: p.y,
-        z: p.z,
-        layer: live.layers.findIndex((l) => l.id === viewLayerId(p.primId, p.dir)),
-      }));
+      // Hidden layers are not part of the world's visible surface: their
+      // placements supply no snap heights.
+      const placements = (
+        live.layerVisibility.sprites ? live.world.list() : []
+      ).map((p) => ({
+          x: p.x,
+          y: p.y,
+          z: p.z,
+          layer: live.layers.findIndex((l) => l.id === viewLayerId(p.primId, p.dir)),
+        }));
       return surfaceHeightAt(spriteSet, placements, wx, wy, frameRef.current.originY, PPU, toPx);
     };
 
@@ -397,9 +429,12 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
      * The placement under a world-image pixel, or null: sprites by their
      * baked g-buffer silhouette, meshes and point lights by screen-space
      * proximity (design D2). Reads the same in-memory data the frame uses.
+     * Hidden layers are not pickable: their placements are excluded, so
+     * clicks pass through them.
      */
     const pickAt = (live: WorldDocument, px: [number, number]): PlacementRef | null => {
-      const sprites = live.world.list().map((p) => ({
+      const viz = live.layerVisibility;
+      const sprites = (viz.sprites ? live.world.list() : []).map((p) => ({
         id: p.id,
         x: p.x,
         y: p.y,
@@ -408,7 +443,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       }));
       const off = live.character?.worldOffset ?? [0, 0, 0];
       const height = live.character?.height ?? 1;
-      const meshes = live.world.listMeshes().map((m) => ({
+      const meshes = (viz.meshes ? live.world.listMeshes() : []).map((m) => ({
         id: m.id,
         x: m.x + off[0],
         y: m.y + off[1],
@@ -589,16 +624,20 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       // Placements arrive far → near; the ghost slots in at its depth key
       // so the per-pixel occlusion solves exactly as if it were placed.
       let ghostDone = false;
-      for (const p of placed) {
-        if (ghost && !ghostDone && p.key >= ghost.key) {
-          emit(ghost.layer, ghost.x, ghost.y, ghost.z, live.shadowLevel);
-          ghostDone = true;
+      // The sprite layer's visibility gates placed sprites only; the ghost
+      // preview stays (it previews the next action, not world content).
+      if (live.layerVisibility.sprites) {
+        for (const p of placed) {
+          if (ghost && !ghostDone && p.key >= ghost.key) {
+            emit(ghost.layer, ghost.x, ghost.y, ghost.z, live.shadowLevel);
+            ghostDone = true;
+          }
+          const layerIndex = live.layers.findIndex(
+            (l) => l.id === viewLayerId(p.primId, p.dir),
+          );
+          if (layerIndex < 0) continue;
+          emit(layerIndex, p.x, p.y, p.z, p.shadow);
         }
-        const layerIndex = live.layers.findIndex(
-          (l) => l.id === viewLayerId(p.primId, p.dir),
-        );
-        if (layerIndex < 0) continue;
-        emit(layerIndex, p.x, p.y, p.z, p.shadow);
       }
       if (ghost && !ghostDone) emit(ghost.layer, ghost.x, ghost.y, ghost.z, live.shadowLevel);
 
@@ -622,7 +661,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       }
       const meshDraws: MeshDraw[] = [];
       const off = live.character?.worldOffset ?? [0, 0, 0];
-      for (const mp of meshPlaced) {
+      // The mesh layer's visibility gates placed characters only; the
+      // character ghost stays (preview of the next action). Animation
+      // players above keep advancing either way.
+      const meshesVisible = live.layerVisibility.meshes;
+      for (const mp of meshesVisible ? meshPlaced : []) {
         const entry = players.get(mp.id);
         if (!entry) continue;
         meshDraws.push({
@@ -652,12 +695,20 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
 
       // Contact shadows: under every raised placement (sprites and
       // characters) and a raised ghost, drawn between the ground and the
-      // meshes/sprites.
+      // meshes/sprites. Hidden layers take their shadows with them; with
+      // the ground hidden no floor remains, so the whole stage empties.
+      // Ghost shadows follow the ghost, not the layer.
       shadowBatch.reset();
-      for (const p of placed) emitShadow(p.x, p.y, p.z);
-      for (const mp of meshPlaced) emitShadow(mp.x, mp.y, mp.z);
-      if (ghost) emitShadow(ghost.x, ghost.y, ghost.z);
-      if (charGhost && charGhost.y > GROUND_EPSILON) emitShadow(charGhost.x, charGhost.y, charGhost.z);
+      if (live.layerVisibility.ground) {
+        if (live.layerVisibility.sprites) {
+          for (const p of placed) emitShadow(p.x, p.y, p.z);
+        }
+        if (live.layerVisibility.meshes) {
+          for (const mp of meshPlaced) emitShadow(mp.x, mp.y, mp.z);
+        }
+        if (ghost) emitShadow(ghost.x, ghost.y, ghost.z);
+        if (charGhost && charGhost.y > GROUND_EPSILON) emitShadow(charGhost.x, charGhost.y, charGhost.z);
+      }
 
     // Ring editor chrome for point lights: a ground/horizontal circle at
     // the light's position and radius (projected like the contact-shadow
@@ -782,7 +833,15 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       if (target) highlightRef(live, target);
     }
     if (live.selection) {
-      highlightRef(live, live.selection);
+      // The selection survives hiding its layer, but its highlight only
+      // draws while the layer is visible; showing the layer restores it.
+      const selVisible =
+        live.selection.kind === 'sprite'
+          ? live.layerVisibility.sprites
+          : live.selection.kind === 'mesh'
+            ? live.layerVisibility.meshes
+            : true;
+      if (selVisible) highlightRef(live, live.selection);
     }
     // Light-icon hover: with a light-aware tool (Select or point-light), a
     // cursor resting within the light pick radius of a placed light
@@ -814,6 +873,10 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         overlayBatch.batch(),
         { zoom: t.zoom * dpr, panX: t.panX * dpr, panY: t.panY * dpr },
         meshDraws,
+        // The ground layer's visibility: a per-frame draw gate — the
+        // ground-apply cache above stays untouched, so showing the layer
+        // again restores instantly with no re-upload.
+        { groundVisible: live.layerVisibility.ground },
       );
     };
 
@@ -1536,6 +1599,45 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           >
             <IconEraser />
           </button>
+        </div>
+        <div className="layer-controls" ref={layerPanelRef}>
+          <button
+            className={`icon-btn${layersOpen ? ' active' : ''}`}
+            title="Layers — show or hide the ground, sprites, and meshes"
+            aria-haspopup="menu"
+            aria-expanded={layersOpen}
+            onClick={() => setLayersOpen((o) => !o)}
+          >
+            <IconLayers />
+          </button>
+          {layersOpen ? (
+            <div className="layer-menu" role="menu" aria-label="Viewport layers">
+              {(
+                [
+                  ['ground', 'Ground'],
+                  ['sprites', 'Sprites'],
+                  ['meshes', 'Meshes'],
+                ] as const
+              ).map(([layer, label]) => {
+                const visible = doc.layerVisibility[layer];
+                return (
+                  <button
+                    key={layer}
+                    role="menuitemcheckbox"
+                    aria-checked={visible}
+                    className={`layer-row${visible ? ' on' : ''}`}
+                    title={`${label} layer — ${visible ? 'visible; click to hide' : 'hidden; click to show'}`}
+                    onClick={() => setLayerVisibility(doc.docId, layer, !visible)}
+                  >
+                    <span className="layer-check" aria-hidden="true">
+                      {visible ? '✓' : ''}
+                    </span>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
         <canvas ref={canvasRef} />
         <div className="zoom-controls">

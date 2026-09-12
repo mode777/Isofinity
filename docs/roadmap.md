@@ -45,7 +45,10 @@ each line below has a full record there).
   selectable light icons, Select tool with pixel-accurate g-buffer picking
   (ADR 0012, `verify:selection`), undo/redo (`verify:history`), per-world
   ground size (new-world dialog + panel resize, 1–128 units;
-  `isoinfinity-world/7`), tool-gated panels/chrome. **Removed:** the
+  `isoinfinity-world/7`), tool-gated panels/chrome, a viewport
+  layer-visibility dropdown (top-right) hiding/showing the ground, sprite,
+  and mesh layers (transient per-document state; hidden layers stop
+  rendering, picking, and snapping). **Removed:** the
   sprite editor's "Place in world" hand-off — sprites reach a world by
   saving to `sprites/` and picking as a brush; worlds are created only
   explicitly (with a size).

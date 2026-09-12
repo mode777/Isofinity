@@ -1394,6 +1394,8 @@ export class Renderer {
     overlay: FlatBatch | null,
     view: RenderView = IDENTITY_VIEW,
     meshes: readonly MeshDraw[] = [],
+    /** Editor-side layer visibility: false skips the ground draw stage. */
+    options: { groundVisible?: boolean } = {},
   ): void {
     const gl = this.gl;
     const canvas = gl.canvas as HTMLCanvasElement;
@@ -1448,8 +1450,14 @@ export class Renderer {
     //    ground-plane surface so the deferred pass lights the floor; with
     //    a material selected the textured plane draws instead, also
     //    writing the shared window depth for per-pixel occlusion.
+    //    The editor's layer visibility skips the whole stage (nothing
+    //    re-uploaded — the draw is just gated off); the editor likewise
+    //    empties the shadow batch then, since no floor remains to receive
+    //    the contact shadows.
     gl.disable(gl.BLEND);
-    if (this.groundMatTiles) {
+    if (options.groundVisible === false) {
+      // Ground hidden by the editor's layer visibility.
+    } else if (this.groundMatTiles) {
       gl.enable(gl.DEPTH_TEST);
       gl.useProgram(this.groundProg);
       gl.activeTexture(gl.TEXTURE0);
