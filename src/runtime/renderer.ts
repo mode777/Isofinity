@@ -751,6 +751,7 @@ export class Renderer {
   /** Display saturation of the env the baked renders were produced with. */
   private envSaturation = 1;
   /** Display exposure of the env the baked renders were produced with. */
+  private envExposure = 1;
   private groundUniforms: {
     res: WebGLUniformLocation;
     view: WebGLUniformLocation;
@@ -760,6 +761,7 @@ export class Renderer {
     slotBound: WebGLUniformLocation;
     heightScale: WebGLUniformLocation;
     heightBias: WebGLUniformLocation;
+    exposure: WebGLUniformLocation;
     saturation: WebGLUniformLocation;
     depthA: WebGLUniformLocation;
     depthB: WebGLUniformLocation;
@@ -994,6 +996,7 @@ export class Renderer {
       slotBound: gu('uSlotBound'),
       heightScale: gu('uHeightScale'),
       heightBias: gu('uHeightBias'),
+      exposure: gu('uExposure'),
       saturation: gu('uSaturation'),
       depthA: gu('uDepthA'),
       depthB: gu('uDepthB'),
@@ -1004,6 +1007,7 @@ export class Renderer {
     gl.uniform1f(this.groundUniforms.depthB, 0.5);
     gl.uniform1f(this.groundUniforms.heightScale, DEFAULT_HEIGHT_SCALE);
     gl.uniform4f(this.groundUniforms.heightBias, 0, 0, 0, 0);
+    gl.uniform1f(this.groundUniforms.exposure, 1);
     gl.uniform1i(gu('uDiffuse'), 0);
     gl.uniform1i(gu('uNormal'), 1);
     gl.uniform1i(gu('uArm'), 2);
@@ -1250,6 +1254,7 @@ export class Renderer {
   /** Display-referred env parameters that shaped the baked render texels. */
   setEnvDisplay(exposure: number, saturation: number): void {
     this.envSaturation = saturation;
+    this.envExposure = exposure;
     const gl = this.gl;
     for (const [mode, u] of [
       ['gpu', this.meshUniforms.gpu],
@@ -1259,6 +1264,10 @@ export class Renderer {
       gl.uniform1f(u.exposure, exposure);
       gl.uniform1f(u.saturation, saturation);
     }
+    // The ground's ACES fit shares `uExposure` (see ACES_GLSL); leaving it
+    // unset would default to 0 and blacken the material ground.
+    gl.useProgram(this.groundProg);
+    gl.uniform1f(this.groundUniforms.exposure, exposure);
   }
 
   /**
@@ -1696,6 +1705,7 @@ export class Renderer {
     gl.uniform4f(this.groundUniforms.view, view.zoom, view.zoom, view.panX, view.panY);
     gl.uniform3f(this.groundUniforms.proj, this.meshFrame[0], this.meshFrame[1], this.meshFrame[2]);
     gl.uniform1f(this.groundUniforms.saturation, this.envSaturation);
+    gl.uniform1f(this.groundUniforms.exposure, this.envExposure);
 
     // 1. Ground: opaque. The flat batch keeps today's no-depth behavior
     //    (sprites always composite over it) but now writes the g-buffer's

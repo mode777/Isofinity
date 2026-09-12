@@ -1174,6 +1174,8 @@ export function setWorldViewTransform(
 export function placeAt(docId: string, gx: number, gz: number, y = 0): void {
   const doc = worldDoc(docId);
   if (!doc) return;
+  // The terrain paint tool paints the ground; it never places a brush.
+  if (doc.tool === TERRAIN_PAINT_TOOL_ID) return;
   // The eraser is pixel-picked by the caller (`eraseRef`); it never places.
   if (doc.tool === 'eraser') return;
   if (doc.tool === POINT_LIGHT_TOOL_ID) {
