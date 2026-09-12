@@ -58,10 +58,9 @@ import {
 import { WorkspaceFileDialog } from './WorkspaceFileDialog.js';
 
 const MARGIN = 8;
-const GRID_N = 12;
 
-// Projected headroom above the grid (world units of stacking) so the fit
-// view reveals raised sprites; taller stacks pan into view.
+// Projected headroom above the ground (world units of stacking) so the
+// fit view reveals raised sprites; taller stacks pan into view.
 const HEADROOM_UNITS = 4;
 
 const GRID_COLORS: [number, number, number] = [0.145, 0.153, 0.173];
@@ -70,36 +69,100 @@ const HIGHLIGHT_COLOR: [number, number, number] = [0.55, 0.62, 0.75];
 
 const PPU = RUNTIME_PPU;
 
-const minU = Math.min(
-  ...[[0, 0], [GRID_N, 0], [0, GRID_N], [GRID_N, GRID_N]].map(
-    ([x, z]) => groundToScreen(x, z)[0],
-  ),
-);
-const maxU = Math.max(
-  ...[[0, 0], [GRID_N, 0], [0, GRID_N], [GRID_N, GRID_N]].map(
-    ([x, z]) => groundToScreen(x, z)[0],
-  ),
-);
-const minV = Math.min(
-  ...[[0, 0], [GRID_N, 0], [0, GRID_N], [GRID_N, GRID_N]].map(
-    ([x, z]) => groundToScreen(x, z)[1],
-  ),
-);
-const maxV = HEADROOM_UNITS * SCREEN_UP[1];
+/**
+ * The fixed "world image" frame for one ground size: every placement, the
+ * ground and the overlays are projected into this pixel space (the bake's
+ * isometric camera, unchanged); zoom/pan is a 2D view transform over it.
+ * A pure function of the ground's width/depth, memoized per size.
+ */
+interface WorldFrame {
+  width: number;
+  depth: number;
+  minU: number;
+  maxU: number;
+  minV: number;
+  maxV: number;
+  canvasW: number;
+  canvasH: number;
+  originX: number;
+  originY: number;
+}
 
-// The fixed "world image": every placement, the ground and the overlays
-// are projected into this pixel space once (the bake's isometric camera,
-// unchanged). Zoom/pan is a 2D view transform over it.
-const CANVAS_W = Math.ceil((maxU - minU) * PPU) + MARGIN * 2;
-const CANVAS_H = Math.ceil((maxV - minV) * PPU) + MARGIN * 2;
-const ORIGIN_X = -minU * PPU + MARGIN;
-const ORIGIN_Y = maxV * PPU + MARGIN;
+const frameCache = new Map<string, WorldFrame>();
 
-function toPx(x: number, z: number, y = 0): [number, number] {
+/** Build (memoized) the world-image frame for a ground size. */
+function worldFrame(width: number, depth: number): WorldFrame {
+  const key = `${width}x${depth}`;
+  const cached = frameCache.get(key);
+  if (cached) return cached;
+  const corners: [number, number][] = [
+    [0, 0],
+    [width, 0],
+    [0, depth],
+    [width, depth],
+  ];
+  const us = corners.map(([x, z]) => groundToScreen(x, z)[0]);
+  const vs = corners.map(([x, z]) => groundToScreen(x, z)[1]);
+  const minU = Math.min(...us);
+  const maxU = Math.max(...us);
+  const minV = Math.min(...vs);
+  const maxV = HEADROOM_UNITS * SCREEN_UP[1];
+  const frame: WorldFrame = {
+    width,
+    depth,
+    minU,
+    maxU,
+    minV,
+    maxV,
+    canvasW: Math.ceil((maxU - minU) * PPU) + MARGIN * 2,
+    canvasH: Math.ceil((maxV - minV) * PPU) + MARGIN * 2,
+    originX: -minU * PPU + MARGIN,
+    originY: maxV * PPU + MARGIN,
+  };
+  frameCache.set(key, frame);
+  return frame;
+}
+
+/** Project a world point into the world-image pixels of a frame. */
+function framePx(frame: WorldFrame, x: number, z: number, y = 0): [number, number] {
   const [u, v] = groundToScreen(x, z);
   // World +Y projects exactly onto screen-up; height is a pure vertical
   // pixel shift of the same projected image.
-  return [ORIGIN_X + u * PPU, ORIGIN_Y - (v + y * SCREEN_UP[1]) * PPU];
+  return [frame.originX + u * PPU, frame.originY - (v + y * SCREEN_UP[1]) * PPU];
+}
+
+const groundCache = new Map<string, Float32Array>();
+
+/** The checkerboard ground batch for a ground size (memoized). */
+function groundBatch(width: number, depth: number): Float32Array {
+  const key = `${width}x${depth}`;
+  const cached = groundCache.get(key);
+  if (cached) return cached;
+  const frame = worldFrame(width, depth);
+  const ground = new Float32Array(width * depth * 6 * 6);
+  let o = 0;
+  const push = (x: number, z: number, c: [number, number, number]) => {
+    const [px, py] = framePx(frame, x, z);
+    ground[o++] = px;
+    ground[o++] = py;
+    ground[o++] = c[0];
+    ground[o++] = c[1];
+    ground[o++] = c[2];
+    ground[o++] = 1;
+  };
+  for (let i = 0; i < width; i++) {
+    for (let j = 0; j < depth; j++) {
+      const c = (i + j) % 2 === 0 ? GRID_COLORS : GRID_COLORS_ALT;
+      push(i, j, c);
+      push(i + 1, j, c);
+      push(i + 1, j + 1, c);
+      push(i, j, c);
+      push(i + 1, j + 1, c);
+      push(i, j + 1, c);
+    }
+  }
+  groundCache.set(key, ground);
+  return ground;
 }
 
 /** Heights at or below this count as ground level (no gizmo/shadow). */
@@ -178,34 +241,6 @@ class FlatBatchBuilder {  data = new Float32Array(2048 * 6);
   }
 }
 
-function buildGround(): Float32Array {
-  const ground = new Float32Array(GRID_N * GRID_N * 6 * 6);
-  let o = 0;
-  const push = (x: number, z: number, c: [number, number, number]) => {
-    const [px, py] = toPx(x, z);
-    ground[o++] = px;
-    ground[o++] = py;
-    ground[o++] = c[0];
-    ground[o++] = c[1];
-    ground[o++] = c[2];
-    ground[o++] = 1;
-  };
-  for (let i = 0; i < GRID_N; i++) {
-    for (let j = 0; j < GRID_N; j++) {
-      const c = (i + j) % 2 === 0 ? GRID_COLORS : GRID_COLORS_ALT;
-      push(i, j, c);
-      push(i + 1, j, c);
-      push(i + 1, j + 1, c);
-      push(i, j, c);
-      push(i + 1, j + 1, c);
-      push(i, j + 1, c);
-    }
-  }
-  return ground;
-}
-
-const GROUND = buildGround();
-
 export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
   const { doc } = props;
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -227,13 +262,24 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
   // Stable unless the document's layers change (place-in-world, load).
   const spriteSet = useMemo(() => layersToSet(doc.layers), [doc.layers]);
 
+  // The per-size world-image frame: a memoized pure function of the
+  // document's ground size (memoization is per size, so this is cheap).
+  // Render-time closures read frameRef; renderFrame refreshes it from the
+  // live document every frame, so a resize applies mid-session.
+  const frame = useMemo(
+    () => worldFrame(doc.ground.width, doc.ground.depth),
+    [doc.ground.width, doc.ground.depth],
+  );
+  const frameRef = useRef(frame);
+  frameRef.current = frame;
+
   // Zoom/pan: the document's stored transform, else the default fit (the
-  // whole grid letterboxed in the panel).
+  // whole ground plane letterboxed in the panel).
   const transform: ViewTransform | null = useMemo(() => {
     if (doc.viewTransform) return doc.viewTransform;
     if (!panel) return null;
-    return fitTransform(CANVAS_W, CANVAS_H, panel.w, panel.h);
-  }, [doc.viewTransform, panel]);
+    return fitTransform(frame.canvasW, frame.canvasH, panel.w, panel.h);
+  }, [doc.viewTransform, panel, frame]);
   liveRef.current = { transform, panel };
 
   // Track the panel size; the backing store follows it × devicePixelRatio.
@@ -267,7 +313,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         .setStatus(`Renderer init failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
-    renderer.setGround(GROUND);
+    // Per-size frame access for the closures below: world-image pixel
+    // projection and the frame origin, always for the current ground
+    // size (renderFrame refreshes frameRef from the live document).
+    const toPx = (x: number, z: number, y = 0): [number, number] =>
+      framePx(frameRef.current, x, z, y);
 
     let instances = new Float32Array(256 * 10);
     const shadowBatch = new FlatBatchBuilder();
@@ -340,7 +390,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         z: p.z,
         layer: live.layers.findIndex((l) => l.id === viewLayerId(p.primId, p.dir)),
       }));
-      return surfaceHeightAt(spriteSet, placements, wx, wy, ORIGIN_Y, PPU, toPx);
+      return surfaceHeightAt(spriteSet, placements, wx, wy, frameRef.current.originY, PPU, toPx);
     };
 
     /**
@@ -410,7 +460,12 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       if (canvas.width !== bw) canvas.width = bw;
       if (canvas.height !== bh) canvas.height = bh;
 
-      const t = live.viewTransform ?? fitTransform(CANVAS_W, CANVAS_H, panel.w, panel.h);
+      // The frame follows the live ground size, so a panel resize applies
+      // on the next frame without a React pass.
+      const frame = worldFrame(live.ground.width, live.ground.depth);
+      frameRef.current = frame;
+
+      const t = live.viewTransform ?? fitTransform(frame.canvasW, frame.canvasH, panel.w, panel.h);
       renderer.setLight(lightParams(live.light));
       renderer.setLightsEnabled(live.light.enabled);
       // Point lights: the deferred pass evaluates them; the editor converts
@@ -434,21 +489,24 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       }
       // The world-image frame is shared by meshes and the ground plane;
       // set it unconditionally (it must be right even with no character).
-      renderer.setMeshFrame(ORIGIN_X, ORIGIN_Y, PPU);
+      renderer.setMeshFrame(frame.originX, frame.originY, PPU);
       // Environment-derived ambient + its display parameters: meshes shade
       // with the same probe the sprites' bake environment implies.
       renderer.setShProbe(live.shProbe);
       const envParams = live.envParams;
       renderer.setEnvDisplay(envParams?.exposure ?? 1, envParams?.saturation ?? 1);
 
-      // Textured ground plane: apply when the material/tile selection or
-      // the decoded maps change; none selected = the flat batch draws.
+      // Ground: apply when the material/tile selection, the decoded maps,
+      // or the ground size changes; none selected = the flat batch draws.
+      // Size participates in the key so the checkerboard batch, the
+      // material quad's extent, and the frame all re-apply on resize.
       const groundKey = `${live.ground.material ?? ''}|${live.ground.tileScale}|${
         live.ground.maps ? 'maps' : 'nomaps'
-      }`;
+      }|${live.ground.width}x${live.ground.depth}`;
       if (groundKey !== appliedGroundKey) {
         appliedGroundKey = groundKey;
-        renderer.setGroundExtent(GRID_N);
+        renderer.setGround(groundBatch(live.ground.width, live.ground.depth));
+        renderer.setGroundExtent(live.ground.width, live.ground.depth);
         renderer.setGroundMaterial(live.ground.maps, live.ground.tileScale);
       }
 
@@ -777,7 +835,10 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       const rect = canvas.getBoundingClientRect();
       const wx = (e.clientX - rect.left - t.panX) / t.zoom;
       const wy = (e.clientY - rect.top - t.panY) / t.zoom;
-      const [gx, gz] = screenToGround((wx - ORIGIN_X) / PPU, -(wy - ORIGIN_Y) / PPU);
+      const [gx, gz] = screenToGround(
+        (wx - frameRef.current.originX) / PPU,
+        -(wy - frameRef.current.originY) / PPU,
+      );
       return { px: [wx, wy], ground: [gx, gz] };
     };
 
@@ -798,8 +859,8 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
      * + y·UP1, so the ground basis coordinates solve with s − y·UP1.
      */
     const groundAtHeight = (px: [number, number], y: number): [number, number] => {
-      const u = (px[0] - ORIGIN_X) / PPU;
-      const s = -(px[1] - ORIGIN_Y) / PPU;
+      const u = (px[0] - frameRef.current.originX) / PPU;
+      const s = -(px[1] - frameRef.current.originY) / PPU;
       return screenToGround(u, s - y * SCREEN_UP[1]);
     };
 

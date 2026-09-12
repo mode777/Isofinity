@@ -204,21 +204,45 @@ export interface EnvDisplayParams {
 
 /**
  * The ground plane's material state. `material` (file name in the
- * workspace's materials/ folder) and `tileScale` (tiles per world unit)
- * persist in world files; `maps` is the decoded material (engine object,
- * never serialized) the renderer uploads.
+ * workspace's materials/ folder), `tileScale` (tiles per world unit), and
+ * `width`/`depth` (the ground plane's extent in world units, from the
+ * fixed origin corner toward +x/+z) persist in world files; `maps` is the
+ * decoded material (engine object, never serialized) the renderer uploads.
  */
 export interface GroundState {
   material: string | null;
   tileScale: number;
+  /** Ground extent in world units along +x, from the origin corner. */
+  width: number;
+  /** Ground extent in world units along +z, from the origin corner. */
+  depth: number;
   maps: import('./groundMaterial.js').GroundMaterialMaps | null;
 }
 
 /** Default tiling: one material tile per 10 world units. */
 export const DEFAULT_GROUND_TILE_SCALE = 0.1;
 
+/** Default ground extent (the historical 12 × 12 grid). */
+export const DEFAULT_GROUND_WIDTH = 12;
+export const DEFAULT_GROUND_DEPTH = 12;
+
+/**
+ * Clamp a ground-size axis to the accepted range: whole world units in
+ * 1–128. Non-finite input falls back to the given default.
+ */
+export function clampGroundSize(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(128, Math.max(1, Math.round(value)));
+}
+
 export function defaultGroundState(): GroundState {
-  return { material: null, tileScale: DEFAULT_GROUND_TILE_SCALE, maps: null };
+  return {
+    material: null,
+    tileScale: DEFAULT_GROUND_TILE_SCALE,
+    width: DEFAULT_GROUND_WIDTH,
+    depth: DEFAULT_GROUND_DEPTH,
+    maps: null,
+  };
 }
 
 /** A selected placement's identity (kind + stable placement id). */
@@ -306,8 +330,8 @@ export interface WorldDocument {
   shadowLevel: number;
   /**
    * Viewport zoom/pan over the fixed projected world image; null = fit
-   * (the whole grid letterboxed in the panel). In-memory editor state
-   * only — never written into world files.
+   * (the whole ground plane letterboxed in the panel). In-memory editor
+   * state only — never written into world files.
    */
   viewTransform: ViewTransform | null;
   /**

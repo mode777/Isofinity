@@ -27,8 +27,6 @@ import {
 } from '../../runtime/shProbe.js';
 import characterAssetUrl from '../assets/CesiumMan.glb?url';
 import type {
-  BakeDocument,
-  EditorDocument,
   LightState,
   PlacementRef,
   PrimitiveKind,
@@ -43,25 +41,20 @@ import {
   type EnvDisplayParams,
 } from '../document.js';
 import {
+  clampGroundSize,
+  DEFAULT_GROUND_DEPTH,
   DEFAULT_GROUND_TILE_SCALE,
+  DEFAULT_GROUND_WIDTH,
   DEFAULT_POINT_LIGHT,
   defaultGroundState,
 } from '../document.js';
 import { parseGroundMaterial } from '../groundMaterial.js';
 import { equirectFromHdrBuffer } from '../hdr.js';
+import { buildWorldFile, parseWorldFile } from '../worldFile.js';
 import { nextDocId, useEditor, type EditorState } from './editor.js';
-import { bakePrimitiveLayer, anyBakeBusy, resultToLayer } from './bake.js';
+import { bakePrimitiveLayer, anyBakeBusy } from './bake.js';
 import { SPRITE_EXTS, useProject } from './project.js';
 
-const WORLD_FORMAT = 'isoinfinity-world/6';
-/** Older formats the parser still accepts; heights/directions/shadows/lights default. */
-const LEGACY_WORLD_FORMATS = [
-  'isoinfinity-world/1',
-  'isoinfinity-world/2',
-  'isoinfinity-world/3',
-  'isoinfinity-world/4',
-  'isoinfinity-world/5',
-];
 
 const ed = (): EditorState => useEditor.getState();
 const worldDoc = (docId: string): WorldDocument | null => {
@@ -295,7 +288,10 @@ export async function updateShProbe(docId: string): Promise<void> {
 
 // --- document construction ----------------------------------------------
 
-export function newWorldDoc(): string {
+export function newWorldDoc(
+  width: number = DEFAULT_GROUND_WIDTH,
+  depth: number = DEFAULT_GROUND_DEPTH,
+): string {
   const doc: WorldDocument = {
     kind: 'world',
     docId: nextDocId('world'),
@@ -311,7 +307,11 @@ export function newWorldDoc(): string {
     envParams: null,
     shProbe: null,
     userEnv: null,
-    ground: defaultGroundState(),
+    ground: {
+      ...defaultGroundState(),
+      width: clampGroundSize(width, DEFAULT_GROUND_WIDTH),
+      depth: clampGroundSize(depth, DEFAULT_GROUND_DEPTH),
+    },
     tool: '',
     heightLevel: 0,
     surfaceSnap: false,
@@ -329,177 +329,6 @@ export function newWorldDoc(): string {
   return doc.docId;
 }
 
-/** Validate a world file completely before anything is mutated. */
-interface WorldFile {
-  format: string;
-  name?: string;
-  savedAt?: string;
-  sprites: { asset: string; x: number; z: number; y: number; dir?: ViewSlot; shadow?: number }[];
-  /** Point light placements (present on /6 files only). Height is optional. */
-  lights: {
-    x: number;
-    z: number;
-    y?: number;
-    radius: number;
-    energy: number;
-    color: string;
-  }[];
-  light: LightState;
-  sun: SunState;
-  /** Ground state (present on /4 files only). */
-  groundMaterial?: string | null;
-  groundTileScale?: number | null;
-  /** User-selected world HDRI (present on /4 files only). */
-  envHdri?: string | null;
-}
-
-/** The sRGB hex a point light's color must match. */
-const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
-
-const VIEW_SLOT_SET: ReadonlySet<string> = new Set(['n', 'e', 's', 'w']);
-
-function isFiniteNumber(v: unknown): v is number {
-  return typeof v === 'number' && Number.isFinite(v);
-}
-
-function parseWorldFile(text: string, fileName: string): WorldFile {
-  const fail = (why: string): Error => new Error(`world "${fileName}": ${why}`);
-  let data: unknown;
-  try {
-    data = JSON.parse(text);
-  } catch (err) {
-    throw fail(`not valid JSON — ${err instanceof Error ? err.message : String(err)}`);
-  }
-  const obj = data as Record<string, unknown>;
-  const format = typeof obj.format === 'string' ? obj.format : String(obj.format);
-  if (format !== WORLD_FORMAT && !LEGACY_WORLD_FORMATS.includes(format)) {
-    throw fail(`unsupported format ${format} — expected ${WORLD_FORMAT}`);
-  }
-  const spritesRaw = obj.sprites;
-  if (!Array.isArray(spritesRaw)) throw fail('missing "sprites" array');
-  const sprites: WorldFile['sprites'] = [];
-  for (const entry of spritesRaw) {
-    const s = entry as Record<string, unknown>;
-    if (typeof s.asset !== 'string' || !isFiniteNumber(s.x) || !isFiniteNumber(s.z)) {
-      throw fail('malformed sprite placement (needs asset/x/z)');
-    }
-    if (s.y !== undefined && !isFiniteNumber(s.y)) {
-      throw fail('malformed sprite placement — height must be a finite number');
-    }
-    if (s.dir !== undefined && (typeof s.dir !== 'string' || !VIEW_SLOT_SET.has(s.dir))) {
-      throw fail('malformed sprite placement — direction must be a view slot (n/e/s/w)');
-    }
-    if (s.shadow !== undefined && (!isFiniteNumber(s.shadow) || s.shadow < 0 || s.shadow > 1)) {
-      throw fail('malformed sprite placement — shadow strength must be a number in [0, 1]');
-    }
-    sprites.push({
-      asset: s.asset,
-      x: s.x,
-      z: s.z,
-      y: s.y === undefined ? 0 : s.y,
-      dir: (s.dir as ViewSlot | undefined) ?? 'n',
-      shadow: s.shadow === undefined ? 1 : s.shadow,
-    });
-  }
-  const l = obj.light as Record<string, unknown> | undefined;
-  if (
-    !l ||
-    !isFiniteNumber(l.azimuthDeg) ||
-    !isFiniteNumber(l.elevationDeg) ||
-    !isFiniteNumber(l.intensity) ||
-    typeof l.colorHex !== 'string' ||
-    typeof l.ambientHex !== 'string' ||
-    typeof l.enabled !== 'boolean'
-  ) {
-    throw fail('malformed light state');
-  }
-  const sunRaw = obj.sun as Record<string, unknown> | undefined;
-  if (!sunRaw || !isFiniteNumber(sunRaw.hour) || !isFiniteNumber(sunRaw.day) || !isFiniteNumber(sunRaw.lat)) {
-    throw fail('malformed sun state');
-  }
-  // Point light placements: /6 and later only (older files carry none).
-  const lights: WorldFile['lights'] = [];
-  const lightsRaw = obj.lights;
-  if (lightsRaw !== undefined) {
-    if (!Array.isArray(lightsRaw)) throw fail('malformed lights array');
-    for (const entry of lightsRaw) {
-      const l = entry as Record<string, unknown>;
-      if (!isFiniteNumber(l.x) || !isFiniteNumber(l.z)) {
-        throw fail('malformed point light (needs finite x/z)');
-      }
-      if (l.y !== undefined && !isFiniteNumber(l.y)) {
-        throw fail('malformed point light — height must be a finite number');
-      }
-      if (!isFiniteNumber(l.radius) || !isFiniteNumber(l.energy)) {
-        throw fail('malformed point light — radius and energy must be finite numbers');
-      }
-      if (typeof l.color !== 'string' || !HEX_COLOR_RE.test(l.color)) {
-        throw fail('malformed point light — color must be #rrggbb');
-      }
-      lights.push({
-        x: l.x,
-        z: l.z,
-        y: l.y === undefined ? 0 : l.y,
-        radius: l.radius,
-        energy: l.energy,
-        color: l.color,
-      });
-    }
-  }
-  // Ground + user-selected environment: optional, /4 and later only.
-  let groundMaterial: string | null = null;
-  let groundTileScale: number | null = null;
-  let envHdri: string | null = null;
-  const groundRaw = obj.ground as Record<string, unknown> | undefined;
-  if (groundRaw !== undefined) {
-    if (typeof groundRaw !== 'object' || groundRaw === null) throw fail('malformed ground state');
-    if (
-      groundRaw.material !== undefined &&
-      groundRaw.material !== null &&
-      typeof groundRaw.material !== 'string'
-    ) {
-      throw fail('malformed ground state — material must be a file name');
-    }
-    groundMaterial = (groundRaw.material as string | null | undefined) ?? null;
-    if (groundRaw.tileScale !== undefined) {
-      if (!isFiniteNumber(groundRaw.tileScale) || groundRaw.tileScale <= 0) {
-        throw fail('malformed ground state — tile scale must be a positive number');
-      }
-      groundTileScale = groundRaw.tileScale;
-    }
-  }
-  const envRaw = obj.env as Record<string, unknown> | undefined;
-  if (envRaw !== undefined) {
-    if (typeof envRaw !== 'object' || envRaw === null) throw fail('malformed env state');
-    if (
-      envRaw.hdri !== undefined &&
-      envRaw.hdri !== null &&
-      typeof envRaw.hdri !== 'string'
-    ) {
-      throw fail('malformed env state — hdri must be a file name');
-    }
-    envHdri = (envRaw.hdri as string | null | undefined) ?? null;
-  }
-  return {
-    format: WORLD_FORMAT,
-    name: typeof obj.name === 'string' ? obj.name : fileName.replace(/\.json$/i, ''),
-    savedAt: typeof obj.savedAt === 'string' ? obj.savedAt : undefined,
-    sprites,
-    lights,
-    groundMaterial,
-    groundTileScale,
-    envHdri,
-    light: {
-      azimuthDeg: l.azimuthDeg,
-      elevationDeg: l.elevationDeg,
-      intensity: l.intensity,
-      colorHex: l.colorHex,
-      ambientHex: l.ambientHex,
-      enabled: l.enabled,
-    },
-    sun: { hour: sunRaw.hour, day: sunRaw.day, lat: sunRaw.lat },
-  };
-}
 
 /**
  * Resolve a placement's asset id to a bundle file in the workspace's
@@ -648,11 +477,24 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     }
 
     // Ground + user-selected environment (/4): names restore immediately,
-    // the material's maps load best-effort after the doc opens.
+    // the material's maps load best-effort after the doc opens. The
+    // ground size (/7) clamps into the editor's accepted range.
     doc.userEnv = data.envHdri ? { kind: 'hdri', fileName: data.envHdri } : null;
     const groundMaterial = data.groundMaterial ?? null;
     const groundTileScale = data.groundTileScale ?? DEFAULT_GROUND_TILE_SCALE;
-    doc.ground = { material: groundMaterial, tileScale: groundTileScale, maps: null };
+    doc.ground = {
+      material: groundMaterial,
+      tileScale: groundTileScale,
+      width: clampGroundSize(
+        data.groundWidth ?? DEFAULT_GROUND_WIDTH,
+        DEFAULT_GROUND_WIDTH,
+      ),
+      depth: clampGroundSize(
+        data.groundDepth ?? DEFAULT_GROUND_DEPTH,
+        DEFAULT_GROUND_DEPTH,
+      ),
+      maps: null,
+    };
 
     ed().addDoc(doc);
     void updateShProbe(doc.docId);
@@ -756,6 +598,28 @@ export function setGroundTileScale(docId: string, tileScale: number): void {
 }
 
 /**
+ * Resize the ground plane in place (whole world units, 1–128 per axis;
+ * out-of-range input clamps, non-finite keeps the current value). The
+ * origin corner stays fixed — the plane grows and shrinks toward +x/+z —
+ * placements are never touched, the view refits, and the change is dirty
+ * but not undoable (like the other ground-state edits).
+ */
+export function setGroundSize(docId: string, width: number, depth: number): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  const w = clampGroundSize(width, doc.ground.width);
+  const d = clampGroundSize(depth, doc.ground.depth);
+  if (w === doc.ground.width && d === doc.ground.depth) return;
+  update(docId, (state) => {
+    state.ground.width = w;
+    state.ground.depth = d;
+    // The world image re-anchors with the frame; fit reveals the plane.
+    state.viewTransform = null;
+  });
+  ed().markDirty(docId);
+}
+
+/**
  * Select the world's environment HDRI (from hdri/); null clears the
  * selection back to the environment inherited from sprite bake
  * provenance. Rebuilds the ambient probe.
@@ -816,7 +680,13 @@ export async function selectGroundMaterialFile(file: File, docId?: string): Prom
   try {
     const maps = await parseGroundMaterial(await file.arrayBuffer(), file.name);
     update(doc.docId, (d) => {
-      d.ground = { material: file.name, tileScale: d.ground.tileScale, maps };
+      d.ground = {
+        material: file.name,
+        tileScale: d.ground.tileScale,
+        width: d.ground.width,
+        depth: d.ground.depth,
+        maps,
+      };
     });
     ed().markDirty(doc.docId);
     const note = maps.notes.length > 0 ? ` (${maps.notes.join('; ')})` : '';
@@ -879,46 +749,16 @@ export async function saveWorld(docId: string, rawName?: string): Promise<void> 
   try {
     const placements = doc.world.list();
     const lights = doc.world.listLights();
-    const worldFile: WorldFile = {
-      format: WORLD_FORMAT,
+    const worldFile = buildWorldFile({
       name,
       savedAt: new Date().toISOString(),
-      sprites: placements.map((p) => ({
-        asset: p.primId,
-        x: p.x,
-        z: p.z,
-        y: p.y,
-        // North is the default; a north-facing placement may omit dir.
-        ...(p.dir !== 'n' ? { dir: p.dir } : {}),
-        // Full strength is the default; omitted keeps /4 files identical.
-        ...(p.shadow !== 1 ? { shadow: p.shadow } : {}),
-      })),
-      // Point light placements (/6): the emitter position is the cell
-      // center; save that position, not the footprint corner.
-      lights: lights.map((l) => ({
-        x: l.x + 0.5,
-        z: l.z + 0.5,
-        // Ground level is the default; a ground-level light may omit y.
-        ...(l.y !== 0 ? { y: l.y } : {}),
-        radius: l.radius,
-        energy: l.energy,
-        color: l.colorHex,
-      })),
+      sprites: placements,
+      lights,
       light: doc.light,
       sun: doc.sun,
-      // Ground + user-selected env are additive /4 fields; defaults omit.
-      ...(doc.ground.material || doc.ground.tileScale !== DEFAULT_GROUND_TILE_SCALE
-        ? {
-            ground: {
-              ...(doc.ground.material ? { material: doc.ground.material } : {}),
-              ...(doc.ground.tileScale !== DEFAULT_GROUND_TILE_SCALE
-                ? { tileScale: doc.ground.tileScale }
-                : {}),
-            },
-          }
-        : {}),
-      ...(doc.userEnv?.kind === 'hdri' ? { env: { hdri: doc.userEnv.fileName } } : {}),
-    };
+      ground: doc.ground,
+      userEnv: doc.userEnv,
+    });
     const json = JSON.stringify(worldFile, null, 2);
     await writeWorkspaceFile('worlds', file, new TextEncoder().encode(json));
     update(docId, (d) => {
@@ -1513,66 +1353,4 @@ export async function selectBrush(docId: string, brush: Brush): Promise<void> {
   } finally {
     brushBusy.delete(docId);
   }
-}
-
-// --- place in world ---------------------------------------------------------
-
-function uniqueLayerId(base: string, layers: SpriteLayer[]): string {
-  const taken = new Set(layers.map((l) => l.id));
-  if (!taken.has(base)) return base;
-  for (let n = 2; ; n++) {
-    const id = `${base}-${n}`;
-    if (!taken.has(id)) return id;
-  }
-}
-
-/**
- * Place a baked sprite document into a world document: convert its passes
- * to a sprite layer in memory, add a placement, mark dirty. Targets the
- * given world doc, else the active world doc, else a new one.
- */
-export function placeInWorld(bakeDocId: string, targetDocId?: string): void {
-  const bdoc = useEditor.getState().docs[bakeDocId];
-  if (!bdoc || bdoc.kind !== 'bake') return;
-  if (!bdoc.result || !bdoc.render) {
-    ed().setStatus('Place in world needs baked passes including a render pass');
-    return;
-  }
-
-  let target: WorldDocument | undefined;
-  if (targetDocId) {
-    const doc = useEditor.getState().docs[targetDocId];
-    if (doc?.kind === 'world') target = doc;
-  } else {
-    const active = useEditor.getState().activeDocId;
-    const activeDoc: EditorDocument | undefined = active ? useEditor.getState().docs[active] : undefined;
-    if (activeDoc?.kind === 'world') target = activeDoc;
-  }
-  let created = false;
-  if (!target) {
-    const id = newWorldDoc();
-    const doc = useEditor.getState().docs[id];
-    if (doc?.kind === 'world') target = doc;
-    created = true;
-  }
-  if (!target) return;
-
-  const id = uniqueLayerId(bdoc.result.id, target.layers);
-  const layer = resultToLayer(bdoc as BakeDocument, id);
-  if (!layer) return;
-  const placed = target.world.place(9.5, 5.5, id);
-  update(target.docId, (d) => {
-    d.layers = [...d.layers, layer];
-    d.history.push(placementCommand('place sprite', d.world, placed));
-    d.tool = id;
-  });
-  ed().markDirty(target.docId);
-  ed().focusDoc(target.docId);
-  const [w, h] = [layer.width, layer.height];
-  ed().setStatus(
-    `${created ? 'Created world and placed' : 'Placed'} ${id} — ${w}x${h} px @ ${layer.pxPerUnit} px/unit` +
-      (bdoc.ref
-        ? ''
-        : ' — this sprite has no bundle in sprites/ yet: Save it (with a render pass) or placements will be skipped when the world reloads'),
-  );
 }

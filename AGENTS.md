@@ -128,14 +128,16 @@ file + a row in its index). Full design/process records stay in
   view slots, view-independent `provenance` so sprites re-bake in place;
   `/4`+`/5` open view-only/N-only). Worlds consume the N view. Pipeline
   details: `docs/bake-pipeline.md`.
-- Sprite→world handoff: a baked sprite document's N-view passes become a
-  world document layer in memory ("Place in world") — no bundle round
-  trip.
+- World size: new worlds get their ground plane's width × depth from a
+  dialog (1–128 whole units, defaults 12 × 12); existing worlds resize
+  from the properties panel — the origin corner stays fixed and
+  out-of-bounds placements are kept, never removed. Ground size persists
+  in `isoinfinity-world/7` (optional, omitted at 12 × 12).
 - Workspace binding (File System Access API, `src/shared/workspace.ts`;
   convention: `hdri/`, `models/`, `sprites/`, `worlds/`, `presets/`) is surfaced
   through the top bar, project browser and panels, with dialogs/downloads
   as fallback. Worlds (placements + light state) save/load as
-  `isoinfinity-world/1` JSON in the workspace's `worlds/` folder.
+  `isoinfinity-world/7` JSON in the workspace's `worlds/` folder.
 - Raw WebGL2 compositor (`src/runtime/renderer.ts`) with per-pixel sprite
   occlusion, deferred-style directional lighting (key + ambient, shades
   the baked render image by the g-buffer normals — multiplicatively, see

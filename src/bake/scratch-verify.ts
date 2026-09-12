@@ -883,7 +883,7 @@ async function runGroundSpike(): Promise<void> {
     arm: await bitmap(white, 8),
   };
 
-  renderer.setGroundExtent(12);
+  renderer.setGroundExtent(12, 12);
   renderer.setGroundMaterial(maps, 1);
   const mat1 = await frame();
   ok(mat1 !== flat1, 'a material changes the frame');

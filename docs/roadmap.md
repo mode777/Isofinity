@@ -206,6 +206,19 @@ list when a change lands (and prune it — history belongs in the archives).
   recenters on release, repeated drags compound, and typed values still
   apply exactly (unclamped). The light height row joins the other three
   on the precise-input control. UI-only, no format impact.
+- World size — the ground plane's width × depth becomes per-document
+  world state instead of a fixed 12 × 12 grid: the project browser's
+  New-world action opens a size dialog (whole units, 1–128 per axis,
+  defaults 12 × 12), the properties panel's Ground section resizes
+  existing worlds (origin corner fixed; out-of-bounds placements are
+  kept, never removed; view refits; not undoable, like the other
+  ground-state edits), and the world image frame/checkerboard/material
+  quad become memoized functions of the size. Ground size persists as an
+  optional `isoinfinity-world/7` field (omitted at 12 × 12; `/1`–`/6`
+  still load at the default). **Removed:** the sprite editor's
+  "Place in world" in-memory handoff — a baked sprite reaches a world by
+  saving its bundle to `sprites/` and picking it as a brush, and worlds
+  are now created only explicitly (with a size).
 
 ## In progress
 

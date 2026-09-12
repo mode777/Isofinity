@@ -77,7 +77,8 @@ cover the implementation sweep inside it.
 
 1. `LightState`/`SunState` in `src/app/document.ts` + defaults; store
    actions in `src/app/store/world.ts`.
-2. Persistence: `isoinfinity-world/1` save/load in `src/app/store/` —
+2. Persistence: `isoinfinity-world` save/load in `src/app/store/` (the
+   pure payload lives in `src/app/worldFile.ts`) —
    validate completely before applying (corrupt file = named error,
    nothing opens); new fields round-trip and older files load without
    them.

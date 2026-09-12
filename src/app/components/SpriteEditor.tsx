@@ -28,7 +28,6 @@ import {
   ZOOM_STEP,
   zoomAround,
 } from '../bakeView.js';
-import { placeInWorld } from '../store/world.js';
 import {
   bakeAll,
   removeView,
@@ -47,7 +46,6 @@ import { useWorkspace } from '../store/workspace.js';
 import { EditorToolbar } from './EditorToolbar.js';
 import {
   IconBakeAll,
-  IconPlaceWorld,
   IconRemoveView,
   IconRender,
   IconSave,
@@ -409,14 +407,6 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
           onClick={() => removeView(doc.docId, slot)}
         >
           <IconRemoveView />
-        </button>
-        <button
-          className="icon-btn"
-          disabled={!doc.result || !doc.render}
-          title="Place in world — place this sprite into a world document (in memory)"
-          onClick={() => placeInWorld(doc.docId)}
-        >
-          <IconPlaceWorld />
         </button>
       </EditorToolbar>
       {doc.viewOnly ? (

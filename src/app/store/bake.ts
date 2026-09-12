@@ -1235,21 +1235,6 @@ export async function deletePreset(fileName: string): Promise<void> {
   }
 }
 
-/** Convert a sprite document's baked passes into a placeable layer. */
-export function resultToLayer(doc: BakeDocument, id: string): SpriteLayer | null {
-  if (!doc.result || !doc.render) return null;
-  return {
-    id,
-    pxPerUnit: doc.result.pxPerUnit,
-    width: doc.result.width,
-    height: doc.result.height,
-    originPx: doc.result.originPx,
-    origin: doc.origin,
-    gbuffer: bakeFloatToHalf(doc.result.gbuffer, doc.result.width, doc.result.height),
-    render: ptImageToLayerBytes(doc.render),
-  };
-}
-
 /**
  * Bake a built-in primitive into a placeable layer on the fly (default
  * settings, procedural environment). Runs on a throwaway path tracer so

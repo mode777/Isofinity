@@ -1,9 +1,10 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { openBundleDoc, openGltfFiles, openModelDoc } from '../store/bake.js';
 import { useProject } from '../store/project.js';
 import { newWorldDoc, openWorldDoc, selectGroundMaterial } from '../store/world.js';
 import { useWorkspace } from '../store/workspace.js';
 import { buildDirTree, useExpansion, type DirNode } from './fileTree.js';
+import { NewWorldDialog } from './NewWorldDialog.js';
 
 export function ProjectBrowser(): React.JSX.Element {
   const sprites = useProject((s) => s.sprites);
@@ -13,6 +14,7 @@ export function ProjectBrowser(): React.JSX.Element {
   const refresh = useProject((s) => s.refresh);
   const connected = useWorkspace((s) => s.state.kind) === 'connected';
   const gltfInput = useRef<HTMLInputElement>(null);
+  const [newWorldOpen, setNewWorldOpen] = useState(false);
 
   return (
     <div className="browser">
@@ -61,7 +63,7 @@ export function ProjectBrowser(): React.JSX.Element {
 
       <section>
         <h3>Worlds</h3>
-        <button onClick={() => newWorldDoc()}>New world</button>
+        <button onClick={() => setNewWorldOpen(true)}>New world</button>
         {connected ? (
           <SectionTree paths={worlds} empty="worlds/ is empty" onOpen={(n) => void openWorldDoc(n)} />
         ) : (
@@ -83,6 +85,16 @@ export function ProjectBrowser(): React.JSX.Element {
           Import a glTF file to start a sprite without a workspace; workspace
           assets need a connected folder.
         </p>
+      ) : null}
+
+      {newWorldOpen ? (
+        <NewWorldDialog
+          onClose={() => setNewWorldOpen(false)}
+          onCreate={(width, depth) => {
+            setNewWorldOpen(false);
+            newWorldDoc(width, depth);
+          }}
+        />
       ) : null}
     </div>
   );

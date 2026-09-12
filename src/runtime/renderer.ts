@@ -93,11 +93,11 @@ in vec2 aCorner;  // 0..1 over the world extent
 uniform vec3 uProj;    // world-image origin px (x, y), px per unit
 uniform vec2 uRes;
 uniform vec4 uView;    // view transform: scale.xy, offset.xy (backing px)
-uniform float uExtent; // world extent (the plane spans [0, extent]^2)
+uniform vec2 uExtent; // world extent (the plane spans [0, extent.x] × [0, extent.y])
 out vec3 vWorldPos;
 ${ISO_GLSL}
 void main() {
-  vec3 wp = vec3(aCorner.x * uExtent, 0.0, aCorner.y * uExtent);
+  vec3 wp = vec3(aCorner.x * uExtent.x, 0.0, aCorner.y * uExtent.y);
   vWorldPos = wp;
   vec2 px = vec2(uProj.x + dot(SCREEN_RIGHT, wp) * uProj.z,
                  uProj.y - dot(SCREEN_UP, wp) * uProj.z);
@@ -1247,10 +1247,10 @@ export class Renderer {
     gl.bindVertexArray(null);
   }
 
-  /** World extent for the textured ground plane (world units per side). */
-  setGroundExtent(extent: number): void {
+  /** World extent for the textured ground plane (world units per axis). */
+  setGroundExtent(width: number, depth: number): void {
     this.gl.useProgram(this.groundProg);
-    this.gl.uniform1f(this.groundUniforms.extent, extent);
+    this.gl.uniform2f(this.groundUniforms.extent, width, depth);
   }
 
   /**

@@ -14,6 +14,7 @@ import {
   selectGroundMaterialFile,
   selectLight,
   setBrushDir,
+  setGroundSize,
   setGroundTileScale,
   setHeightLevel,
   setLight,
@@ -447,6 +448,24 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
       </Section>
 
       <Section title="Ground">
+        <PreciseNumberRow
+          label="Width"
+          value={doc.ground.width}
+          min={1}
+          max={128}
+          onCommit={(v) => setGroundSize(doc.docId, v, doc.ground.depth)}
+        />
+        <PreciseNumberRow
+          label="Depth"
+          value={doc.ground.depth}
+          min={1}
+          max={128}
+          onCommit={(v) => setGroundSize(doc.docId, doc.ground.width, v)}
+        />
+        <p className="hint">
+          ground plane size in world units (1–128); resizing keeps the
+          origin corner and never removes placements
+        </p>
         {connected ? (
           <select
             title="Workspace materials"

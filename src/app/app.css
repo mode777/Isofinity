@@ -652,6 +652,32 @@ span.dirtree-caret {
   cursor: pointer;
 }
 
+/* --- new world dialog --- */
+
+.new-world-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(20rem, 92vw);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.new-world-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem;
+}
+
+.new-world-actions {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: flex-end;
+  margin-top: 0.25rem;
+}
+
 .file-dialog-body {
   display: grid;
   grid-template-columns: 14rem 1fr;

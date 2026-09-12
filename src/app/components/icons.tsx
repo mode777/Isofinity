@@ -130,19 +130,6 @@ export function IconRemoveView(): React.JSX.Element {
   );
 }
 
-/** Globe with an arrow (place the sprite into a world). */
-export function IconPlaceWorld(): React.JSX.Element {
-  return icon(
-    <>
-      <circle cx="7" cy="7" r="4.5" />
-      <path d="M2.5 7h9" />
-      <ellipse cx="7" cy="7" rx="2" ry="4.5" />
-      <path d="M10.5 10.5l3 3" />
-      <path d="M13.5 10.8v2.7h-2.7" />
-    </>,
-  );
-}
-
 /** Horseshoe magnet (surface snap). */
 export function IconSnap(): React.JSX.Element {
   return icon(

@@ -123,7 +123,7 @@ disabled when the document is view-only.
 - The panel has no bake or render buttons: the sprite editor toolbar —
   icon buttons like the world editor — holds save and save as, the render
   pass action (plus **Bake All** over N→E→S→W and **Remove view** for
-  non-N slots), and **Place in world**. The render action implicitly
+  non-N slots). The render action implicitly
   re-bakes the raster g-buffer from the current source and settings before
   accumulating, so both passes stay current and pixel-aligned. Opening a
   model auto-bakes the raster pass; the render pass runs from the toolbar.
@@ -144,24 +144,22 @@ provenance. Bundles without provenance (`/4`), or whose model/HDRI
 references no longer resolve, open **view-only** (passes visible,
 save/export available) with the reason in the editor and status bar.
 
-### Place in world
-
-A sprite document with baked passes (including a render pass) can be
-placed into a world document — the **active slot's** passes convert to a
-`SpriteLayer` in memory (row-flip + half-float g-buffer, same helpers as
-the old boot bake; place-in-world hands off exactly that one view as a
-north-facing layer, independent of the multi-view brush loading below),
-becomes a placement tool, and one instance is placed. No bundle is
-written; the world document turns dirty. With no world tab open, a new
-world document is created. Saving the world records the sprite's asset id;
-reloading resolves it against `sprites/<id>.sprite` (missing bundles are
-skipped and named).
-
 ## World editor
 
 The compositor is unchanged: see Display, Lighting, Renderer and Input
-below. Available placement tools are the document's sprite layers; new
-world documents start with an empty grid. World save/load works against
+below. Available placement tools are the document's sprite layers. New
+worlds are created only explicitly: the project browser's **New world**
+action opens a small dialog for the ground plane's width × depth (whole
+world units, 1–128 per axis, defaults 12 × 12; blank/non-numeric input
+falls back to the default, out-of-range clamps), and accepting creates
+the world with a ground of exactly that size. Existing worlds resize from
+the properties panel's Ground section (same range and input conventions):
+the resize keeps the ground's (0, 0) origin corner — the plane grows and
+shrinks toward +x/+z — never removes or moves a placement (things outside
+the new bounds stay in the scene and can be dragged back), refits the
+view, marks the document dirty, and is not undoable (like the other
+ground-state edits). The ground size is persisted world state, not chrome.
+World save/load works against
 the workspace `worlds/` folder as described in Worlds.
 
 The world editor is full-bleed: like the sprite editor it fills the
@@ -190,9 +188,11 @@ its centroid (one finger keeps tap-to-place/drag-paint, two fingers are
 a neutral pre-gesture; trackpad three-finger gestures are OS-consumed
 and unreachable). Picking inverts the same transform, so
 placements land at the same ground position at every zoom level. The
-transform defaults to fit (whole grid letterboxed) and is per-document
+transform defaults to fit (whole ground plane letterboxed) and is per-document
 in-memory editor state — it survives tab switches and is never written
-into world JSON.
+into world JSON. The projected world image itself is a memoized pure
+function of the ground size (`worldFrame` in `src/app/components/
+WorldEditor.tsx`): a resize re-anchors the image and the view refits.
 
 With a brush (pencil) active and its layer loaded, the viewport renders
 that brush's sprite as a ghost at the exact position the next click
@@ -317,7 +317,7 @@ workspace control explains its absence and dialogs/downloads keep working.
 ### Worlds
 
 **Save world** writes `worlds/<name>.json` (name defaults to the first
-free `world-<n>`): the format marker `isoinfinity-world/6`, every placement
+free `world-<n>`): the format marker `isoinfinity-world/7`, every placement
 (asset id + continuous ground position + height, always written; facing
 direction and grounding-shadow strength, each written only when not the
 default — north and full strength), every **point light placement**
@@ -329,19 +329,23 @@ also records additive optional ground state — the ground material's file
 name in `materials/` (omitted when none) and the ground tile scale
 (omitted at the default one tile per world unit) — and a user-selected
 world environment HDRI (`env.hdri`, omitted when the environment is
-inherited from sprite bake provenance). The strength rides the same
+inherited from sprite bake provenance). `/7` adds the ground plane's
+`width`/`depth` to the same `ground` object (omitted together at the
+default 12 × 12). The strength rides the same
 optional-field pattern: placements added in `/5` record `shadow` only
 when the placement differs from full strength, and the per-placement
 value is set from the toolbar's shadow field before placing (like the
 height field). Saving an
 existing name overwrites it. Loading a world validates the file completely
-first (format marker `isoinfinity-world/6` or the older
-`/1`+`/2`+`/3`+`/4`+`/5`,
+first (format marker `isoinfinity-world/7` or the older
+`/1`+`/2`+`/3`+`/4`+`/5`+`/6`,
 placements with optional finite height, optional direction
 (`n`/`e`/`s`/`w`), optional shadow strength in [0, 1], optional point
 lights (finite position/radius/energy, `#rrggbb` color — a malformed
 light entry rejects the file), light/sun fields,
-optional ground/env state) so a corrupt
+optional ground/env state — a ground size that is not a pair of finite
+positive numbers rejects the file; `/6`-and-older files restore the
+ground at the default 12 × 12) so a corrupt
 file fails with
 a named error and opens nothing; `/1` placements and `/2` placements
 without a height restore at ground level, placements without a
@@ -485,7 +489,8 @@ on one driver while all diagnostics showed the data exact.
 
 ## Ground plane
 
-The world spans a flat ground plane (`y = 0`, world extent = the grid).
+The world spans a flat ground plane (`y = 0`, world extent = the ground
+plane's width × depth, chosen at creation and resizable in the panel).
 Without a material it is the flat checkerboard batch (below); with a
 ground material selected it becomes a real world-space quad drawn by its
 own program: lean PBR shading — linearized diffuse albedo, tangent-space
@@ -528,8 +533,9 @@ the light pass's position reconstruction); blending is per-attachment
 straight alpha (each output's own alpha is its blend weight), with the
 light pass sampling all three afterwards:
 
-1. **Ground** — the grid's cell top faces (y=0) as a static vertex-color
-   triangle batch, CPU-projected at startup, written into RT0/RT1/RT2 with
+1. **Ground** — the ground's cell top faces (y=0) as a static vertex-color
+   triangle batch, CPU-projected from the per-size world image (rebuilt
+   when the ground size changes), written into RT0/RT1/RT2 with
    the up normal and per-vertex ground-plane depth (deferred lighting hits
    the floor). Still no window-depth interaction (it writes no
    `gl_FragDepth`, so sprites always composite over it); with a ground
@@ -645,7 +651,7 @@ The **Select** tool's left button selects the placement under the cursor
 and drags it along the ground plane; an empty click or Escape clears the
 selection. Ground picking inverts the shared
 projection analytically (`screenToGround`) after inverting the viewport's
-zoom/pan transform, no hit-testing. The 12×12 checkerboard is a visual
+zoom/pan transform, no hit-testing. The checkerboard is a visual
 reference only. Viewport navigation: two-finger scroll pans, pinch
 (ctrl+wheel) zooms around the cursor, middle-drag pans; on touch screens
 three fingers pan (one finger paints/taps, two are neutral); the

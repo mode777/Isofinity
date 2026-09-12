@@ -64,10 +64,11 @@ the pointer for the real semantics.
 
 ## World
 
-- **World** — placements + light state, saved as `isoinfinity-world/6`
-  JSON in `worlds/` (`/1`+`/2`+`/3`+`/4`+`/5` still load; missing heights =
-  ground level, missing directions = north, missing ground/env fields =
-  defaults, older files carry no point lights).
+- **World** — placements + light state + ground size, saved as
+  `isoinfinity-world/7` JSON in `worlds/` (`/1`+`/2`+`/3`+`/4`+`/5`+`/6`
+  still load; missing heights = ground level, missing directions = north,
+  missing ground/env/size fields = defaults, older files carry no point
+  lights).
 - **Ground material** — a zip file with a `.material` extension in
   `materials/` holding diffuse (`diff`, with `diffuse` accepted as an
   alias; `diff` wins when both are present), AO/Roughness/Metal (`arm`,
