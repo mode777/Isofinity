@@ -119,11 +119,12 @@ files appear as leaves at their relative path position, filtered to the
 accepted file types. Activating a file entry SHALL open it (sprite bundle or
 world) or start a new sprite document from it (model), regardless of the
 folder depth it lives at. The browser SHALL offer the glTF import file dialog
-as the workspace-less path to a new sprite document and a new empty world
-action. The browser SHALL NOT list built-in test primitives; primitives reach
-the pipeline only as world-editor brushes. When no workspace is connected the
-browser SHALL remain usable through the import dialog and explain that
-workspace assets need a connection.
+as the workspace-less path to a new sprite document, and its new-world
+action SHALL open the ground-size dialog as specified by the world-creation
+requirement before creating the world. The browser SHALL NOT list built-in
+test primitives; primitives reach the pipeline only as world-editor brushes.
+When no workspace is connected the browser SHALL remain usable through the
+import dialog and explain that workspace assets need a connection.
 
 #### Scenario: Connected workspace lists its assets
 
@@ -167,6 +168,83 @@ workspace assets need a connection.
   browser's import dialog
 - **THEN** a sprite editor tab opens with that model as its bake source
 
+#### Scenario: New world asks for a size
+
+- **WHEN** the user activates the browser's new-world action
+- **THEN** the ground-size dialog opens first, and accepting it creates the
+  world at the chosen size
+
+
+### Requirement: Resizing the ground plane from the properties panel
+
+While a world document is active, the properties panel's Ground section
+SHALL offer the ground plane's width and depth as editable world-unit
+fields reflecting the document's current size. Committing values SHALL
+resize the ground plane in place: the ground keeps its (0, 0) origin corner
+(growing and shrinking extend toward +x/+z), the checkerboard or
+ground-material quad and the fit view SHALL reflect the new size
+immediately, and the document SHALL turn dirty. Resizing SHALL NOT remove
+or move any placement: placements that end up outside the new bounds stay
+in the scene at their positions and can be dragged back. Resizing SHALL NOT
+be an undoable command (like the other ground-state edits — material and
+tile scale). Input SHALL follow the panel's precise-input conventions:
+commit on Enter/blur, invalid input reverts, Escape cancels. Whole units in
+the range 1–128 per axis are accepted; out-of-range values clamp on commit.
+
+#### Scenario: Growing the ground keeps placements
+
+- **WHEN** the user changes a 12 × 12 world's width to 24
+- **THEN** the ground plane extends toward +x, every existing placement
+  stands at its former ground position, and the document is dirty
+
+#### Scenario: Shrinking keeps out-of-bounds placements
+
+- **WHEN** the user resizes a world so that placed sprites and lights lie
+  outside the new ground bounds
+- **THEN** those placements remain in the scene, render where they are, and
+  can be selected and dragged back onto the ground
+
+#### Scenario: Resize is immediate and not undoable
+
+- **WHEN** the user commits a new depth and then activates Undo
+- **THEN** the ground keeps the new size (undo steps back the last
+  placement-level command instead), consistent with ground material and
+  tile-scale edits
+
+#### Scenario: Invalid size input reverts
+
+- **WHEN** the user types a non-numeric value into the width field and
+  commits it
+- **THEN** the field reverts to the document's current width and the ground
+  is unchanged
+### Requirement: Creating a world at a chosen ground size
+
+Activating the project browser's new-world action SHALL open a small dialog
+before any world document is created. The dialog SHALL offer the ground
+plane's width and depth as separate world-unit fields, defaulting to
+12 × 12, and accept whole units in the range 1–128 per axis (out-of-range
+or non-numeric values SHALL clamp to the range on accept). Accepting the
+dialog SHALL create the world document with a ground plane of exactly that
+size; cancelling or closing it SHALL create nothing. The chosen size SHALL
+be part of the world's persisted state, not editor chrome.
+
+#### Scenario: Dialog defaults and clamps
+
+- **WHEN** the user opens the new-world dialog, clears the depth field,
+  enters `300` for the width, and accepts
+- **THEN** a world is created with a 128 × 12 ground plane (clamped to the
+  range, empty depth restored to its default 12)
+
+#### Scenario: Cancel creates nothing
+
+- **WHEN** the user opens the new-world dialog and cancels it
+- **THEN** no world tab is created and the tab bar is unchanged
+
+#### Scenario: Created ground matches the chosen size
+
+- **WHEN** the user accepts the dialog with width 20 and depth 8
+- **THEN** the new world's ground plane spans 20 × 8 world units from its
+  origin corner, and the fit view shows the whole plane
 ### Requirement: Properties panel follows the active editor
 
 The properties panel SHALL show controls matching the active tab's editor kind.
@@ -234,43 +312,11 @@ the active document only.
   switches to another sprite tab
 - **THEN** the second tab's properties show its own environment settings,
   unchanged by the first tab's edit
-
-### Requirement: Place a baked sprite into a world document
-
-From a sprite editor whose document holds baked passes (including a
-rendered pass), the user SHALL be able to place the sprite into a world
-document: the sprite's passes become a sprite layer of the target world
-document in memory — choosing an open world tab or creating a new one —
-without writing a bundle file. The placed sprite SHALL become placeable in
-that world like any other sprite layer, and the world document SHALL turn
-dirty.
-
-#### Scenario: Place into an open world
-
-- **WHEN** the user invokes place-in-world on a baked sprite tab while a
-  world tab is open
-- **THEN** the sprite becomes a placeable layer in that world document, a
-  placement appears, no file is written, and the world tab is dirty
-
-#### Scenario: Place creates a world when none is open
-
-- **WHEN** the user invokes place-in-world with no world tab open
-- **THEN** a new world document is created with the sprite as its first
-  placeable layer
-
-#### Scenario: Placed sprite persists like any sprite
-
-- **WHEN** the user saves the world after placing an in-memory sprite and
-  later reloads that world with the sprite's bundle present in `sprites/`
-- **THEN** the placement restores from the bundle by asset id; when the
-  bundle is absent the placement is reported as skipped, as with any
-  missing sprite asset
-
 ### Requirement: Sprite editor toolbar
 
 A sprite editor SHALL render a toolbar above its content offering Save, the
-render pass action, Bake All, Remove view, and Place in world. The render
-pass action SHALL first bake the raster g-buffer pass (world-space normals
+render pass action, Bake All, and Remove view. The render pass action SHALL
+first bake the raster g-buffer pass (world-space normals
 + linear ray depth) from the document's current source and settings, then
 accumulate the path-traced render pass against that g-buffer, so the two
 passes stay pixel-aligned and current without a separate bake action; both
@@ -291,8 +337,7 @@ current name as the default; cancelling the prompt SHALL abort the save
 without writing a file or clearing the dirty state. With a workspace
 connected, Save SHALL write the bundle to the workspace's `sprites/`
 folder under the chosen name; without a connection it SHALL fall back to
-downloading the bundle. Place in world SHALL behave as specified by the
-placement requirement (target an open world tab or create a new world).
+downloading the bundle.
 
 #### Scenario: Save prompts with the current name
 
@@ -314,9 +359,10 @@ placement requirement (target an open world tab or create a new world).
 
 #### Scenario: Place in world from the toolbar
 
-- **WHEN** the user activates Place in world on a baked sprite document
-- **THEN** the sprite becomes a placeable layer in the active world
-  document (or a new world when none is open), with no bundle file written
+- **WHEN** the user looks for the removed place-in-world handoff on a
+  baked sprite document's toolbar
+- **THEN** no Place-in-world action exists; a baked sprite reaches a world
+  by saving its bundle to `sprites/` and picking it as a world brush
 
 #### Scenario: Render action bakes the g-buffer first
 
@@ -356,7 +402,6 @@ placement requirement (target an open world tab or create a new world).
   passes
 - **THEN** Remove view is disabled; selecting a non-N slot with baked
   passes enables it and activating it discards that slot's passes
-
 ### Requirement: World editor toolbar
 
 A world editor SHALL render a toolbar above its content offering Save, undo and
@@ -509,7 +554,7 @@ turn the world document dirty.
 #### Scenario: Brush reuses an existing layer
 
 - **WHEN** the user picks a brush whose sprite layer the world document
-  already holds (for example after a place-in-world handoff)
+  already holds
 - **THEN** the pencil places that layer immediately with no load or bake
   work
 
@@ -533,7 +578,6 @@ turn the world document dirty.
   the workspace
 - **THEN** the status bar names the failure, the tool state is unchanged,
   and no placement occurs
-
 ### Requirement: Slider rows accept precise numeric input
 
 Every numeric slider in the properties panel (world key-light and

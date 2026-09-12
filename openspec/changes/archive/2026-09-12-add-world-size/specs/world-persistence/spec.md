@@ -1,11 +1,4 @@
-# world-persistence Specification
-
-## Purpose
-Saving and restoring runtime world scenes — sprite placements and light
-state — as versioned JSON files in the workspace's `worlds/` folder, so a
-built scene survives sessions and can be shared as a file.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Save the current world into the workspace
 
@@ -68,6 +61,7 @@ unavailable (or disabled).
 - **WHEN** the user saves a world whose ground plane is 24 × 8
 - **THEN** the saved file records the ground width and depth, and a world
   at the default 12 × 12 may omit them
+
 ### Requirement: Load a world from the workspace
 
 While connected, the runtime editor SHALL list the `worlds/` folder's JSON
