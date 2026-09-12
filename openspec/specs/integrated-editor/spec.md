@@ -264,9 +264,10 @@ more than one placeable direction, a facing control; for a selected point light,
 the light properties — radius, energy, color, and position), and the key light
 controls (azimuth, elevation, intensity, color, ambient color, dynamic-light
 switch) and the sun-position controls. The panel SHALL NOT duplicate the
-per-editor toolbar's actions (save, place-in-world, render pass, undo/redo, and
-placement tool selection live in the toolbar). Editing a control SHALL update
-the active document only.
+per-editor toolbar's actions (save, place-in-world, and render pass live in the
+sprite editor toolbar; save, undo, and redo live in the world editor toolbar;
+placement tool selection lives in the world viewport's tool bar). Editing a
+control SHALL update the active document only.
 
 #### Scenario: Sprite tab shows bake properties
 
@@ -404,53 +405,88 @@ downloading the bundle.
   passes enables it and activating it discards that slot's passes
 ### Requirement: World editor toolbar
 
-A world editor SHALL render a toolbar above its content offering Save, undo and
-redo controls, a pencil placement tool, a brush dropdown, an eraser toggle, a
-point-light placement tool, a Select tool, and a surface-snap toggle.
+A world editor SHALL render a toolbar above its content offering, as icon
+buttons (icons instead of text labels), Save, undo, and redo; the active
+tool's contextual controls; and a short hint naming the active tool. The
+global actions (Save, undo, redo) SHALL be visually separated from the
+tool-contextual controls (for example by a divider between the groups).
 
-Save SHALL prompt for a file name, defaulting to the world's saved name or the
-next free `world-N`, and SHALL write the world to the workspace's `worlds/`
-folder under the chosen name when a workspace is connected; cancelling SHALL
-abort without writing or clearing the dirty state.
+Save SHALL prompt for a file name, defaulting to the world's saved name or
+the next free `world-N`, and SHALL write the world to the workspace's
+`worlds/` folder under the chosen name when a workspace is connected;
+cancelling SHALL abort without writing or clearing the dirty state. The
+undo/redo buttons SHALL undo and redo the document's world edits as
+specified by the world-edit-history capability, and SHALL be disabled when
+there is nothing to undo (or redo).
 
-The pencil tool SHALL be the active placement tool by default; the brush it
-places is chosen from a dropdown grouped into **Primitives** (the built-in test
-primitives) and **Sprites** (the workspace's saved sprite bundles, listed when a
-workspace is connected). Clicking or dragging on the world canvas with the
-pencil places the chosen brush at the pointed cell; the eraser toggle (and the
-right mouse button) removes placements. The point-light tool places point lights
-as specified by the point-light tool requirement. The Select tool selects and
-moves placements as specified by the world-editor-selection capability.
+The tool-contextual controls are the brush dropdown and the surface-snap
+toggle, and they SHALL be visible only while a placement (pencil) tool is
+active — including when no brush is chosen yet. With the Select, eraser, or
+point-light tool active they SHALL be hidden. Hiding them SHALL NOT change
+their stored state: the chosen brush and the snap toggle's on/off state are
+per-document in-memory editor state and SHALL apply again when a placement
+tool is reactivated.
 
-The surface-snap toggle SHALL control whether placements take their height from
-the visible surface under the cursor (on) or from the user-adjusted placement
-height (off), as specified by the placement-height requirement. The brush's
-placement height, grounding-shadow strength, and direction SHALL be edited in
-the properties panel's Brush section (see the properties-panel requirement),
-not in the toolbar; both the surface-snap toggle and the Brush section values
-SHALL be per-document in-memory editor state. The toolbar SHALL replace the
-previous per-layer tool strip.
+The pencil tool SHALL be the active placement tool by default; it is
+activated from the world viewport's tool bar (see the world-editor tool bar
+requirement). The brush it places is chosen from a dropdown grouped into
+**Primitives** (the built-in test primitives) and **Sprites** (the
+workspace's saved sprite bundles, listed when a workspace is connected).
+Clicking or dragging on the world canvas with the pencil places the chosen
+brush at the pointed cell; the right mouse button removes placements. The
+surface-snap toggle SHALL control whether placements take their height from
+the visible surface under the cursor (on) or from the user-adjusted
+placement height (off), as specified by the placement-height requirement.
+The brush's placement height, grounding-shadow strength, and direction
+SHALL be edited in the properties panel's Brush section (see the
+properties-panel requirement), not in the toolbar. The toolbar SHALL NOT
+host tool selection: the Select, pencil, point-light, and eraser tools live
+in the world viewport's tool bar.
 
 #### Scenario: World toolbar offers save, pencil, and brush dropdown
 
-- **WHEN** the user activates a world editor tab
-- **THEN** the toolbar shows Save, a pencil tool marked active, a brush
-  dropdown whose groups list the built-in primitives and the workspace's saved
-  sprites, and a Select tool
+- **WHEN** the user activates a world editor tab with the pencil tool active
+- **THEN** the toolbar shows Save, undo, and redo as icon buttons separated
+  by a divider from the brush dropdown and surface-snap toggle, the tool bar
+  in the viewport marks the pencil active, and the brush dropdown's groups
+  list the built-in primitives and the workspace's saved sprites
+
+#### Scenario: Contextual controls appear only in placement mode
+
+- **WHEN** the user switches to the Select, eraser, or point-light tool
+- **THEN** the brush dropdown and the surface-snap toggle are hidden from
+  the toolbar, and switch back to a placement tool shows them again
 
 #### Scenario: Surface-snap toggle and height field are available
 
-- **WHEN** the user activates a world editor tab
-- **THEN** the toolbar shows a surface-snap toggle that can be switched on and
-  off and it persists across tab switches within the session, while the
-  placement-height field lives in the properties panel's Brush section
+- **WHEN** the user activates a world editor tab with a placement tool
+  active
+- **THEN** the toolbar shows a surface-snap toggle that can be switched on
+  and off and it persists across tab switches within the session, the
+  placement-height field lives in the properties panel's Brush section, and
+  with the Select, eraser, or point-light tool active the toggle is hidden
+  while keeping its state
+
+#### Scenario: Contextual state survives tool switches
+
+- **WHEN** surface snap is on and a brush chosen, the user switches to the
+  eraser and back to the pencil tool
+- **THEN** surface snap is still on and the same brush is still chosen,
+  without the user re-picking either
 
 #### Scenario: Brush properties live in the panel
 
 - **WHEN** the user activates a world editor tab with a brush chosen
-- **THEN** the toolbar shows no numeric height field and no direction control,
-  and the properties panel's Brush section offers the placement height,
-  grounding-shadow strength, and (for a multi-view sprite) the direction
+- **THEN** the toolbar shows no numeric height field and no direction
+  control, and the properties panel's Brush section offers the placement
+  height, grounding-shadow strength, and (for a multi-view sprite) the
+  direction
+
+#### Scenario: Select tool is available
+
+- **WHEN** the user activates a world editor tab
+- **THEN** the viewport's tool bar offers a Select tool alongside the
+  pencil, eraser, and point-light tools
 
 #### Scenario: Saving prompts with a sensible default
 
@@ -466,15 +502,9 @@ previous per-layer tool strip.
 
 #### Scenario: Eraser remains available
 
-- **WHEN** the user toggles the eraser and clicks a placed sprite, or
-  right-clicks a placed sprite with the pencil active
+- **WHEN** the user activates the eraser from the tool bar and clicks a
+  placed sprite, or right-clicks a placed sprite with any tool active
 - **THEN** that placement is removed
-
-#### Scenario: Select tool is available
-
-- **WHEN** the user activates a world editor tab
-- **THEN** the toolbar offers a Select tool alongside the pencil, eraser, and
-  point-light tools
 
 ### Requirement: Brush direction selection
 
@@ -1188,7 +1218,7 @@ back to the eraser's hover highlight of the placement under the cursor
 ### Requirement: Unclamped placement height control
 
 The world editor SHALL give the current brush a placement height that the
-user adjusts in two ways:
+user adjusts in three ways:
 
 - **Shift + mouse move**: while shift is held, vertical mouse movement
   over the viewport SHALL adjust the placement height — moving the mouse
@@ -1203,6 +1233,18 @@ user adjusts in two ways:
   input that is empty or not a valid number SHALL be rejected with the
   document unchanged and the field reverting to the current height, and
   Escape SHALL cancel editing and restore the current value.
+- **Height slider**: the Brush section SHALL additionally offer a slider
+  spanning −2 to +2 world units alongside the numeric field, adjusting the
+  stored brush height relative to its value at the start of each drag: the
+  thumb SHALL rest centered (no offset), dragging SHALL apply the thumb's
+  offset on top of that drag-start value continuously, and releasing the
+  pointer SHALL recenter the thumb — the next drag re-anchors on the height
+  current then, so repeated drags compound. The slider SHALL be a pointer
+  shortcut only: it SHALL NOT clamp the stored height, typed values SHALL
+  keep applying exactly regardless of the band, and the slider SHALL follow
+  the height field's edit-state rules: it never marks the document dirty,
+  and while surface snap is on it SHALL be replaced together with the
+  numeric field by the read-only snap display.
 
 The placement height SHALL be per-document in-memory
 editor state, defaulting to ground level for a newly opened or created
@@ -1220,12 +1262,12 @@ SHALL be ground level. While surface snap is on, the height field
 SHALL display the height snap read at the current cursor position, so the
 user can see the value snap picked; the display is transient feedback and
 SHALL NOT overwrite the stored brush height, which applies again when snap
-goes off. Surface snap SHALL override both the shift-move adjustment and
-the manual input (the stored height is kept and applies again when snap
-goes off). The effective height SHALL apply to every placement the brush
-makes (clicks and drags alike) and to the ghost preview. Adjusting or
-entering a height SHALL NOT by itself mark the document dirty; a placement
-made at a non-zero height SHALL mark it dirty.
+goes off. Surface snap SHALL override the shift-move adjustment, the
+slider, and the manual input (the stored height is kept and applies again
+when snap goes off). The effective height SHALL apply to every placement
+the brush makes (clicks and drags alike) and to the ghost preview.
+Adjusting or entering a height SHALL NOT by itself mark the document
+dirty; a placement made at a non-zero height SHALL mark it dirty.
 
 #### Scenario: Shift-move raises the brush height
 
@@ -1265,6 +1307,38 @@ made at a non-zero height SHALL mark it dirty.
 - **WHEN** the user changes the height field's text and presses Escape
 - **THEN** the document is unchanged and the field shows the current
   height again
+
+#### Scenario: Slider drag adjusts the brush height relative to its value
+
+- **WHEN** the stored brush height is 6 and the user drags the Brush
+  section's height slider to its +2 end
+- **THEN** the stored brush height follows the drag to exactly 8 and the
+  ghost shows it, without marking the document dirty
+
+#### Scenario: Slider recenters after release
+
+- **WHEN** the user releases a height slider drag
+- **THEN** the thumb returns to its center (no offset) and the brush
+  height keeps the dragged value
+
+#### Scenario: Repeated drags compound
+
+- **WHEN** the brush height is 6, the user drags the slider to its +2 end
+  and releases, then drags to +2 and releases again
+- **THEN** the brush height is 10 after the second release
+
+#### Scenario: Typed value outside the slider band stays exact
+
+- **WHEN** the user types `5` into the height field and commits
+- **THEN** the brush height is exactly `5`, the field shows `5`, and the
+  slider stays centered with no offset
+
+#### Scenario: Height slider hides with the field while surface snap is on
+
+- **WHEN** the user toggles surface snap on with a brush active
+- **THEN** the Brush section replaces the height field and its slider with
+  the read-only snap display, and toggling snap off restores both with the
+  stored height
 
 #### Scenario: Snap onto a unit cube's top lands at height 1
 
@@ -1467,4 +1541,108 @@ apply to the rendered frame immediately.
 - **WHEN** the user clicks a point light with a selection-capable tool
 - **THEN** the properties panel shows the light's radius, energy, color,
   and position controls
+
+### Requirement: World editor viewport tool bar
+
+A world editor SHALL render a thin vertical tool bar docked inside the world
+viewport, Photoshop-style, offering one button per tool: Select, pencil
+(placement), point light, and eraser. Each button SHALL show an icon instead
+of a text label, with a tooltip naming the tool (and its behavior hint), and
+the active tool's button SHALL be visually highlighted. Activating a tool
+button SHALL switch the editor to that tool with the same semantics the
+previous toolbar text buttons had (the pencil restores the last chosen
+brush). The tool bar SHALL overlay the viewport without affecting the view
+transform: hovering or clicking it SHALL NOT pan, zoom, place, erase, or
+pick, and canvas interaction outside the bar SHALL behave exactly as before.
+The active tool SHALL be per-document in-memory editor state — it SHALL
+never be serialized into world files.
+
+#### Scenario: Tools are offered as icons
+
+- **WHEN** the user activates a world editor tab
+- **THEN** a thin vertical bar inside the viewport shows the Select, pencil,
+  point-light, and eraser tools as icon buttons, with the active tool
+  highlighted and each button's tooltip naming its tool
+
+#### Scenario: Activating a tool
+
+- **WHEN** the user clicks the eraser button in the tool bar
+- **THEN** the eraser becomes the active tool (clicks remove the picked
+  placement), the highlight moves to the eraser button, and no dialog or
+  mode other than the tool switch occurs
+
+#### Scenario: Pencil restores the last brush
+
+- **WHEN** the user had a sprite brush chosen, switches to the Select tool,
+  and then clicks the pencil button in the tool bar
+- **THEN** the pencil tool is active again with that same brush chosen
+
+#### Scenario: The tool bar does not eat canvas input
+
+- **WHEN** the user clicks or drags on the viewport outside the tool bar
+- **THEN** the tool bar neither places nor erases nor pans, and the click
+  behaves exactly as it would with the bar hidden
+
+### Requirement: Compact world editor chrome
+
+The world editor SHALL use the center area's full extent for its content:
+a world tab's editor SHALL fill the center region without the generic
+center-area padding (as a sprite tab already does), and the editor's own
+chrome spacing — the editor's padding, the toolbar's margins, and the gaps
+between toolbar, viewport, and hint line — SHALL stay small so the world
+viewport remains the dominant surface of the panel.
+
+#### Scenario: World editor is full-bleed
+
+- **WHEN** a world tab is active
+- **THEN** the world editor's content spans the center region edge-to-edge
+  with only a thin inset, rather than sitting inside the generic
+  document padding
+
+#### Scenario: Sprite and world tabs use comparable space
+
+- **WHEN** the user switches between a sprite tab and a world tab
+- **THEN** both editors present their viewport with the same full-bleed
+  treatment, and neither loses space to extra chrome margins
+
+### Requirement: Editor toolbars use icon buttons with tooltips
+
+The bake editor's and world editor's main toolbars SHALL use icon-only
+buttons (inline SVG glyphs) with a tooltip describing each action, in a
+shared visual style; the bake editor toolbar SHALL NOT use text buttons
+for actions that exist as icons. The bake toolbar SHALL offer, as icon
+buttons: save, save as, render pass, bake all views, remove the active
+view, and place in world — each keeping its existing enable/disable
+conditions and existing action. The world toolbar SHALL offer save and
+save as as icon buttons, and its surface-snap toggle SHALL be an icon
+button that keeps the active-state highlight while snap is on and its
+existing tooltip. Tooltips remain the discoverable name of every icon
+action.
+
+#### Scenario: Bake toolbar shows icons, not text
+
+- **WHEN** a bake editor document is open
+- **THEN** its toolbar shows icon buttons for save, save as, render pass,
+  bake all, remove view, and place in world, each with a tooltip naming
+  the action
+
+#### Scenario: Save As is available in both editors
+
+- **WHEN** the bake editor or world editor toolbar is shown
+- **THEN** it contains a save-as icon button next to the plain save
+  button, and activating it opens the workspace save dialog (or the
+  no-workspace fallback) instead of saving in place
+
+#### Scenario: Snap toggle renders as an icon with active state
+
+- **WHEN** the world editor's placement mode is active and surface snap is
+  toggled on
+- **THEN** the snap control renders as an icon button in the highlighted
+  active state, and toggling it off removes the highlight
+
+#### Scenario: Disabled icon buttons keep their conditions
+
+- **WHEN** a bake document has no baked result
+- **THEN** its save and save-as icon buttons are disabled, exactly as the
+  previous text buttons were
 
