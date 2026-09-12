@@ -348,7 +348,12 @@ their defaults; the shadow strength rides the same optional-field pattern,
 set per placement from the toolbar's shadow field before placing.
 
 Loading validates the file completely first — a corrupt file fails with a
-named error and opens nothing. Formats `/8` back to `/1` are accepted;
+named error and opens nothing. While it loads, the status bar shows a
+determinate progress bar over the unique sprite assets referenced (north
+views decode during this phase) plus each referenced non-north direction
+resolved afterwards; the world is rendered as soon as the assets are in, so
+the direction phase runs with the viewport already visible. Formats `/8`
+back to `/1` are accepted;
 missing fields restore defaults (placements at ground level, facing
 north, full shadow strength; `/5`-and-older files carry no lights, `/6`-and-older
 grounds at 12 × 12, `/7`-and-older ground materials load as slot 0); a

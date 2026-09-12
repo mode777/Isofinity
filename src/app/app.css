@@ -151,11 +151,55 @@ body {
 
 .statusbar {
   grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   padding: 0.3rem 0.75rem;
   border-top: 1px solid var(--panel-border);
   background: var(--panel);
   color: var(--muted);
   min-height: 1.4em;
+}
+
+.status-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* World-load progress: a thin determinate bar plus its unit counter. */
+.load-progress {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.load-progress-track {
+  display: block;
+  width: 12rem;
+  height: 0.5rem;
+  background: var(--control);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.load-progress-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 120ms ease;
+}
+
+.load-progress-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 button,

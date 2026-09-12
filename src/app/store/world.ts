@@ -412,6 +412,28 @@ export async function openWorldDoc(fileName: string): Promise<void> {
   try {
     const file = await readWorkspaceFile('worlds', fileName);
     const data = parseWorldFile(await file.text(), fileName);
+    // Loading a world is the slow path into the editor: show a determinate
+    // bar across the unique sprite assets it references (north decoded
+    // synchronously) plus each referenced non-north direction that decodes
+    // afterwards. The world renders as soon as the assets are in, so the
+    // direction phase runs with the viewport already visible.
+    const totalAssets = Math.max(new Set(data.sprites.map((s) => s.asset)).size, 1);
+    const directionTargets: { asset: string; dir: ViewSlot }[] = [];
+    {
+      const seenDirs = new Set<string>();
+      for (const s of data.sprites) {
+        const dir = s.dir ?? 'n';
+        if (dir === 'n') continue;
+        const targetKey = `${s.asset}\u0000${dir}`;
+        if (seenDirs.has(targetKey)) continue;
+        seenDirs.add(targetKey);
+        directionTargets.push({ asset: s.asset, dir });
+      }
+    }
+    const loadingLabel = `Loading world ${fileName}…`;
+    const totalSteps = totalAssets + directionTargets.length;
+    let loadedAssets = 0;
+    ed().setProgress({ label: loadingLabel, value: 0, max: totalSteps });
     // Everything validated — only now build the document.
     const docId = nextDocId('world');
     const doc: WorldDocument = {
@@ -458,6 +480,12 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     };
     for (const entry of data.sprites) {
       if (loaded.has(entry.asset)) continue;
+      loadedAssets++;
+      ed().setProgress({
+        label: loadingLabel,
+        value: loadedAssets,
+        max: totalSteps,
+      });
       const bundleName = resolveBundleFile(entry.asset);
       if (!bundleName) {
         if (PRIMITIVE_KINDS.includes(entry.asset as PrimitiveKind)) {
@@ -564,26 +592,22 @@ export async function openWorldDoc(fileName: string): Promise<void> {
 
     ed().addDoc(doc);
     void updateShProbe(doc.docId);
-    // Resolve every direction the restored placements actually face, in
-    // the background: the world shows immediately and each placement
-    // repaints from its real view when the decode lands (north until
-    // then). A direction that turns out unplaceable is dropped with a
-    // status note.
-    const wantedDirs = new Map<string, Set<ViewSlot>>();
-    for (const s of data.sprites) {
-      if (!loaded.has(s.asset)) continue;
-      const dir = s.dir ?? 'n';
-      if (dir === 'n') continue;
-      let set = wantedDirs.get(s.asset);
-      if (!set) {
-        set = new Set();
-        wantedDirs.set(s.asset, set);
-      }
-      set.add(dir);
+    // Resolve every direction the restored placements actually face. The
+    // document is already added (the viewport is live, each placement
+    // drawing north until its view lands), so this phase advances the
+    // progress bar rather than freezing silently. A direction that turns
+    // out unplaceable is dropped with a status note.
+    let resolvedDirs = 0;
+    for (const { asset, dir } of directionTargets) {
+      ed().setProgress({
+        label: loadingLabel,
+        value: loadedAssets + resolvedDirs,
+        max: totalSteps,
+      });
+      await ensureView(docId, asset, dir);
+      resolvedDirs++;
     }
-    for (const [asset, dirs] of wantedDirs) {
-      for (const dir of dirs) void ensureView(docId, asset, dir);
-    }
+    ed().setProgress({ label: loadingLabel, value: totalSteps, max: totalSteps });
     for (let slot = 0; slot < GROUND_MATERIAL_SLOTS; slot++) {
       const name = doc.ground.materials[slot];
       if (name) void applyGroundMaps(doc.docId, name, slot);
@@ -603,6 +627,8 @@ export async function openWorldDoc(fileName: string): Promise<void> {
   } catch (err) {
     ed().setStatus(`World load failed: ${err instanceof Error ? err.message : String(err)}`);
     console.error(err);
+  } finally {
+    ed().setProgress(null);
   }
 }
 

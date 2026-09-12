@@ -1,14 +1,28 @@
 import { create } from 'zustand';
 import type { EditorDocument, EditorKind, Tab } from '../document.js';
 
+/**
+ * A determinate long-running operation shown as a progress bar in the
+ * status bar (world loading). `max` is the total unit count; `value` the
+ * completed count. Null = nothing in progress.
+ */
+export interface LoadProgress {
+  label: string;
+  value: number;
+  max: number;
+}
+
 export interface EditorState {
   docs: Record<string, EditorDocument>;
   tabs: Tab[];
   activeDocId: string | null;
   status: string;
+  progress: LoadProgress | null;
   nextId: number;
 
   setStatus(text: string): void;
+  /** Set or clear the status bar's progress bar (null = hide). */
+  setProgress(progress: LoadProgress | null): void;
   /** Register a fresh document (caller owns dedupe) and focus its tab. */
   addDoc(doc: EditorDocument): void;
   focusDoc(docId: string): void;
@@ -30,9 +44,12 @@ export const useEditor = create<EditorState>((set, get) => ({
   tabs: [],
   activeDocId: null,
   status: 'Ready',
+  progress: null,
   nextId: 0,
 
   setStatus: (text) => set({ status: text }),
+
+  setProgress: (progress) => set({ progress }),
 
   addDoc: (doc) =>
     set((s) => ({
