@@ -269,6 +269,19 @@ export {
   splatDimensions,
 } from '../shared/splat.js';
 
+/** Default terrain-paint brush radius in world units. */
+export const DEFAULT_PAINT_RADIUS = 1;
+
+/**
+ * Terrain-paint hardness and its control range. The falloff's flat core is
+ * `radius × hardness`, so useful values are small: 0.01 is mid-range and
+ * anything past ~0.02 reads as a hard edge.
+ */
+export const DEFAULT_PAINT_HARDNESS = 0.01;
+export const PAINT_HARDNESS_MIN = 0;
+export const PAINT_HARDNESS_MAX = 0.02;
+export const PAINT_HARDNESS_STEP = 0.001;
+
 /**
  * Clamp a ground-size axis to the accepted range: whole world units in
  * 1–128. Non-finite input falls back to the given default.

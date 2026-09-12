@@ -2,6 +2,11 @@ import { useRef } from 'react';
 import type { ViewSlot } from '../../shared/iso.js';
 import type { WorldDocument } from '../document.js';
 import {
+  PAINT_HARDNESS_MAX,
+  PAINT_HARDNESS_MIN,
+  PAINT_HARDNESS_STEP,
+} from '../document.js';
+import {
   POINT_LIGHT_TOOL_ID,
   SELECT_TOOL_ID,
   TERRAIN_PAINT_TOOL_ID,
@@ -111,10 +116,10 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
           <SliderRow
             label="Hardness"
             value={doc.paintHardness}
-            min={0}
-            max={1}
-            step={0.01}
-            format={(v) => v.toFixed(2)}
+            min={PAINT_HARDNESS_MIN}
+            max={PAINT_HARDNESS_MAX}
+            step={PAINT_HARDNESS_STEP}
+            format={(v) => v.toFixed(3)}
             onChange={(v) => setPaintBrush(doc.docId, { hardness: v })}
           />
           <label className="row">
