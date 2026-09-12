@@ -511,9 +511,11 @@ and reflections are later work.
 The coverage splat stores the four material weights: rgb are slots 0–2 and
 alpha is slot 3 (derived as `1 - r - g - b`, so the weights sum to 1). The
 **terrain paint tool** (viewport tool bar) paints them with a
-cursor-anchored brush — adjustable radius (world units) and hardness (soft
-to hard edge) — as a normalized replace (painting a material over another
-replaces it), one undoable command per stroke. Where coverages meet, each
+cursor-anchored brush — adjustable radius (world units), hardness (soft to
+hard edge), and per-stroke opacity, plus an **Accumulate** toggle (off:
+opacity caps a single stroke; on: repeated dabs build up) — as a
+normalized replace (painting a material over another replaces it), one
+undoable command per stroke. Where coverages meet, each
 material's optional `disp`/`displace`/`displacement` map is used as a
 per-pixel surface height and the higher material wins the seam (no geometry
 moves). Coverage is persisted as a PNG beside the world JSON in `worlds/`

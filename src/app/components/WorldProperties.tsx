@@ -5,6 +5,9 @@ import {
   PAINT_HARDNESS_MAX,
   PAINT_HARDNESS_MIN,
   PAINT_HARDNESS_STEP,
+  PAINT_OPACITY_MAX,
+  PAINT_OPACITY_MIN,
+  PAINT_OPACITY_STEP,
 } from '../document.js';
 import {
   POINT_LIGHT_TOOL_ID,
@@ -119,9 +122,28 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
             min={PAINT_HARDNESS_MIN}
             max={PAINT_HARDNESS_MAX}
             step={PAINT_HARDNESS_STEP}
-            format={(v) => v.toFixed(3)}
+            format={(v) => v.toFixed(4)}
             onChange={(v) => setPaintBrush(doc.docId, { hardness: v })}
           />
+          <SliderRow
+            label="Opacity"
+            value={doc.paintOpacity}
+            min={PAINT_OPACITY_MIN}
+            max={PAINT_OPACITY_MAX}
+            step={PAINT_OPACITY_STEP}
+            format={(v) => v.toFixed(2)}
+            onChange={(v) => setPaintBrush(doc.docId, { opacity: v })}
+          />
+          <CheckRow
+            label="Accumulate"
+            checked={doc.paintAccumulate}
+            onChange={(v) => setPaintBrush(doc.docId, { accumulate: v })}
+          />
+          <p className="hint">
+            {doc.paintAccumulate
+              ? 'accumulate: dabs build up as you keep painting'
+              : 'opacity caps a single stroke; enable Accumulate to build up'}
+          </p>
           <label className="row">
             <span className="row-label">Slot</span>
             <select

@@ -113,6 +113,9 @@ function main(): void {
   console.log('normalized-replace stamp:');
   {
     const { width, height } = splatDimensions(1, 1, 4);
+    const center = (Math.floor(height / 2) * width + Math.floor(width / 2)) * 4;
+    // Accumulate path (before/stroke null, opacity 1) reproduces the plain
+    // normalized replace.
     const data = defaultSplatBytes(width, height);
     ok(data[0] === 255 && data[1] === 0 && data[2] === 0, 'the default mirror is slot 0 over everything');
     const rect = stampSplatDab(
@@ -124,9 +127,12 @@ function main(): void {
       0.5,
       1,
       1,
+      1,
+      true,
+      null,
+      null,
     );
     ok(rect !== null, 'a centered dab reports a changed rect');
-    const center = (Math.floor(height / 2) * width + Math.floor(width / 2)) * 4;
     ok(data[center + 1] === 255 && data[center] === 0, 'painting slot 1 replaces slot 0 at the center');
     let maxSumErr = 0;
     for (let i = 0; i < width * height; i++) {
@@ -138,15 +144,15 @@ function main(): void {
 
     // Painting slot 3 (alpha) must clear rgb: the derived alpha rises.
     const data3 = defaultSplatBytes(width, height);
-    stampSplatDab({ data: data3, width, height }, 1, 1, 0.5, 0.5, 3, 1, 3);
-    const o3 = (Math.floor(height / 2) * width + Math.floor(width / 2)) * 4;
+    stampSplatDab({ data: data3, width, height }, 1, 1, 0.5, 0.5, 3, 1, 3, 1, true, null, null);
+    const o3 = center;
     ok(data3[o3] === 0 && data3[o3 + 3] === 255, 'painting slot 3 clears rgb (alpha becomes 1)');
 
     // Hardness: a hard edge leaves the rim untouched, a soft one feathers it.
     const hard = defaultSplatBytes(width, height);
     const soft = defaultSplatBytes(width, height);
-    stampSplatDab({ data: hard, width, height }, 1, 1, 0.5, 0.5, 0.2, 4, 1);
-    stampSplatDab({ data: soft, width, height }, 1, 1, 0.5, 0.5, 0.2, 0, 1);
+    stampSplatDab({ data: hard, width, height }, 1, 1, 0.5, 0.5, 0.2, 4, 1, 1, true, null, null);
+    stampSplatDab({ data: soft, width, height }, 1, 1, 0.5, 0.5, 0.2, 0, 1, 1, true, null, null);
     let hardChanged = 0;
     let softChanged = 0;
     for (let i = 0; i < width * height; i++) {
@@ -154,6 +160,36 @@ function main(): void {
       if (soft[i * 4] !== 255 || soft[i * 4 + 1] !== 0) softChanged++;
     }
     ok(hardChanged > 0 && softChanged > 0, 'both hard and soft brushes paint');
+
+    // Opacity scales a dab.
+    const low = defaultSplatBytes(width, height);
+    stampSplatDab({ data: low, width, height }, 1, 1, 0.5, 0.5, 0.5, 1, 1, 0.5, true, null, null);
+    ok(
+      Math.abs(low[center + 1] - 128) <= 1,
+      `opacity 0.5 paints half coverage (got ${low[center + 1]})`,
+    );
+
+    // Non-accumulate mode caps a stroke at its opacity even across dabs.
+    const capped = defaultSplatBytes(width, height);
+    const cappedBefore = capped.slice();
+    const cappedStroke = new Uint8Array(width * height);
+    const cappedOpts = [1, 1, 0.5, 0.5, 0.5, 1, 1, 0.5, false, cappedBefore, cappedStroke] as const;
+    stampSplatDab({ data: capped, width, height }, ...cappedOpts);
+    stampSplatDab({ data: capped, width, height }, ...cappedOpts);
+    ok(
+      Math.abs(capped[center + 1] - 128) <= 1,
+      `non-accumulate stays at the opacity cap (got ${capped[center + 1]})`,
+    );
+
+    // Accumulate mode compounds repeated dabs past a single dab's opacity.
+    const built = defaultSplatBytes(width, height);
+    const builtOpts = [1, 1, 0.5, 0.5, 0.5, 1, 1, 0.5, true, null, null] as const;
+    stampSplatDab({ data: built, width, height }, ...builtOpts);
+    stampSplatDab({ data: built, width, height }, ...builtOpts);
+    ok(
+      built[center + 1] > 128,
+      `accumulate builds past the single-dab opacity (got ${built[center + 1]})`,
+    );
   }
 
   console.log('resample + derived alpha:');

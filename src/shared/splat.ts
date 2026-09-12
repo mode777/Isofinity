@@ -105,6 +105,12 @@ export function unionRect(rect: Rect | null, other: Rect): Rect {
  * rgb), and alpha is re-derived so the four coverages keep summing to 1.
  * Mutates `splat.data` and returns the changed texel rectangle (null when
  * the dab was entirely off-plane).
+ *
+ * `opacity` scales the dab. With `accumulate` false and a `before`/`stroke`
+ * pair supplied, each texel's applied coverage is `opacity × max(falloff over
+ * the stroke)` — so overlapping dabs cannot push a stroke past its opacity.
+ * With `accumulate` true (or no stroke state) the dab compounds on the
+ * current value, so repeated passes build toward full coverage.
  */
 export function stampSplatDab(
   splat: Splat,
@@ -115,6 +121,10 @@ export function stampSplatDab(
   radius: number,
   hardness: number,
   slot: number,
+  opacity: number,
+  accumulate: boolean,
+  before: Uint8Array | null,
+  stroke: Uint8Array | null,
 ): Rect | null {
   const W = splat.width;
   const H = splat.height;
@@ -128,18 +138,31 @@ export function stampSplatDab(
   if (x1 < x0 || y1 < y0) return null;
   const target = slot < 3 ? slot : -1;
   const data = splat.data;
+  const useStroke = !accumulate && before !== null && stroke !== null;
+  const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
       const dist = Math.hypot(x + 0.5 - cx, y + 0.5 - cy) / r;
-      const a = brushFalloff(dist, hardness);
-      if (a <= 0) continue;
+      const falloff = brushFalloff(dist, hardness);
+      if (falloff <= 0) continue;
       const o = (y * W + x) * 4;
+      let a: number;
+      let base: Uint8Array;
+      if (useStroke) {
+        const idx = y * W + x;
+        const s = Math.max(stroke![idx] / 255, falloff);
+        stroke![idx] = Math.round(s * 255);
+        a = clamp01(opacity) * s;
+        base = before!;
+      } else {
+        a = clamp01(opacity) * falloff;
+        base = data;
+      }
       let sum = 0;
       for (let c = 0; c < 3; c++) {
-        const dst = data[o + c] / 255;
+        const dst = base[o + c] / 255;
         const tgt = c === target ? 1 : 0;
-        const v = dst * (1 - a) + tgt * a;
-        data[o + c] = Math.round(Math.min(1, Math.max(0, v)) * 255);
+        data[o + c] = Math.round(clamp01(dst * (1 - a) + tgt * a) * 255);
         sum += data[o + c];
       }
       data[o + 3] = Math.max(0, 255 - sum);

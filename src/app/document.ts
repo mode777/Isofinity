@@ -274,13 +274,19 @@ export const DEFAULT_PAINT_RADIUS = 1;
 
 /**
  * Terrain-paint hardness and its control range. The falloff's flat core is
- * `radius × hardness`, so useful values are small: 0.01 is mid-range and
- * anything past ~0.02 reads as a hard edge.
+ * `radius × hardness`, so useful values are very small: the default is a
+ * soft edge and anything past ~0.02 reads as hard.
  */
-export const DEFAULT_PAINT_HARDNESS = 0.01;
+export const DEFAULT_PAINT_HARDNESS = 0.0025;
 export const PAINT_HARDNESS_MIN = 0;
 export const PAINT_HARDNESS_MAX = 0.02;
-export const PAINT_HARDNESS_STEP = 0.001;
+export const PAINT_HARDNESS_STEP = 0.0005;
+
+/** Default terrain-paint per-stroke opacity (1 = full). */
+export const DEFAULT_PAINT_OPACITY = 1;
+export const PAINT_OPACITY_MIN = 0;
+export const PAINT_OPACITY_MAX = 1;
+export const PAINT_OPACITY_STEP = 0.01;
 
 /**
  * Clamp a ground-size axis to the accepted range: whole world units in
@@ -377,6 +383,14 @@ export interface WorldDocument {
   paintRadius: number;
   /** Terrain paint brush hardness in [0, 1] (0 soft, 1 hard). In-memory. */
   paintHardness: number;
+  /** Terrain paint per-stroke opacity in [0, 1]. In-memory editor state. */
+  paintOpacity: number;
+  /**
+   * Terrain paint accumulation: when true, dabs compound (opacity builds up
+   * as you keep painting); when false, a stroke's coverage is capped at the
+   * set opacity. In-memory editor state.
+   */
+  paintAccumulate: boolean;
   /** Material slot the paint brush paints (0-3). In-memory editor state. */
   paintSlot: number;
   /**

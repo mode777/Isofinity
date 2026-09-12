@@ -57,6 +57,7 @@ import {
   DEFAULT_GROUND_TILE_SCALE,
   DEFAULT_GROUND_WIDTH,
   DEFAULT_PAINT_HARDNESS,
+  DEFAULT_PAINT_OPACITY,
   DEFAULT_PAINT_RADIUS,
   DEFAULT_PAINT_TEXELS_PER_UNIT,
   DEFAULT_POINT_LIGHT,
@@ -332,6 +333,8 @@ export function newWorldDoc(
     },
     paintRadius: DEFAULT_PAINT_RADIUS,
     paintHardness: DEFAULT_PAINT_HARDNESS,
+    paintOpacity: DEFAULT_PAINT_OPACITY,
+    paintAccumulate: false,
     paintSlot: 0,
     tool: '',
     heightLevel: 0,
@@ -416,6 +419,8 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       ground: defaultGroundState(),
       paintRadius: DEFAULT_PAINT_RADIUS,
       paintHardness: DEFAULT_PAINT_HARDNESS,
+      paintOpacity: DEFAULT_PAINT_OPACITY,
+      paintAccumulate: false,
       paintSlot: 0,
       tool: '',
       heightLevel: 0,
@@ -863,12 +868,21 @@ export async function selectGroundMaterialFile(
 export const TERRAIN_PAINT_TOOL_ID = 'terrain-paint';
 
 /** Left drags between these marks one undoable paint stroke's snapshot. */
-const paintStrokeSnapshots = new Map<string, { before: Uint8Array; w: number; h: number }>();
+const paintStrokeSnapshots = new Map<
+  string,
+  { before: Uint8Array; stroke: Uint8Array; w: number; h: number; accumulate: boolean }
+>();
 
-/** Set the terrain paint brush's radius, hardness, and active slot. */
+/** Set the terrain paint brush's radius, hardness, opacity, accumulate, slot. */
 export function setPaintBrush(
   docId: string,
-  patch: { radius?: number; hardness?: number; slot?: number },
+  patch: {
+    radius?: number;
+    hardness?: number;
+    opacity?: number;
+    accumulate?: boolean;
+    slot?: number;
+  },
 ): void {
   const doc = worldDoc(docId);
   if (!doc) return;
@@ -879,6 +893,10 @@ export function setPaintBrush(
     if (patch.hardness !== undefined && Number.isFinite(patch.hardness)) {
       d.paintHardness = Math.max(0, Math.min(1, patch.hardness));
     }
+    if (patch.opacity !== undefined && Number.isFinite(patch.opacity)) {
+      d.paintOpacity = Math.max(0, Math.min(1, patch.opacity));
+    }
+    if (patch.accumulate !== undefined) d.paintAccumulate = patch.accumulate;
     if (patch.slot !== undefined) d.paintSlot = clampSlot(patch.slot);
   });
 }
@@ -905,8 +923,11 @@ export function beginPaintStroke(docId: string): void {
   if (!g?.splat) return;
   paintStrokeSnapshots.set(docId, {
     before: g.splat.slice(),
+    // Per-texel stroke coverage for the non-accumulating (capped) mode.
+    stroke: new Uint8Array(g.splatWidth * g.splatHeight),
     w: g.splatWidth,
     h: g.splatHeight,
+    accumulate: doc.paintAccumulate,
   });
 }
 
@@ -915,6 +936,7 @@ export function paintDab(docId: string, wx: number, wz: number): void {
   const doc = worldDoc(docId);
   if (!doc) return;
   if (!doc.ground.materials[doc.paintSlot]) return;
+  const snap = paintStrokeSnapshots.get(docId);
   update(docId, (d) => {
     ensureSplatState(d.ground);
     if (!d.ground.paint) {
@@ -936,6 +958,14 @@ export function paintDab(docId: string, wx: number, wz: number): void {
       d.paintRadius,
       d.paintHardness,
       d.paintSlot,
+      d.paintOpacity,
+      snap?.accumulate ?? d.paintAccumulate,
+      snap && snap.w === d.ground.splatWidth && snap.h === d.ground.splatHeight
+        ? snap.before
+        : null,
+      snap && snap.w === d.ground.splatWidth && snap.h === d.ground.splatHeight
+        ? snap.stroke
+        : null,
     );
     if (rect) {
       d.ground.splatRevision++;
