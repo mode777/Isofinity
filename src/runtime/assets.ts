@@ -172,19 +172,71 @@ export function layersToSet(layers: SpriteLayer[]): SpriteSet {
 }
 
 /**
+ * Skip reasons recorded on `BundleViews.skipped` for extra stored views
+ * that are not placeable.
+ */
+export const VIEW_SKIP_NO_RENDER = 'no render pass';
+export const VIEW_SKIP_STALE_DEPTH = 'stale depth — re-bake this sprite';
+
+/**
+ * Tolerance for the load-time depth-range check: about two half-precision
+ * ulps at the top of a unit cube's range (~1.72, ulp ≈ 0.00098), far below
+ * the smallest stale-slot signature (−0.61).
+ */
+const DEPTH_RANGE_EPSILON = 0.002;
+
+/** Exact half-float bits → number (every half value is exact in f64). */
+function halfToNumber(bits: number): number {
+  const sign = bits & 0x8000 ? -1 : 1;
+  const exp = (bits & 0x7c00) >> 10;
+  const frac = bits & 0x03ff;
+  if (exp === 0) return sign * frac * 2 ** -24;
+  if (exp === 0x1f) return frac ? NaN : sign * Infinity;
+  return sign * (1 + frac / 1024) * 2 ** (exp - 15);
+}
+
+/**
+ * A decoded g-buffer is placeable only when every covered pixel (non-zero
+ * normal) stores a depth within the manifest's recorded range. Stale
+ * view-slot bakes — slots written by the pre-ADR-0005 camera-rotating
+ * implementation — carry depth along the slot's camera direction, which
+ * goes negative where no valid bake can (the reference plane through the
+ * origin and all-positive view components bound every valid bake). A
+ * missing or non-finite range (older manifests) falls back to the lower
+ * bound alone. Returns true when any covered pixel is out of range.
+ */
+function gbufferDepthOutOfRange(
+  gbuffer: Uint16Array,
+  range: readonly [number, number] | undefined,
+): boolean {
+  const finite = range !== undefined && Number.isFinite(range[0]) && Number.isFinite(range[1]);
+  const lower = finite ? range![0] - DEPTH_RANGE_EPSILON : -DEPTH_RANGE_EPSILON;
+  const upper = finite ? range![1] + DEPTH_RANGE_EPSILON : Infinity;
+  for (let i = 0; i < gbuffer.length; i += 4) {
+    if (gbuffer[i] === 0 && gbuffer[i + 1] === 0 && gbuffer[i + 2] === 0) continue;
+    const depth = halfToNumber(gbuffer[i + 3]);
+    if (!(depth >= lower) || depth > upper) return true;
+  }
+  return false;
+}
+
+/**
  * A bundle parsed into every placeable view: the north layer (render
  * required, as always) plus each extra view slot that carries its own
- * render pass, each with its own baked size and origin. Extra views
- * without a render pass are not placeable — they come back in `skipped`
- * so the caller can note them; the bundle still loads.
+ * render pass and a g-buffer whose decoded depth stays within the
+ * manifest's recorded range, each with its own baked size and origin.
+ * Extra views that lack a render pass or carry stale (out-of-range)
+ * depth are not placeable — they come back in `skipped` with the named
+ * cause so the caller can note them; the bundle still loads. The north
+ * view failing the depth check fails the whole load.
  */
 export interface BundleViews {
   /** North view; id is the bundle's manifest id. */
   north: SpriteLayer;
   /** Placeable extra views in manifest order. */
   extras: { slot: ExtraViewSlot; layer: SpriteLayer }[];
-  /** Extra stored views skipped for lacking a render pass. */
-  skipped: ExtraViewSlot[];
+  /** Extra stored views skipped as unplaceable, with the named cause. */
+  skipped: { slot: ExtraViewSlot; reason: string }[];
   manifest: BakeManifest;
   provenance: BakeProvenance | null;
 }
@@ -197,6 +249,12 @@ export async function loadBundleViews(buffer: ArrayBuffer): Promise<BundleViews>
   const w = manifest.sprite.width;
   const h = manifest.sprite.height;
   const anchor: Vec3 = provenance?.origin ?? [0, 0, 0];
+  const northGbuffer = decodeExrGbuffer(await gbuffer.arrayBuffer(), w, h);
+  if (gbufferDepthOutOfRange(northGbuffer, manifest.depth?.range)) {
+    throw new Error(
+      'north view depth outside the manifest range — stale view-slot bake, re-bake this sprite',
+    );
+  }
   const north: SpriteLayer = {
     id: manifest.id,
     pxPerUnit: manifest.pxPerUnit,
@@ -204,14 +262,23 @@ export async function loadBundleViews(buffer: ArrayBuffer): Promise<BundleViews>
     height: h,
     originPx: manifest.sprite.originPx,
     origin: anchor,
-    gbuffer: decodeExrGbuffer(await gbuffer.arrayBuffer(), w, h),
+    gbuffer: northGbuffer,
     render: await decodePng(render, w, h),
   };
   const extras: BundleViews['extras'] = [];
-  const skipped: ExtraViewSlot[] = [];
+  const skipped: BundleViews['skipped'] = [];
   for (const view of views) {
     if (!view.render) {
-      skipped.push(view.slot);
+      skipped.push({ slot: view.slot, reason: VIEW_SKIP_NO_RENDER });
+      continue;
+    }
+    const viewGbuffer = decodeExrGbuffer(
+      await view.gbuffer.arrayBuffer(),
+      view.width,
+      view.height,
+    );
+    if (gbufferDepthOutOfRange(viewGbuffer, manifest.depth?.range)) {
+      skipped.push({ slot: view.slot, reason: VIEW_SKIP_STALE_DEPTH });
       continue;
     }
     extras.push({
@@ -223,11 +290,7 @@ export async function loadBundleViews(buffer: ArrayBuffer): Promise<BundleViews>
         height: view.height,
         originPx: view.originPx,
         origin: slotAnchorPoint(anchor, manifest.cube.size, slotYawDeg(view.slot)),
-        gbuffer: decodeExrGbuffer(
-          await view.gbuffer.arrayBuffer(),
-          view.width,
-          view.height,
-        ),
+        gbuffer: viewGbuffer,
         render: await decodePng(view.render, view.width, view.height),
       },
     });

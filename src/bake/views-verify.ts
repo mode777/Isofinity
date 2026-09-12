@@ -1,17 +1,17 @@
 /**
- * Node-runnable verification for the multi-view bundle logic (no WebGL, no
- * DOM): /6 manifest shape, parse round trips, /4+/5 compatibility, and
- * remove-view omission. Run with:
+ * Node-runnable verification for the multi-view bundle logic (no WebGL,
+ * no DOM): /6 manifest shape, parse round trips, /4+/5 compatibility,
+ * remove-view omission, and the load-time depth-validity guard. Run with:
  *   npx esbuild src/bake/views-verify.ts --bundle --platform=node \
  *     --format=esm --outfile=/tmp/views-verify.mjs && node /tmp/views-verify.mjs
  */
 import { buildBundle, parseBake, type BakeProvenance } from './bundle.js';
 import { applySlotModelRotation, PAD_PX } from './bake.js';
 import type { BakeResult } from './bake.js';
-import { buildManifest } from './export.js';
+import { buildManifest, encodeExr } from './export.js';
 import { strToU8, zipSync } from 'three/examples/jsm/libs/fflate.module.js';
 import { Object3D } from 'three';
-import { projectBoxFrame, ISO_AZIMUTH_DEG } from './iso.js';
+import { depthRange, frameIsoBox, projectBoxFrame, ISO_AZIMUTH_DEG } from './iso.js';
 import {
   slotAnchorPoint,
   slotAzimuthDeg,
@@ -21,7 +21,14 @@ import {
   type Vec3,
   type ViewSlot,
 } from '../shared/iso.js';
-import { orderedViewSlots, parseViewLayerId, viewLayerId } from '../runtime/assets.js';
+import {
+  loadBundleViews,
+  orderedViewSlots,
+  parseViewLayerId,
+  viewLayerId,
+  VIEW_SKIP_NO_RENDER,
+  VIEW_SKIP_STALE_DEPTH,
+} from '../runtime/assets.js';
 import {
   boxBlur,
   composeGroundShadow,
@@ -30,7 +37,6 @@ import {
   groundShadowPadPx,
   GROUND_SHADOW_TINT,
 } from './shadow.js';
-import { frameIsoBox } from './iso.js';
 
 declare const process: { exit(code?: number): void };
 
@@ -406,6 +412,125 @@ async function main(): Promise<void> {
       'parseViewLayerId round-trips tagged ids');
     ok(parseViewLayerId('tree@mail').slot === 'n' && parseViewLayerId('tree@mail').asset === 'tree@mail',
       'non-slot @ suffixes stay part of the asset id');
+  }
+
+  // 5b. Load-time depth-validity guard: loadBundleViews skips extra views
+  //     whose decoded g-buffer depth leaves the manifest's recorded range
+  //     (the stale camera-frame slot signature) and fails the load when
+  //     north is stale. EXR g-buffers encode/decode for real; the PNG
+  //     render decode is stubbed (encoding needs a canvas, the render
+  //     bytes are irrelevant to the guard, and the real decode is covered
+  //     by the browser scratch-verify).
+  {
+    console.log('test: load-time depth-validity guard (loadBundleViews)');
+    (globalThis as Record<string, unknown>).createImageBitmap = () =>
+      Promise.resolve({ width: 8, height: 8, close() {} });
+    (globalThis as Record<string, unknown>).document = {
+      createElement: () => ({
+        width: 8,
+        height: 8,
+        getContext: () => ({
+          drawImage() {},
+          getImageData: () => ({ data: new Uint8Array(8 * 8 * 4) }),
+        }),
+      }),
+    };
+
+    const exrWithAlpha = async (alpha: number): Promise<Uint8Array> => {
+      const result = fakeResult(slotAzimuthDeg('n'), 8, 8);
+      result.gbuffer[3] = alpha;
+      return encodeExr(result.gbuffer, result.width, result.height);
+    };
+    const guardBundle = async (
+      nDepth: number,
+      eDepth: number,
+      opts: { depth?: boolean; eRender?: boolean } = {},
+    ): Promise<ArrayBuffer> => {
+      const { depth = true, eRender = true } = opts;
+      const passes = (tag: string): Record<string, unknown> => ({
+        gbuffer: {
+          file: `x${tag}-gbuffer.exr`,
+          encoding: 'exr-f32-linear',
+          channels: 'rgb=world-normal a=ray-depth',
+        },
+        ...(eRender || tag === ''
+          ? {
+              render: {
+                file: `x${tag}-render.png`,
+                encoding: 'png-r8-srgb',
+                channels: 'rgb=tonemapped-render a=coverage',
+              },
+            }
+          : {}),
+      });
+      const manifest: Record<string, unknown> = {
+        format: 'isoinfinity-bake/6',
+        id: 'x',
+        pxPerUnit: 128,
+        cube: { size: [1, 1, 1], origin: [0, 0, 0] },
+        sprite: { width: 8, height: 8, originPx: [0, 0] },
+        passes: passes(''),
+        views: [
+          { slot: 'n', azimuthDeg: 45, sprite: { width: 8, height: 8, originPx: [0, 0] }, passes: passes('') },
+          { slot: 'e', azimuthDeg: 135, sprite: { width: 8, height: 8, originPx: [0, 0] }, passes: passes('-e') },
+        ],
+      };
+      if (depth) {
+        manifest.depth = { definition: 'dot(worldPos, viewDir)', range: depthRange([1, 1, 1]) };
+      }
+      return zipSync({
+        'manifest.json': strToU8(JSON.stringify(manifest)),
+        'x-gbuffer.exr': await exrWithAlpha(nDepth),
+        'x-render.png': new Uint8Array(4),
+        'x-e-gbuffer.exr': await exrWithAlpha(eDepth),
+        ...(eRender ? { 'x-e-render.png': new Uint8Array(4) } : {}),
+      }).buffer as ArrayBuffer;
+    };
+
+    const staleE = await loadBundleViews(await guardBundle(0.9, -0.5));
+    ok(staleE.extras.length === 0, 'stale e view is not placeable');
+    ok(staleE.north.width === 8 && staleE.north.gbuffer.length > 0,
+      'north still loads beside a stale extra');
+    ok(staleE.skipped.length === 1 && staleE.skipped[0].slot === 'e' &&
+        staleE.skipped[0].reason === VIEW_SKIP_STALE_DEPTH,
+      `e skipped with the named stale-depth reason (got ${JSON.stringify(staleE.skipped)})`);
+
+    let guardErr = '';
+    try {
+      await loadBundleViews(await guardBundle(-0.5, 0.9));
+    } catch (err) {
+      guardErr = err instanceof Error ? err.message : String(err);
+    }
+    ok(guardErr.includes('north view depth outside the manifest range'),
+      `stale north fails the load with a named error (got "${guardErr}")`);
+
+    const control = await loadBundleViews(await guardBundle(0.9, 0.9));
+    ok(control.extras.length === 1 && control.extras[0].slot === 'e' &&
+        control.skipped.length === 0,
+      'in-range bundle loads n + e with nothing skipped');
+
+    const above = await loadBundleViews(
+      await guardBundle(0.9, depthRange([1, 1, 1])[1] + 0.5),
+    );
+    ok(above.extras.length === 0 && above.skipped.length === 1 &&
+        above.skipped[0].reason === VIEW_SKIP_STALE_DEPTH,
+      'depth above the recorded range is stale too');
+
+    const noRange = await loadBundleViews(await guardBundle(0.9, -0.5, { depth: false }));
+    ok(noRange.extras.length === 0 && noRange.skipped.length === 1 &&
+        noRange.skipped[0].reason === VIEW_SKIP_STALE_DEPTH,
+      'missing manifest range still rejects negative depth');
+    const noRangeBig = await loadBundleViews(await guardBundle(0.9, 4, { depth: false }));
+    ok(noRangeBig.extras.length === 1 && noRangeBig.skipped.length === 0,
+      'missing manifest range leaves the upper bound open');
+
+    const noRender = await loadBundleViews(
+      await guardBundle(0.9, 0.9, { eRender: false }),
+    );
+    ok(noRender.extras.length === 0 && noRender.skipped.length === 1 &&
+        noRender.skipped[0].slot === 'e' &&
+        noRender.skipped[0].reason === VIEW_SKIP_NO_RENDER,
+      `missing render pass keeps its named reason (got ${JSON.stringify(noRender.skipped)})`);
   }
 
   // 6. Grounding shadow: provenance flag round trip + default omission.

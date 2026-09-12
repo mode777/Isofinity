@@ -302,7 +302,7 @@ rejected by name):
 | `/1`–`/3` | Early loose-file eras; `/3` fixed the g-buffer EXR byte conventions still in force | not accepted |
 | `/4` | Single-file `.sprite` zip; albedo PNG ships alongside the g-buffer (ao appears in path-traced-era manifests) | loads; albedo/ao entries ignored |
 | `/5` | Albedo/ao passes removed (ADR 0002); `provenance` block added | loads N-only; without `provenance` → view-only |
-| `/6` | Multi-view: optional `views[]` table + per-slot zip entries (ADR 0005) | loads; extra views decode into the editor's slot set |
+| `/6` | Multi-view: optional `views[]` table + per-slot zip entries (ADR 0005) | loads; extra views decode into the editor's slot set — except views whose decoded g-buffer depth lies outside the manifest's recorded `depth.range`: those are stale camera-frame slots (pre-ADR-0005 bakes) and load as skipped, not placeable, with the north view failing the check rejecting the load |
 
 Records camera angles and view direction, `pxPerUnit`, sprite size, origin,
 depth semantics/range and per-pass channel semantics

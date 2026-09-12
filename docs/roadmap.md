@@ -219,6 +219,15 @@ list when a change lands (and prune it — history belongs in the archives).
   "Place in world" in-memory handoff — a baked sprite reaches a world by
   saving its bundle to `sprites/` and picking it as a brush, and worlds
   are now created only explicitly (with a size).
+- Stale view-slot depth guard — `loadBundleViews` validates every decoded
+  view's g-buffer depth against the manifest's recorded `depth.range`
+  (half-precision epsilon): a covered pixel outside the range is the
+  unambiguous signature of a pre-ADR-0005 camera-rotating slot bake. A
+  stale extra view loads as skipped with a named note ("stale depth —
+  re-bake this sprite") while the placeable views load; a stale north
+  view fails the bundle load with a named error. Old bundles with
+  in-range data load byte-for-byte unchanged; missing/non-finite ranges
+  fall back to the lower bound alone. No format change.
 
 ## In progress
 

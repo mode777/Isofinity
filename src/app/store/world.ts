@@ -1,5 +1,5 @@
 import { sunDirection } from '../../shared/sun.js';
-import { type ExtraViewSlot, type ViewSlot } from '../../shared/iso.js';
+import { type ViewSlot } from '../../shared/iso.js';
 import {
   BUNDLE_EXT,
   readWorkspaceFile,
@@ -10,6 +10,7 @@ import {
   orderedViewSlots,
   parseViewLayerId,
   viewLayerId,
+  type BundleViews,
   type SpriteLayer,
 } from '../../runtime/assets.js';
 import {
@@ -404,8 +405,8 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     };
 
     const skipped: { asset: string; reason: string }[] = [];
-    /** Bundles that loaded but had view slots without a render pass. */
-    const viewSkipped: { asset: string; slots: ExtraViewSlot[] }[] = [];
+    /** Bundles that loaded but had view slots that are not placeable. */
+    const viewSkipped: { asset: string; skipped: BundleViews['skipped'] }[] = [];
     const loaded = new Map<string, SpriteLayer[]>();
     const markSkipped = (asset: string, err: unknown): void => {
       const reason = err instanceof Error ? err.message : String(err);
@@ -447,7 +448,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
           })),
         ]);
         if (views.skipped.length > 0) {
-          viewSkipped.push({ asset: entry.asset, slots: views.skipped });
+          viewSkipped.push({ asset: entry.asset, skipped: views.skipped });
         }
       } catch (err) {
         markSkipped(entry.asset, err);
@@ -457,7 +458,8 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     for (const s of data.sprites) {
       if (!loaded.has(s.asset)) continue;
       // A placement whose saved direction has no loaded view (render
-      // pass missing) still restores, facing north.
+      // pass missing, or the slot's depth is stale) still restores,
+      // facing north.
       const savedDir = s.dir ?? 'n';
       const dirs = brushDirections(doc, s.asset);
       doc.world.place(
@@ -510,8 +512,12 @@ export async function openWorldDoc(fileName: string): Promise<void> {
               .join('; ')} — save each sprite into sprites/ (with a render pass) and re-save the world`
           : '') +
         (viewSkipped.length > 0
-          ? `${skipped.length > 0 ? ';' : ' —'} no render pass, direction(s) unavailable: ${viewSkipped
-              .map((v) => `${v.asset} (${v.slots.join('/').toUpperCase()})`)
+          ? `${skipped.length > 0 ? ';' : ' —'} direction(s) unavailable: ${viewSkipped
+              .map((v) =>
+                `${v.asset} (${v.skipped
+                  .map((s) => `${s.slot.toUpperCase()}: ${s.reason}`)
+                  .join('; ')})`,
+              )
               .join('; ')}`
           : ''),
     );
@@ -1334,7 +1340,9 @@ export async function selectBrush(docId: string, brush: Brush): Promise<void> {
         })),
       ];
       if (views.skipped.length > 0) {
-        skippedNote = ` — ${views.skipped.join('/').toUpperCase()} view skipped (no render pass)`;
+        skippedNote = ` — ${views.skipped
+          .map((s) => `${s.slot.toUpperCase()} view skipped (${s.reason})`)
+          .join(', ')}`;
       }
     } else {
       layers = [await bakePrimitiveLayer(brush.id)];
