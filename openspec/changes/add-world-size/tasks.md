@@ -29,4 +29,4 @@
 ## 6. Docs and wrap-up
 
 - [x] 6.1 Update `docs/runtime.md`: Worlds section (marker `/7`, optional ground size), remove the Place-in-world subsection, world editor section (per-size frame, resize); check `docs/glossary.md` for place-in-world references
-- [ ] 6.2 Update `docs/roadmap.md` (done summary); commit and push per the AGENTS.md workflow and report the build version
+- [x] 6.2 Update `docs/roadmap.md` (done summary); commit and push per the AGENTS.md workflow and report the build version
