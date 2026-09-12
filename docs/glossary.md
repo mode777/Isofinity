@@ -95,14 +95,23 @@ the pointer for the real semantics.
   fade.
 - **Sprite layer** — a world's loaded sprite asset: padded passes in two
   texture arrays (render RGBA8 + g-buffer RGBA16F) plus per-layer size/
-  origin (`src/runtime/assets.ts`). A multi-view asset loads one layer
-  per placeable view slot.
+  origin (`src/runtime/assets.ts`). A multi-view asset loads the north
+  layer eagerly and one layer per extra view slot **on demand**; see
+  **Lazy view**.
+- **Lazy view** — an extra bundle view slot (E/S/W) the world document
+  knows about but has not decoded yet: the manifest lists it, so the
+  direction is selectable, but its passes are inflated and decoded — and
+  its render-pass/depth checks run — only the first time that direction is
+  used. Decoded views are cached per source file for the session
+  (invalidated by size/last-modified); a view that fails the checks is
+  dropped with a skip note and the direction falls back to north
+  (`src/runtime/assets.ts`, ADR 0014). The north view always loads eagerly.
 - **Placement direction** — which baked view slot a placement stands in
   (`n`/`e`/`s`/`w`, default `n`): the brush's facing at placement time,
   persisted with the placement (omitted in world files when north).
-  Rendering resolves the placement's layer via `viewLayerId(asset, dir)`;
-  the erase pick reads that drawn view's silhouette, so it follows the
-  facing.
+  Rendering resolves the placement's layer via `viewLayerId(asset, dir)`,
+  falling back to north while a lazy view decodes; the erase pick reads the
+  drawn view's silhouette, so it follows the facing.
 - **Placement** — one instance of a sprite layer at a continuous ground
   position and height; free-form (not grid-snapped), height may be
   negative (sunk below the ground plane).

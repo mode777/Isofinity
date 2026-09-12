@@ -1,5 +1,5 @@
 import { sunDirection } from '../../shared/sun.js';
-import { type ViewSlot } from '../../shared/iso.js';
+import { type ExtraViewSlot, type ViewSlot } from '../../shared/iso.js';
 import {
   BUNDLE_EXT,
   readWorkspaceFile,
@@ -13,11 +13,13 @@ import {
   withDerivedAlpha,
 } from '../../shared/splat.js';
 import {
-  loadBundleViews,
+  loadBundleNorth,
   orderedViewSlots,
   parseViewLayerId,
+  resolveBundleView,
   viewLayerId,
-  type BundleViews,
+  type BundleSource,
+  type LazySpriteBundle,
   type SpriteLayer,
 } from '../../runtime/assets.js';
 import {
@@ -319,6 +321,7 @@ export function newWorldDoc(
     title: 'untitled world',
     world: new World(),
     layers: [],
+    lazyViews: new Map(),
     light: { ...DEFAULT_LIGHT },
     sun: { ...DEFAULT_SUN },
     character: null,
@@ -380,6 +383,16 @@ function stripModelExt(name: string): string {
   return name.replace(/\.(glb|gltf)$/i, '');
 }
 
+/** A workspace sprite File as a lazily-reread bundle source. */
+function bundleSource(key: string, file: File): BundleSource {
+  return {
+    key,
+    size: file.size,
+    lastModified: file.lastModified,
+    read: () => file.arrayBuffer(),
+  };
+}
+
 /**
  * Open (or focus) a world document from the workspace's worlds/ folder.
  * Every referenced sprite bundle is loaded from sprites/; placements
@@ -409,6 +422,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       title: data.name ?? fileName.replace(/\.json$/i, ''),
       world: new World(),
       layers: [],
+      lazyViews: new Map(),
       light: data.light,
       sun: data.sun,
       character: null,
@@ -435,9 +449,8 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     };
 
     const skipped: { asset: string; reason: string }[] = [];
-    /** Bundles that loaded but had view slots that are not placeable. */
-    const viewSkipped: { asset: string; skipped: BundleViews['skipped'] }[] = [];
     const loaded = new Map<string, SpriteLayer[]>();
+    const lazyViews = new Map<string, LazySpriteBundle>();
     const markSkipped = (asset: string, err: unknown): void => {
       const reason = err instanceof Error ? err.message : String(err);
       console.error(`world load: sprite "${asset}" failed to load:`, err);
@@ -466,30 +479,31 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       }
       try {
         const bundleFile = await readWorkspaceFile('sprites', bundleName);
-        const views = await loadBundleViews(await bundleFile.arrayBuffer());
-        captureEnv(docId, doc, views.provenance);
+        const source = bundleSource(`sprites/${bundleName}`, bundleFile);
+        // North only: the extra directions decode on first use, so an
+        // unused view is never inflated or decoded.
+        const { north, descriptor } = await loadBundleNorth(source);
+        captureEnv(docId, doc, descriptor.provenance);
         // Pin the layer ids to the placement's asset id: a bundle's
         // manifest id can differ from the file name it was saved as.
-        loaded.set(entry.asset, [
-          { ...views.north, id: entry.asset },
-          ...views.extras.map(({ slot, layer }) => ({
-            ...layer,
-            id: viewLayerId(entry.asset, slot),
-          })),
-        ]);
-        if (views.skipped.length > 0) {
-          viewSkipped.push({ asset: entry.asset, skipped: views.skipped });
+        loaded.set(entry.asset, [{ ...north, id: entry.asset }]);
+        if (descriptor.extras.length > 0) {
+          lazyViews.set(entry.asset, {
+            source,
+            slots: descriptor.extras.map((e) => e.slot as ExtraViewSlot),
+          });
         }
       } catch (err) {
         markSkipped(entry.asset, err);
       }
     }
     doc.layers = loaded.size > 0 ? [...loaded.values()].flat() : [];
+    doc.lazyViews = lazyViews;
     for (const s of data.sprites) {
       if (!loaded.has(s.asset)) continue;
-      // A placement whose saved direction has no loaded view (render
-      // pass missing, or the slot's depth is stale) still restores,
-      // facing north.
+      // The saved direction restores even before its view decodes: it is
+      // an available (lazy) slot, and the background resolve below fills
+      // it in; until then the placement draws north.
       const savedDir = s.dir ?? 'n';
       const dirs = brushDirections(doc, s.asset);
       doc.world.place(
@@ -550,6 +564,26 @@ export async function openWorldDoc(fileName: string): Promise<void> {
 
     ed().addDoc(doc);
     void updateShProbe(doc.docId);
+    // Resolve every direction the restored placements actually face, in
+    // the background: the world shows immediately and each placement
+    // repaints from its real view when the decode lands (north until
+    // then). A direction that turns out unplaceable is dropped with a
+    // status note.
+    const wantedDirs = new Map<string, Set<ViewSlot>>();
+    for (const s of data.sprites) {
+      if (!loaded.has(s.asset)) continue;
+      const dir = s.dir ?? 'n';
+      if (dir === 'n') continue;
+      let set = wantedDirs.get(s.asset);
+      if (!set) {
+        set = new Set();
+        wantedDirs.set(s.asset, set);
+      }
+      set.add(dir);
+    }
+    for (const [asset, dirs] of wantedDirs) {
+      for (const dir of dirs) void ensureView(docId, asset, dir);
+    }
     for (let slot = 0; slot < GROUND_MATERIAL_SLOTS; slot++) {
       const name = doc.ground.materials[slot];
       if (name) void applyGroundMaps(doc.docId, name, slot);
@@ -564,15 +598,6 @@ export async function openWorldDoc(fileName: string): Promise<void> {
           ? `, skipped: ${skipped
               .map((s) => `${s.asset} (${s.reason})`)
               .join('; ')} — save each sprite into sprites/ (with a render pass) and re-save the world`
-          : '') +
-        (viewSkipped.length > 0
-          ? `${skipped.length > 0 ? ';' : ' —'} direction(s) unavailable: ${viewSkipped
-              .map((v) =>
-                `${v.asset} (${v.skipped
-                  .map((s) => `${s.slot.toUpperCase()}: ${s.reason}`)
-                  .join('; ')})`,
-              )
-              .join('; ')}`
           : ''),
     );
   } catch (err) {
@@ -1329,41 +1354,103 @@ export function setSnappedHeight(docId: string, h: number | null): void {
 
 /**
  * The directions the given brush asset can face: the view slots with a
- * loaded layer, in canonical N/E/S/W order.
+ * loaded layer plus the bundle's not-yet-decoded slots, in canonical
+ * N/E/S/W order.
  */
 export function brushDirections(doc: WorldDocument, asset: string): ViewSlot[] {
-  return orderedViewSlots(
+  const slots = new Set<ViewSlot>(
     doc.layers
       .map((l) => parseViewLayerId(l.id))
       .filter((p) => p.asset === asset)
       .map((p) => p.slot),
   );
+  const lazy = doc.lazyViews.get(asset);
+  if (lazy) for (const slot of lazy.slots) slots.add(slot);
+  return orderedViewSlots(slots);
+}
+
+/**
+ * The layer index a placement draws from in the document's layer list:
+ * its direction's view when loaded, else the asset's north layer. A lazy
+ * direction that has not decoded yet (or failed to) draws north rather
+ * than disappearing.
+ */
+export function placementLayerIndex(
+  doc: WorldDocument,
+  asset: string,
+  dir: ViewSlot,
+): number {
+  const index = doc.layers.findIndex((l) => l.id === viewLayerId(asset, dir));
+  if (index >= 0) return index;
+  return doc.layers.findIndex((l) => l.id === asset);
+}
+
+/**
+ * Make one direction of an asset placeable, decoding the bundle's view
+ * the first time it is requested. Returns true when the direction is
+ * backed by a loaded layer. A view missing its render pass or carrying
+ * stale depth is dropped from the asset's available directions and
+ * reported in the status bar so the caller can fall back to north.
+ */
+async function ensureView(docId: string, asset: string, slot: ViewSlot): Promise<boolean> {
+  if (slot === 'n') return true;
+  const doc = worldDoc(docId);
+  if (!doc) return false;
+  const layerId = viewLayerId(asset, slot);
+  if (doc.layers.some((l) => l.id === layerId)) return true;
+  const lazy = doc.lazyViews.get(asset);
+  if (!lazy || !lazy.slots.includes(slot as ExtraViewSlot)) return false;
+  const resolution = await resolveBundleView(lazy.source, slot as ExtraViewSlot);
+  if (!worldDoc(docId)) return false;
+  if (resolution.ok) {
+    update(docId, (d) => {
+      d.layers = [...d.layers, { ...resolution.layer, id: layerId }];
+    });
+    return true;
+  }
+  update(docId, (d) => {
+    const entry = d.lazyViews.get(asset);
+    if (!entry) return;
+    const next = new Map(d.lazyViews);
+    next.set(asset, { ...entry, slots: entry.slots.filter((s) => s !== slot) });
+    d.lazyViews = next;
+  });
+  ed().setStatus(`${asset}: ${slot.toUpperCase()} view skipped (${resolution.reason})`);
+  return false;
 }
 
 /**
  * Set the brush's facing direction (per-document editor state, not
- * saved). Ignored for directions the brush does not provide.
+ * saved). Ignored for directions the brush does not provide; a lazy
+ * direction is decoded before the brush switches to it.
  */
-export function setBrushDir(docId: string, dir: ViewSlot): void {
+export async function setBrushDir(docId: string, dir: ViewSlot): Promise<void> {
   const doc = worldDoc(docId);
   if (!doc) return;
   if (!brushDirections(doc, doc.tool).includes(dir)) return;
   if (dir === doc.brushDir) return;
+  if (!(await ensureView(docId, doc.tool, dir))) return;
   update(docId, (d) => {
     d.brushDir = dir;
   });
 }
 
-/** Cycle the brush to its next available direction (the `E` key), wrapping. */
-export function cycleBrushDir(docId: string): void {
+/** Cycle the brush to its next placeable direction (the `E` key), wrapping. */
+export async function cycleBrushDir(docId: string): Promise<void> {
   const doc = worldDoc(docId);
   if (!doc) return;
   const dirs = brushDirections(doc, doc.tool);
   if (dirs.length < 2) return;
-  const next = dirs[(dirs.indexOf(doc.brushDir) + 1) % dirs.length];
-  update(docId, (d) => {
-    d.brushDir = next;
-  });
+  const start = dirs.indexOf(doc.brushDir);
+  const order = [...dirs.slice(start + 1), ...dirs.slice(0, Math.max(start, 0))];
+  for (const next of order) {
+    if (await ensureView(docId, doc.tool, next)) {
+      update(docId, (d) => {
+        d.brushDir = next;
+      });
+      return;
+    }
+  }
 }
 
 /**
@@ -1503,15 +1590,26 @@ export function patchSprite(
 
 /**
  * Change a placed sprite's facing (its baked view slot) as an undoable
- * world edit. Ignored for directions the asset does not provide.
+ * world edit. Ignored for directions the asset does not provide; a lazy
+ * direction is decoded before the placement rotates to it.
  */
-export function setSpriteDir(docId: string, id: number, dir: ViewSlot): void {
+export async function setSpriteDir(docId: string, id: number, dir: ViewSlot): Promise<void> {
   const doc = worldDoc(docId);
   if (!doc) return;
   const placement = doc.world.placementAt(id);
   if (!placement) return;
   if (!brushDirections(doc, placement.primId).includes(dir)) return;
   if (placement.dir === dir) return;
+  if (!(await ensureView(docId, placement.primId, dir))) return;
+  applySpriteDir(docId, id, dir);
+}
+
+/** Apply a sprite direction change and record its undoable command. */
+function applySpriteDir(docId: string, id: number, dir: ViewSlot): void {
+  const doc = worldDoc(docId);
+  if (!doc) return;
+  const placement = doc.world.placementAt(id);
+  if (!placement || placement.dir === dir) return;
   const before = placement.dir;
   update(docId, (d) => {
     d.world.updatePlacement(id, { dir });
@@ -1529,7 +1627,7 @@ export function setSpriteDir(docId: string, id: number, dir: ViewSlot): void {
  * (the `E` key while the Select tool holds a sprite). Returns true when a
  * sprite was rotated; false when there is no suitable selection.
  */
-export function cycleSelectedSpriteDir(docId: string): boolean {
+export async function cycleSelectedSpriteDir(docId: string): Promise<boolean> {
   const doc = worldDoc(docId);
   if (!doc || doc.selection?.kind !== 'sprite') return false;
   const placement = doc.world.placementAt(doc.selection.id);
@@ -1537,7 +1635,8 @@ export function cycleSelectedSpriteDir(docId: string): boolean {
   const dirs = brushDirections(doc, placement.primId);
   if (dirs.length < 2) return false;
   const next = dirs[(dirs.indexOf(placement.dir) + 1) % dirs.length];
-  setSpriteDir(docId, placement.id, next);
+  if (!(await ensureView(docId, placement.primId, next))) return false;
+  applySpriteDir(docId, placement.id, next);
   return true;
 }
 
@@ -1721,31 +1820,34 @@ export async function selectBrush(docId: string, brush: Brush): Promise<void> {
   brushBusy.add(docId);
   try {
     let layers: SpriteLayer[];
+    let lazy: LazySpriteBundle | null = null;
     let skippedNote = '';
     if (brush.kind === 'sprite') {
       const fileName = brush.fileName ?? `${brush.id}${BUNDLE_EXT}`;
       ed().setStatus(`Loading brush sprite ${fileName}…`);
       const file = await readWorkspaceFile('sprites', fileName);
-      const views = await loadBundleViews(await file.arrayBuffer());
-      // Pin the layer ids to the brush's asset id: a bundle's manifest
-      // id can differ from the file name it was saved as.
-      layers = [
-        { ...views.north, id: brush.id },
-        ...views.extras.map(({ slot, layer }) => ({
-          ...layer,
-          id: viewLayerId(brush.id, slot),
-        })),
-      ];
-      if (views.skipped.length > 0) {
-        skippedNote = ` — ${views.skipped
-          .map((s) => `${s.slot.toUpperCase()} view skipped (${s.reason})`)
-          .join(', ')}`;
+      const source = bundleSource(`sprites/${fileName}`, file);
+      // North only: the extra directions decode on first use.
+      const { north, descriptor } = await loadBundleNorth(source);
+      // Pin the layer id to the brush's asset id: a bundle's manifest id
+      // can differ from the file name it was saved as.
+      layers = [{ ...north, id: brush.id }];
+      if (descriptor.extras.length > 0) {
+        lazy = {
+          source,
+          slots: descriptor.extras.map((e) => e.slot as ExtraViewSlot),
+        };
       }
     } else {
       layers = [await bakePrimitiveLayer(brush.id)];
     }
     update(docId, (d) => {
       d.layers = [...d.layers, ...layers];
+      if (lazy) {
+        const next = new Map(d.lazyViews);
+        next.set(brush.id, lazy);
+        d.lazyViews = next;
+      }
       d.tool = brush.id;
     });
     ed().markDirty(docId);

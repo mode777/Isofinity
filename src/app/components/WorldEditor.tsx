@@ -29,6 +29,7 @@ import {
   cycleSelectedSpriteDir,
   eraseRef,
   moveSelectionLive,
+  placementLayerIndex,
   paintDab,
   placeAt,
   redoWorld,
@@ -425,7 +426,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           x: p.x,
           y: p.y,
           z: p.z,
-          layer: live.layers.findIndex((l) => l.id === viewLayerId(p.primId, p.dir)),
+          layer: placementLayerIndex(live, p.primId, p.dir),
         }));
       return surfaceHeightAt(spriteSet, placements, wx, wy, frameRef.current.originY, PPU, toPx);
     };
@@ -824,9 +825,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       if (ref.kind === 'sprite') {
         const p = live.world.placementAt(ref.id);
         if (!p) return;
-        const layerIndex = live.layers.findIndex(
-          (l) => l.id === viewLayerId(p.primId, p.dir),
-        );
+        const layerIndex = placementLayerIndex(live, p.primId, p.dir);
         if (layerIndex < 0) return;
         const scale = PPU / spriteSet.ppus[layerIndex];
         const [ox, oy] = spriteSet.origins[layerIndex];
@@ -1429,14 +1428,13 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       // With the Select tool holding a sprite, E rotates that sprite;
       // otherwise it cycles the active brush's direction.
       const live = useEditor.getState().docs[doc.docId];
-      if (
-        live?.kind === 'world' &&
-        live.tool === SELECT_TOOL_ID &&
-        cycleSelectedSpriteDir(doc.docId)
-      ) {
+      if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) {
+        void cycleSelectedSpriteDir(doc.docId).then((rotated) => {
+          if (!rotated) void cycleBrushDir(doc.docId);
+        });
         return;
       }
-      cycleBrushDir(doc.docId);
+      void cycleBrushDir(doc.docId);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);

@@ -356,11 +356,13 @@ malformed light entry, a non-finite ground size, a malformed material-slot
 array, or a malformed coverage descriptor rejects the file. A valid file
 then restores the sun values (re-applying
 the saved manual angles, so hand-tweaked directions round-trip), loads
-every referenced sprite bundle from `sprites/` (each stored view slot
-with a render pass becomes a placeable direction of that asset; views
-without one are skipped with a note, a placement whose saved direction
-has no loaded view restores facing north; placements referencing missing
-bundles are skipped and named in the status line) and resolves the ground
+every referenced sprite bundle's north view from `sprites/` and registers
+its extra view slots as lazy directions (each extra slot decodes and
+depth-validates the first time that direction is used; a view without a
+render pass or with stale depth is then skipped with a note and falls back
+to north; a placement whose saved direction is still decoding draws north
+until it lands; placements referencing missing bundles are skipped and
+named in the status line), and resolves the ground
 material slots against `materials/` (missing or unparseable = skipped with
 a notice while the rest of the scene loads), and restores painted coverage
 from its PNG beside the JSON (missing/unreadable = fall back to slot 0
@@ -368,11 +370,18 @@ over everything with a notice).
 
 ### Loading sprite bundles
 
-Opening a `.sprite` (or legacy `.zip`) goes through exactly one parser:
-`parseBake()` unpacks manifest + passes (formats `isoinfinity-bake/4`,
+Opening a `.sprite` (or legacy `.zip`) goes through one parser family
+(`src/bake/bundle.ts`): `parseBake()` unpacks manifest + every pass in one
+shot (used by the sprite editor), while the world runtime uses
+`parseBakeManifest()` to read only `manifest.json` plus the per-view pass
+file names, then `readBakeEntry()` to inflate exactly the passes of a view
+it is about to decode (formats `isoinfinity-bake/4`,
 `/5` and `/6` accepted; anything else is rejected by name; `/6`'s extra
-views decode into the document's slot set), the render PNG decodes
-via `createImageBitmap` and the EXR via `EXRLoader.parse`. Placing into a
+views are listed but not decoded until requested), the render PNG decodes
+via `createImageBitmap` and the EXR via `EXRLoader.parse`. Decoded views
+are cached per source file for the session (invalidated when the file's
+size or last-modified changes), so re-opening a world or re-picking a
+brush does not re-read or re-decode it. Placing into a
 world **requires** the render pass. Row order differs per decoder and both
 must end top-down (row 0 = sprite top) for upload: the PNG decodes top-down
 and is padded **as-is**, while `EXRLoader` writes rows bottom-up in GL

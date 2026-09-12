@@ -57,6 +57,12 @@ each line below has a full record there).
   sprite editor's "Place in world" hand-off — sprites reach a world by
   saving to `sprites/` and picking as a brush; worlds are created only
   explicitly (with a size).
+- **Lazy sprite view loading** — the world editor reads a bundle's manifest
+  only and decodes its north view eagerly; extra E/S/W views are inflated
+  and decoded on first use, with the depth/render checks deferred to that
+  point, and decoded views are cached per source file for the session
+  (`verify:bundles`; ADR 0014), so loading a large multi-view sprite no
+  longer pays for directions the world never uses.
 
 ## In progress
 

@@ -5,7 +5,7 @@
  *   npx esbuild src/bake/views-verify.ts --bundle --platform=node \
  *     --format=esm --outfile=/tmp/views-verify.mjs && node /tmp/views-verify.mjs
  */
-import { buildBundle, parseBake, type BakeProvenance } from './bundle.js';
+import { buildBundle, parseBake, parseBakeManifest, type BakeProvenance } from './bundle.js';
 import { applySlotModelRotation, PAD_PX } from './bake.js';
 import type { BakeResult } from './bake.js';
 import { buildManifest, encodeExr } from './export.js';
@@ -22,12 +22,16 @@ import {
   type ViewSlot,
 } from '../shared/iso.js';
 import {
+  loadBundleNorth,
   loadBundleViews,
   orderedViewSlots,
   parseViewLayerId,
+  resolveBundleView,
   viewLayerId,
   VIEW_SKIP_NO_RENDER,
+  VIEW_SKIP_NOT_STORED,
   VIEW_SKIP_STALE_DEPTH,
+  type BundleSource,
 } from '../runtime/assets.js';
 import {
   boxBlur,
@@ -531,6 +535,146 @@ async function main(): Promise<void> {
         noRender.skipped[0].slot === 'e' &&
         noRender.skipped[0].reason === VIEW_SKIP_NO_RENDER,
       `missing render pass keeps its named reason (got ${JSON.stringify(noRender.skipped)})`);
+
+    // 5c. Lazy view loading: the manifest parses without inflating any
+    //     pass, north decodes alone, and an extra view is decoded (and
+    //     depth-guarded) only when first resolved — then cached.
+    console.log('test: lazy view loading (manifest-first + on demand)');
+    const lazyBuffer = await guardBundle(0.9, 0.9);
+    const info = parseBakeManifest(lazyBuffer);
+    ok(
+      info.north.renderFile !== null && info.extras.length === 1 && info.extras[0].slot === 'e',
+      'parseBakeManifest lists stored views without decoding passes',
+    );
+
+    let reads = 0;
+    const lazySource: BundleSource = {
+      key: 'views-verify/lazy-ok',
+      size: lazyBuffer.byteLength,
+      lastModified: 1,
+      read: async () => {
+        reads++;
+        return lazyBuffer;
+      },
+    };
+    const loadedNorth = await loadBundleNorth(lazySource);
+    ok(
+      loadedNorth.north.width === 8 && reads === 1,
+      `loadBundleNorth decodes only north (reads=${reads})`,
+    );
+    const resolvedE = await resolveBundleView(lazySource, 'e');
+    ok(
+      resolvedE.ok && resolvedE.layer.width === 8 && reads === 2,
+      'resolveBundleView decodes the extra view on first request',
+    );
+    const resolvedAgain = await resolveBundleView(lazySource, 'e');
+    ok(resolvedAgain.ok && reads === 2, 'a repeat resolve is cache-served');
+
+    // A changed file identity must not serve stale cached views.
+    const changedSource: BundleSource = {
+      ...lazySource,
+      key: 'views-verify/lazy-changed',
+      lastModified: 2,
+    };
+    await loadBundleNorth(changedSource);
+    ok(reads === 3, `a changed file identity reloads (reads=${reads})`);
+    const notStored = await resolveBundleView(lazySource, 's');
+    ok(
+      !notStored.ok && notStored.reason === VIEW_SKIP_NOT_STORED,
+      'an unstored slot resolves with the named not-stored reason',
+    );
+
+    // The deferred guard fires on first resolve: north loads, the stale
+    // extra is skipped with its named cause.
+    const staleSource: BundleSource = {
+      key: 'views-verify/lazy-stale',
+      size: (await guardBundle(0.9, -0.5)).byteLength,
+      lastModified: 1,
+      read: async () => guardBundle(0.9, -0.5),
+    };
+    const staleNorth = await loadBundleNorth(staleSource);
+    ok(staleNorth.north.width === 8, 'north loads beside a lazy stale extra');
+    const lazyStaleE = await resolveBundleView(staleSource, 'e');
+    ok(
+      !lazyStaleE.ok && lazyStaleE.reason === VIEW_SKIP_STALE_DEPTH,
+      'a stale extra view is skipped when first resolved',
+    );
+
+    // A stale north fails the north load itself.
+    let lazyNorthErr = '';
+    try {
+      await loadBundleNorth({
+        key: 'views-verify/lazy-stale-north',
+        size: 1,
+        lastModified: 1,
+        read: async () => guardBundle(-0.5, 0.9),
+      });
+    } catch (err) {
+      lazyNorthErr = err instanceof Error ? err.message : String(err);
+    }
+    ok(
+      lazyNorthErr.includes('north view depth outside the manifest range'),
+      `stale north fails loadBundleNorth with a named error (got "${lazyNorthErr}")`,
+    );
+
+    // Only the requested view's bytes are touched: a bundle that lists an
+    // extra slot but omits its entry still loads north, and only fails
+    // when that slot is resolved.
+    const lazyManifest = {
+      format: 'isoinfinity-bake/6',
+      id: 'lazy',
+      pxPerUnit: 128,
+      cube: { size: [1, 1, 1], origin: [0, 0, 0] },
+      depth: { definition: 'dot', range: depthRange([1, 1, 1]) },
+      sprite: { width: 8, height: 8, originPx: [0, 0] },
+      passes: {
+        gbuffer: { file: 'lazy-gbuffer.exr', encoding: 'exr-f32-linear', channels: 'rgb=world-normal a=ray-depth' },
+        render: { file: 'lazy-render.png', encoding: 'png-r8-srgb', channels: 'rgb=tonemapped-render a=coverage' },
+      },
+      views: [
+        {
+          slot: 'n',
+          azimuthDeg: 45,
+          sprite: { width: 8, height: 8, originPx: [0, 0] },
+          passes: {
+            gbuffer: { file: 'lazy-gbuffer.exr', encoding: 'exr-f32-linear', channels: 'rgb=world-normal a=ray-depth' },
+            render: { file: 'lazy-render.png', encoding: 'png-r8-srgb', channels: 'rgb=tonemapped-render a=coverage' },
+          },
+        },
+        {
+          slot: 'e',
+          azimuthDeg: 135,
+          sprite: { width: 8, height: 8, originPx: [0, 0] },
+          passes: {
+            gbuffer: { file: 'lazy-e-gbuffer.exr', encoding: 'exr-f32-linear', channels: 'rgb=world-normal a=ray-depth' },
+            render: { file: 'lazy-e-render.png', encoding: 'png-r8-srgb', channels: 'rgb=tonemapped-render a=coverage' },
+          },
+        },
+      ],
+    };
+    const missingExtra = zipSync({
+      'manifest.json': strToU8(JSON.stringify(lazyManifest)),
+      'lazy-gbuffer.exr': await exrWithAlpha(0.9),
+      'lazy-render.png': new Uint8Array(4),
+    }).buffer as ArrayBuffer;
+    const missingSource: BundleSource = {
+      key: 'views-verify/lazy-missing-extra',
+      size: missingExtra.byteLength,
+      lastModified: 1,
+      read: async () => missingExtra,
+    };
+    const missingNorth = await loadBundleNorth(missingSource);
+    ok(missingNorth.north.width === 8, 'north loads although the extra entry is absent');
+    let missingErr = '';
+    try {
+      await resolveBundleView(missingSource, 'e');
+    } catch (err) {
+      missingErr = err instanceof Error ? err.message : String(err);
+    }
+    ok(
+      missingErr.includes('missing pass lazy-e-gbuffer.exr'),
+      `an extra entry is only read when resolved (got "${missingErr}")`,
+    );
   }
 
   // 6. Grounding shadow: provenance flag round trip + default omission.

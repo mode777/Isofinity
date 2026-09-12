@@ -10,7 +10,14 @@ import {
 } from 'three';
 import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import type { PtEnvironment } from '../bake/pt.js';
-import { parseBake, type BakeManifest, type BakeProvenance } from '../bake/bundle.js';
+import {
+  parseBakeManifest,
+  readBakeEntry,
+  type BakeManifest,
+  type BakeManifestInfo,
+  type BakeProvenance,
+  type BakeViewSpec,
+} from '../bake/bundle.js';
 import {
   EXTRA_VIEW_SLOTS,
   slotAnchorPoint,
@@ -177,6 +184,7 @@ export function layersToSet(layers: SpriteLayer[]): SpriteSet {
  */
 export const VIEW_SKIP_NO_RENDER = 'no render pass';
 export const VIEW_SKIP_STALE_DEPTH = 'stale depth — re-bake this sprite';
+export const VIEW_SKIP_NOT_STORED = 'no stored view';
 
 /**
  * Tolerance for the load-time depth-range check: about two half-precision
@@ -241,61 +249,207 @@ export interface BundleViews {
   provenance: BakeProvenance | null;
 }
 
-export async function loadBundleViews(buffer: ArrayBuffer): Promise<BundleViews> {
-  const { manifest, gbuffer, render, views, provenance } = parseBake(buffer);
-  if (!render) {
+/** A bundle's bytes reader plus identity, for lazy per-view decoding. */
+export interface BundleSource {
+  /** Workspace-relative identity, e.g. `sprites/tree.sprite`. */
+  key: string;
+  size: number;
+  lastModified: number;
+  read: () => Promise<ArrayBuffer>;
+}
+
+/**
+ * The lazy-view registration for one asset: the bundle source needed to
+ * decode a slot, plus the extra view slots the manifest stores. The
+ * north layer loads eagerly; an extra slot decodes on first use.
+ */
+export interface LazySpriteBundle {
+  source: BundleSource;
+  slots: ExtraViewSlot[];
+}
+
+/** A resolved (or rejected) extra view. */
+export type ViewResolution =
+  | { ok: true; layer: SpriteLayer }
+  | { ok: false; reason: string };
+
+/** Normalize a possibly-offset view into a standalone ArrayBuffer. */
+function entryBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+    ? (bytes.buffer as ArrayBuffer)
+    : (bytes.slice().buffer as ArrayBuffer);
+}
+
+function buildViewLayer(
+  info: BakeManifestInfo,
+  spec: BakeViewSpec,
+  gbuffer: Uint16Array,
+  render: Uint8Array,
+  id: string,
+): SpriteLayer {
+  const anchor: Vec3 = info.provenance?.origin ?? [0, 0, 0];
+  return {
+    id,
+    pxPerUnit: info.manifest.pxPerUnit,
+    width: spec.width,
+    height: spec.height,
+    originPx: spec.originPx,
+    origin:
+      spec.slot === 'n'
+        ? anchor
+        : slotAnchorPoint(anchor, info.manifest.cube.size, slotYawDeg(spec.slot)),
+    gbuffer,
+    render,
+  };
+}
+
+async function decodeNorth(info: BakeManifestInfo, buffer: ArrayBuffer): Promise<SpriteLayer> {
+  const spec = info.north;
+  if (!spec.renderFile) {
     throw new Error('bundle has no render pass — re-bake with an environment');
   }
-  const w = manifest.sprite.width;
-  const h = manifest.sprite.height;
-  const anchor: Vec3 = provenance?.origin ?? [0, 0, 0];
-  const northGbuffer = decodeExrGbuffer(await gbuffer.arrayBuffer(), w, h);
-  if (gbufferDepthOutOfRange(northGbuffer, manifest.depth?.range)) {
+  const gbuffer = decodeExrGbuffer(
+    entryBuffer(readBakeEntry(buffer, spec.gbufferFile)),
+    spec.width,
+    spec.height,
+  );
+  if (gbufferDepthOutOfRange(gbuffer, info.manifest.depth?.range)) {
     throw new Error(
       'north view depth outside the manifest range — stale view-slot bake, re-bake this sprite',
     );
   }
-  const north: SpriteLayer = {
-    id: manifest.id,
-    pxPerUnit: manifest.pxPerUnit,
-    width: w,
-    height: h,
-    originPx: manifest.sprite.originPx,
-    origin: anchor,
-    gbuffer: northGbuffer,
-    render: await decodePng(render, w, h),
+  const render = await decodePng(
+    new Blob([entryBuffer(readBakeEntry(buffer, spec.renderFile))]),
+    spec.width,
+    spec.height,
+  );
+  return buildViewLayer(info, spec, gbuffer, render, info.manifest.id);
+}
+
+async function decodeExtra(
+  info: BakeManifestInfo,
+  spec: BakeViewSpec,
+  buffer: ArrayBuffer,
+  id: string,
+): Promise<ViewResolution> {
+  if (!spec.renderFile) return { ok: false, reason: VIEW_SKIP_NO_RENDER };
+  const gbuffer = decodeExrGbuffer(
+    entryBuffer(readBakeEntry(buffer, spec.gbufferFile)),
+    spec.width,
+    spec.height,
+  );
+  if (gbufferDepthOutOfRange(gbuffer, info.manifest.depth?.range)) {
+    return { ok: false, reason: VIEW_SKIP_STALE_DEPTH };
+  }
+  const render = await decodePng(
+    new Blob([entryBuffer(readBakeEntry(buffer, spec.renderFile))]),
+    spec.width,
+    spec.height,
+  );
+  return { ok: true, layer: buildViewLayer(info, spec, gbuffer, render, id) };
+}
+
+interface CachedBundle {
+  size: number;
+  lastModified: number;
+  info: BakeManifestInfo;
+  views: Map<ViewSlot, SpriteLayer>;
+  skips: Map<ViewSlot, string>;
+}
+
+const bundleCache = new Map<string, CachedBundle>();
+
+async function cacheInfo(
+  source: BundleSource,
+): Promise<{ cached: CachedBundle; buffer: ArrayBuffer | null }> {
+  const existing = bundleCache.get(source.key);
+  if (
+    existing &&
+    existing.size === source.size &&
+    existing.lastModified === source.lastModified
+  ) {
+    return { cached: existing, buffer: null };
+  }
+  const buffer = await source.read();
+  const info = parseBakeManifest(buffer);
+  const cached: CachedBundle = {
+    size: source.size,
+    lastModified: source.lastModified,
+    info,
+    views: new Map(),
+    skips: new Map(),
   };
+  bundleCache.set(source.key, cached);
+  return { cached, buffer };
+}
+
+/**
+ * Load a bundle's north view, decoding only the north passes. The extra
+ * views are registered for on-demand decoding through `resolveBundleView`.
+ */
+export async function loadBundleNorth(
+  source: BundleSource,
+): Promise<{ north: SpriteLayer; descriptor: BakeManifestInfo }> {
+  const { cached, buffer } = await cacheInfo(source);
+  const cachedNorth = cached.views.get('n');
+  if (cachedNorth) return { north: cachedNorth, descriptor: cached.info };
+  const north = await decodeNorth(cached.info, buffer ?? (await source.read()));
+  cached.views.set('n', north);
+  return { north, descriptor: cached.info };
+}
+
+/**
+ * Decode one extra view slot on demand, applying the render-pass and
+ * depth-range checks the eager loader applies. Successful and skipped
+ * results are cached per source file.
+ */
+export async function resolveBundleView(
+  source: BundleSource,
+  slot: ExtraViewSlot,
+): Promise<ViewResolution> {
+  const { cached, buffer } = await cacheInfo(source);
+  const cachedView = cached.views.get(slot);
+  if (cachedView) return { ok: true, layer: cachedView };
+  const cachedSkip = cached.skips.get(slot);
+  if (cachedSkip) return { ok: false, reason: cachedSkip };
+  const spec = cached.info.extras.find((e) => e.slot === slot);
+  if (!spec) return { ok: false, reason: VIEW_SKIP_NOT_STORED };
+  const resolution = await decodeExtra(
+    cached.info,
+    spec,
+    buffer ?? (await source.read()),
+    viewLayerId(cached.info.manifest.id, slot),
+  );
+  if (resolution.ok) cached.views.set(slot, resolution.layer);
+  else cached.skips.set(slot, resolution.reason);
+  return resolution;
+}
+
+/**
+ * Eagerly parse a bundle into every placeable view (north plus every
+ * extra slot that carries a render pass and in-range depth). The world
+ * editor uses the lazy `loadBundleNorth`/`resolveBundleView` pair; this
+ * remains for callers that want the whole bundle at once, and for tests.
+ */
+export async function loadBundleViews(buffer: ArrayBuffer): Promise<BundleViews> {
+  const info = parseBakeManifest(buffer);
+  const north = await decodeNorth(info, buffer);
   const extras: BundleViews['extras'] = [];
   const skipped: BundleViews['skipped'] = [];
-  for (const view of views) {
-    if (!view.render) {
-      skipped.push({ slot: view.slot, reason: VIEW_SKIP_NO_RENDER });
-      continue;
-    }
-    const viewGbuffer = decodeExrGbuffer(
-      await view.gbuffer.arrayBuffer(),
-      view.width,
-      view.height,
+  for (const spec of info.extras) {
+    const resolution = await decodeExtra(
+      info,
+      spec,
+      buffer,
+      viewLayerId(info.manifest.id, spec.slot),
     );
-    if (gbufferDepthOutOfRange(viewGbuffer, manifest.depth?.range)) {
-      skipped.push({ slot: view.slot, reason: VIEW_SKIP_STALE_DEPTH });
-      continue;
+    if (resolution.ok) {
+      extras.push({ slot: spec.slot as ExtraViewSlot, layer: resolution.layer });
+    } else {
+      skipped.push({ slot: spec.slot as ExtraViewSlot, reason: resolution.reason });
     }
-    extras.push({
-      slot: view.slot,
-      layer: {
-        id: viewLayerId(manifest.id, view.slot),
-        pxPerUnit: manifest.pxPerUnit,
-        width: view.width,
-        height: view.height,
-        originPx: view.originPx,
-        origin: slotAnchorPoint(anchor, manifest.cube.size, slotYawDeg(view.slot)),
-        gbuffer: viewGbuffer,
-        render: await decodePng(view.render, view.width, view.height),
-      },
-    });
   }
-  return { north, extras, skipped, manifest, provenance };
+  return { north, extras, skipped, manifest: info.manifest, provenance: info.provenance };
 }
 
 /**
@@ -309,8 +463,9 @@ export async function loadBundleLayer(
   manifest: BakeManifest;
   provenance: BakeProvenance | null;
 }> {
-  const { north, manifest, provenance } = await loadBundleViews(buffer);
-  return { layer: north, manifest, provenance };
+  const info = parseBakeManifest(buffer);
+  const layer = await decodeNorth(info, buffer);
+  return { layer, manifest: info.manifest, provenance: info.provenance };
 }
 
 export async function decodePng(blob: Blob, w: number, h: number): Promise<Uint8Array> {

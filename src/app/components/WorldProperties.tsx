@@ -209,7 +209,7 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
               disabled={!multiView}
               onChange={(e) => {
                 e.currentTarget.blur();
-                setBrushDir(doc.docId, e.target.value as ViewSlot);
+                void setBrushDir(doc.docId, e.target.value as ViewSlot);
               }}
             >
               {(brushDirs.length > 0 ? brushDirs : ['n' as ViewSlot]).map((slot) => (
@@ -271,7 +271,7 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
                 disabled={spriteDirs.length < 2}
                 onChange={(e) => {
                   e.currentTarget.blur();
-                  setSpriteDir(doc.docId, selectedSprite.id, e.target.value as ViewSlot);
+                  void setSpriteDir(doc.docId, selectedSprite.id, e.target.value as ViewSlot);
                 }}
               >
                 {spriteDirs.map((slot) => (

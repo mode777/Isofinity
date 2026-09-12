@@ -14,7 +14,7 @@ import {
   type BundleExtraView,
 } from './export.js';
 import type { PtExtras } from './pt.js';
-import { EXTRA_VIEW_SLOTS, type ExtraViewSlot } from '../shared/iso.js';
+import { EXTRA_VIEW_SLOTS, type ExtraViewSlot, type ViewSlot } from '../shared/iso.js';
 
 export type { PtExtras, BakeProvenance, BakeManifest, BundleExtraView };
 
@@ -89,13 +89,31 @@ export interface ParsedBundleView {
   render: Blob | null;
 }
 
-export function parseBake(buffer: ArrayBuffer | Uint8Array): BakeBundle {
-  const files = unzipSync(buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer));
-  const manifestBytes = files[MANIFEST_ENTRY];
-  if (!manifestBytes) {
-    throw new Error(`bake bundle: missing ${MANIFEST_ENTRY}`);
-  }
-  const manifest = JSON.parse(strFromU8(manifestBytes)) as BakeManifest;
+/** One stored view's pass file names and sprite rect, from the manifest. */
+export interface BakeViewSpec {
+  slot: ViewSlot;
+  width: number;
+  height: number;
+  originPx: [number, number];
+  gbufferFile: string;
+  renderFile: string | null;
+}
+
+/**
+ * A bundle's manifest and per-view pass file names, resolved without
+ * inflating any pass entry. Callers inflate a specific view's passes with
+ * `readBakeEntry` only when they need that view.
+ */
+export interface BakeManifestInfo {
+  manifest: BakeManifest;
+  provenance: BakeProvenance | null;
+  /** The north view's spec (mirrors the top-level manifest fields). */
+  north: BakeViewSpec;
+  /** Extra stored view slots (non-north) in manifest order. */
+  extras: BakeViewSpec[];
+}
+
+function validateBakeManifest(manifest: BakeManifest): void {
   const prefix = 'isoinfinity-bake/';
   if (!manifest.format?.startsWith(prefix)) {
     throw new Error(`bake bundle: unsupported format ${String(manifest.format)}`);
@@ -106,6 +124,70 @@ export function parseBake(buffer: ArrayBuffer | Uint8Array): BakeBundle {
       `bake bundle: unsupported format ${manifest.format} — expected isoinfinity-bake/4, /5 or /6`,
     );
   }
+}
+
+/**
+ * Read a bundle's manifest only, without inflating any pass entry. The
+ * runtime's lazy view loader uses this so unused views are never
+ * decompressed; `parseBake` remains for callers that want every entry.
+ */
+export function parseBakeManifest(buffer: ArrayBuffer | Uint8Array): BakeManifestInfo {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const manifestBytes = unzipSync(bytes, { filter: (e) => e.name === MANIFEST_ENTRY })[
+    MANIFEST_ENTRY
+  ];
+  if (!manifestBytes) {
+    throw new Error(`bake bundle: missing ${MANIFEST_ENTRY}`);
+  }
+  const manifest = JSON.parse(strFromU8(manifestBytes)) as BakeManifest;
+  validateBakeManifest(manifest);
+  const north: BakeViewSpec = {
+    slot: 'n',
+    width: manifest.sprite.width,
+    height: manifest.sprite.height,
+    originPx: manifest.sprite.originPx,
+    gbufferFile: manifest.passes.gbuffer.file,
+    renderFile: manifest.passes.render?.file ?? null,
+  };
+  const extras: BakeViewSpec[] = [];
+  for (const view of manifest.views ?? []) {
+    if (view.slot === 'n') continue;
+    if (!EXTRA_VIEW_SLOTS.includes(view.slot as ExtraViewSlot)) {
+      throw new Error(`bake bundle: unsupported view slot ${String(view.slot)}`);
+    }
+    extras.push({
+      slot: view.slot as ExtraViewSlot,
+      width: view.sprite.width,
+      height: view.sprite.height,
+      originPx: view.sprite.originPx,
+      gbufferFile: view.passes.gbuffer.file,
+      renderFile: view.passes.render?.file ?? null,
+    });
+  }
+  return { manifest, provenance: manifest.provenance ?? null, north, extras };
+}
+
+/**
+ * Inflate exactly one bundle entry by name, leaving every other entry
+ * compressed. Throws the same named error `parseBake`'s accessor does.
+ */
+export function readBakeEntry(buffer: ArrayBuffer | Uint8Array, file: string): Uint8Array {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const entry = unzipSync(bytes, { filter: (e) => e.name === file })[file];
+  if (!entry) {
+    throw new Error(`bake bundle: missing pass ${file}`);
+  }
+  return entry;
+}
+
+export function parseBake(buffer: ArrayBuffer | Uint8Array): BakeBundle {
+  const files = unzipSync(buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer));
+  const manifestBytes = files[MANIFEST_ENTRY];
+  if (!manifestBytes) {
+    throw new Error(`bake bundle: missing ${MANIFEST_ENTRY}`);
+  }
+  const manifest = JSON.parse(strFromU8(manifestBytes)) as BakeManifest;
+  validateBakeManifest(manifest);
   // Only the g-buffer entry is required; pass entries recorded by older
   // manifests that no pass consumes (albedo, ao) are ignored.
   const entry = (file: string): Blob => {

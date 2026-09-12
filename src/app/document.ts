@@ -2,7 +2,7 @@ import type { BakeProvenance } from '../bake/bundle.js';
 import type { BakeResult } from '../bake/bake.js';
 import type { GltfSource } from '../bake/gltf.js';
 import type { PtEnvironment, PtImage, PtSettings } from '../bake/pt.js';
-import type { SpriteLayer } from '../runtime/assets.js';
+import type { LazySpriteBundle, SpriteLayer } from '../runtime/assets.js';
 import type { HistoryStack } from '../runtime/history.js';
 import type { CharacterAsset } from '../runtime/meshAsset.js';
 import type { World } from '../runtime/world.js';
@@ -347,6 +347,14 @@ export interface WorldDocument {
   title: string;
   world: World;
   layers: SpriteLayer[];
+  /**
+   * Sprite bundles with extra (non-north) views that decode on demand:
+   * asset id -> bundle source + available view slots. The north layer is
+   * always in `layers`; an extra slot decodes the first time a placement
+   * or brush direction selects it. In-memory editor state only — never
+   * written into world files (ADR 0006).
+   */
+  lazyViews: Map<string, LazySpriteBundle>;
   light: LightState;
   sun: SunState;
   /**
