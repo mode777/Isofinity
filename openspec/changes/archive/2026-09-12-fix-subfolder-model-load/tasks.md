@@ -6,4 +6,4 @@
 ## 2. Verification
 
 - [x] 2.1 Run `npm run verify:bundles` and `npm run build`; both clean
-- [ ] 2.2 Browser check (user, `npm run dev`): put a `.glb` in `models/tripo/`, open it from the project browser — it loads as a bake source; a bogus path still shows the named missing-file error; a `/6` sprite whose provenance names a nested model re-bakes instead of going view-only
+- [x] 2.2 Browser check (user, `npm run dev`): put a `.glb` in `models/tripo/`, open it from the project browser — it loads as a bake source; a bogus path still shows the named missing-file error; a `/6` sprite whose provenance names a nested model re-bakes instead of going view-only
