@@ -154,12 +154,12 @@ function marchChecks(): void {
     originZ: 0,
     cellX: size.cellX,
     cellZ: size.cellZ,
-    maxHeight: 0.8,
+    maxHeight: 1.5,
   };
-  // A 0.8-high occluder at world (2, 0).
+  // A 1.5-high occluder at world (2, 0).
   const cx = Math.floor(2 / field.cellX);
   const cz = 0;
-  field.data[cz * field.width + cx] = 0.8;
+  field.data[cz * field.width + cx] = 1.5;
 
   const lxz = Math.hypot(1, 0);
   const light: [number, number, number] = [1 / lxz, 0.2 / lxz, 0];
@@ -168,25 +168,19 @@ function marchChecks(): void {
   // Receiver past the occluder: the ray marches away from it.
   ok(shadowVisibilityCPU(field, 3, 0, 0, light) === 1, 'a receiver beyond the occluder is lit');
 
-  // Lower the occluder below the ray: cleared.
-  const low: ShadowField = { ...field, data: field.data.slice() };
-  low.data[cz * low.width + cx] = 0.4;
-  ok(shadowVisibilityCPU(low, 0, 0, 0, light) === 1, 'an occluder below the ray does not shadow');
-
-  // Normal offset lifts the ray origin: a receiver whose occluder only just
-  // exceeds the plain ray is no longer shadowed. Raise the occluder back and
-  // the true blocker still registers.
-  const justUnder: ShadowField = { ...field, data: field.data.slice() };
-  justUnder.data[cz * justUnder.width + cx] = 0.55;
+  // A shorter occluder is cleared by the normal offset (a plain height bias
+  // would have kept it): the ray origin lifts along the receiver's normal.
+  const lower: ShadowField = { ...field, data: field.data.slice() };
+  lower.data[cz * lower.width + cx] = 0.5;
   ok(
-    shadowVisibilityCPU(justUnder, 0, 0, 0, light) === 1,
+    shadowVisibilityCPU(lower, 0, 0, 0, light) === 1,
     'normal offset clears an occluder a plain height bias would keep',
   );
 
   // Extra world points splat on top (mesh compounding).
   const before = field.maxHeight;
-  const raised = splatWorldPoints(field, new Float32Array([1, 1.2, 1]));
-  ok(raised > before && near(field.maxHeight, 1.2), 'splatWorldPoints raises the field peak');
+  const raised = splatWorldPoints(field, new Float32Array([1, 2.0, 1]));
+  ok(raised > before && near(field.maxHeight, 2.0), 'splatWorldPoints raises the field peak');
 }
 
 function main(): void {

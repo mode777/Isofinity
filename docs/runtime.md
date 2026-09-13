@@ -456,9 +456,8 @@ over the composite:
   values clamp into the same window. It is automatic — no asset or
   world setup — and is inert when the occluder is empty or the Dynamic light
   switch is off. The ray starts offset along the surface normal (a
-  normal-offset bias), which is what keeps a large light-facing structure
-  from self-shadowing; the world panel exposes a temporary slider for it
-  while the default is tuned (in-memory only, never saved). `npm run
+  normal-offset bias, larger at grazing incidence), which is what keeps a
+  large light-facing structure from self-shadowing. `npm run
   verify:shadows` covers the domain clamp, the occluder build and the CPU
   march.
 - Shadowing needs **no setup**: it derives from whatever bundles a world

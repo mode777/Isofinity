@@ -20,8 +20,10 @@ import { SCREEN_RIGHT, SCREEN_UP, VIEW_DIR, type Vec3 } from '../shared/iso.js';
 export const SHADOW_CELL_SIZE = 1 / 16;
 /** Hard per-axis grid cap (keeps the CPU build and the texture bounded). */
 export const SHADOW_FIELD_TEXEL_CAP = 2048;
-/** Default normal-offset bias (world units) for the shadow ray start. */
-export const SHADOW_BIAS = 0.06;
+/** Normal-offset bias (world units) for the shadow ray start. Tuned to keep
+ *  a large light-facing structure from self-shadowing through the height
+ *  field's solid-column approximation. */
+export const SHADOW_BIAS = 0.3;
 /** Small height epsilon on the compare (avoids coplanar re-hits). */
 export const SHADOW_BIAS_EPSILON = 0.005;
 /** March cap, in cells (bounds the worst-case per-pixel cost). */

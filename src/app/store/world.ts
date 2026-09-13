@@ -30,7 +30,6 @@ import {
   type Placement,
 } from '../../runtime/world.js';
 import { HistoryStack, type HistoryCommand } from '../../runtime/history.js';
-import { SHADOW_BIAS } from '../../runtime/shadowField.js';
 import { parseCharacterAsset } from '../../runtime/meshAsset.js';
 import {
   equirectFromProcedural,
@@ -347,7 +346,6 @@ export function newWorldDoc(
     snappedHeight: null,
     brushDir: 'n',
     shadowLevel: 1,
-    shadowBias: SHADOW_BIAS,
     viewTransform: null,
     layerVisibility: { ...ALL_LAYERS_VISIBLE },
     selection: null,
@@ -467,7 +465,6 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       snappedHeight: null,
       brushDir: 'n',
     shadowLevel: 1,
-      shadowBias: SHADOW_BIAS,
       viewTransform: null,
       layerVisibility: { ...ALL_LAYERS_VISIBLE },
       selection: null,
@@ -1335,22 +1332,6 @@ export function setShadowLevel(docId: string, strength: number): void {
   if (clamped === doc.shadowLevel) return;
   update(docId, (d) => {
     d.shadowLevel = clamped;
-  });
-}
-
-/**
- * Set the directional-shadow self-shadow bias (world units). Temporary
- * tuning aid while the default is dialled in; in-memory editor state only —
- * never written into world files (ADR 0006).
- */
-export function setShadowBias(docId: string, bias: number): void {
-  const doc = worldDoc(docId);
-  if (!doc) return;
-  if (!Number.isFinite(bias)) return;
-  const clamped = Math.min(1, Math.max(0, bias));
-  if (clamped === doc.shadowBias) return;
-  update(docId, (d) => {
-    d.shadowBias = clamped;
   });
 }
 
