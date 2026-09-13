@@ -209,6 +209,22 @@ function lightIconRgb(hex: string): [number, number, number] {
 }
 
 /**
+ * True when a keyboard event targets a form control (a typing surface):
+ * the shared guard every world-editor shortcut uses to leave keys to
+ * text entry.
+ */
+function typingTarget(e: KeyboardEvent): boolean {
+  const el = e.target as HTMLElement | null;
+  const tag = el?.tagName;
+  return (
+    tag === 'INPUT' ||
+    tag === 'TEXTAREA' ||
+    tag === 'SELECT' ||
+    !!el?.isContentEditable
+  );
+}
+
+/**
  * Growable triangle-vertex batch for the flat program (x, y, r, g, b, a
  * per vertex). Reused across frames to avoid per-frame allocations.
  */
@@ -299,6 +315,21 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     transform: null as ViewTransform | null,
     panel: null as { w: number; h: number } | null,
   });
+
+  // Space-hold pan mode: component-local chrome, never serialized into
+  // the document (ADR 0006). `spaceRef` mirrors "Space is down" for the
+  // native canvas listeners (no re-binding); `spacePanRef` tracks a
+  // space-initiated drag so the cursor survives an early Space release;
+  // `spacePan` is the render-side flag for the hint line. `syncCursor`
+  // flips the canvas between the CSS default, grab, and grabbing.
+  const spaceRef = useRef(false);
+  const spacePanRef = useRef(false);
+  const [spacePan, setSpacePan] = useState(false);
+  const syncCursor = (): void => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.style.cursor = spacePanRef.current ? 'grabbing' : spaceRef.current ? 'grab' : '';
+  };
 
   // Stable unless the document's layers change (place-in-world, load).
   const spriteSet = useMemo(() => layersToSet(doc.layers), [doc.layers]);
@@ -1076,9 +1107,45 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       setSnappedHeight(doc.docId, effectiveHeight(live, px[0], px[1]));
     };
 
-    // Middle-drag pans (left paints, right erases); capture keeps the
-    // drag alive outside the canvas.
-    let pan: { x: number; y: number; zoom: number; panX: number; panY: number } | null = null;
+    // Pan drag in flight: middle-drag, or left-drag while Space is held
+    // (temporary pan mode). The originating button and pointer are
+    // recorded so release ends exactly the drag that started, and a drag
+    // in flight survives an early Space release. Capture keeps the drag
+    // alive outside the canvas.
+    let pan: {
+      button: number;
+      pointerId: number;
+      x: number;
+      y: number;
+      zoom: number;
+      panX: number;
+      panY: number;
+    } | null = null;
+
+    /** Start a pan drag from the transform captured now. */
+    const startPan = (e: PointerEvent, button: number): void => {
+      const t = liveRef.current.transform;
+      if (!t) return;
+      pan = {
+        button,
+        pointerId: e.pointerId,
+        x: e.clientX,
+        y: e.clientY,
+        zoom: t.zoom,
+        panX: t.panX,
+        panY: t.panY,
+      };
+      if (spaceRef.current) spacePanRef.current = true;
+      syncCursor();
+      canvas.setPointerCapture(e.pointerId);
+    };
+
+    /** End the pan drag and restore the mode-appropriate cursor. */
+    const endPan = (): void => {
+      pan = null;
+      spacePanRef.current = false;
+      syncCursor();
+    };
 
     // Select-tool drag in progress: the picked placement, the pointer's
     // starting ground position, and the placement's starting ground
@@ -1168,8 +1235,8 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       // Shift + vertical mouse move adjusts the placement height (up
       // raises, down lowers, below the ground plane included): free-form,
       // never panning. Hover tracking and drag-painting continue
-      // alongside.
-      if (e.pointerType === 'mouse' && e.shiftKey) {
+      // alongside. Suppressed in space-pan mode (the gesture mutates).
+      if (e.pointerType === 'mouse' && e.shiftKey && !spaceRef.current) {
         const live = useEditor.getState().docs[doc.docId];
         if (live && live.kind === 'world') {
           setHeightLevel(doc.docId, live.heightLevel - e.movementY * 0.01);
@@ -1277,10 +1344,18 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       }
       if (e.button === 1) {
         e.preventDefault();
-        const t = liveRef.current.transform;
-        if (t) {
-          pan = { x: e.clientX, y: e.clientY, zoom: t.zoom, panX: t.panX, panY: t.panY };
-          canvas.setPointerCapture(e.pointerId);
+        startPan(e, 1);
+        return;
+      }
+      // Space pan mode: a left press pans instead of placing, and every
+      // other mutating press (right erase/clear) is refused while Space
+      // is down. Suppression applies at press time only — a gesture
+      // already in flight keeps its identity, and a pan started here
+      // runs to pointer release even if Space goes up mid-drag.
+      if (spaceRef.current) {
+        if (e.button === 0) {
+          e.preventDefault();
+          startPan(e, 0);
         }
         return;
       }
@@ -1400,14 +1475,15 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         }
         return;
       }
-      if (e.button === 1 && pan) {
-        pan = null;
+      if (pan && e.pointerId === pan.pointerId && e.button === pan.button) {
+        endPan();
         if (canvas.hasPointerCapture(e.pointerId)) {
           canvas.releasePointerCapture(e.pointerId);
         }
       }
     };
     const onCancel = (e: PointerEvent): void => {
+      if (pan && e.pointerId === pan.pointerId) endPan();
       if (painting) {
         painting = false;
         commitPaintStroke(doc.docId);
@@ -1526,6 +1602,46 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [doc.docId]);
+
+  // Space-hold pan mode: while Space is down the viewport temporarily
+  // pans (left-drag) and refuses world-mutating presses — the pan wiring
+  // lives with the pointer handlers in the render effect above, which
+  // reads `spaceRef` without re-binding. Form controls keep the
+  // keystroke; `blur` clears a missed keyup (alt-tab, browser menu) so
+  // the mode cannot wedge. Each world editor owns its listeners, so the
+  // flag never leaks across tabs.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.code !== 'Space' || typingTarget(e)) return;
+      // The editor claims the key: no page scroll, no Space activation
+      // of a focused toolbar button. Repeats find the flag already set.
+      e.preventDefault();
+      if (e.repeat || spaceRef.current) return;
+      spaceRef.current = true;
+      setSpacePan(true);
+      syncCursor();
+    };
+    const onKeyUp = (e: KeyboardEvent): void => {
+      if (e.code !== 'Space') return;
+      spaceRef.current = false;
+      setSpacePan(false);
+      syncCursor();
+    };
+    const onBlur = (): void => {
+      if (!spaceRef.current) return;
+      spaceRef.current = false;
+      setSpacePan(false);
+      syncCursor();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
 
   const connected = useWorkspace((s) => s.state.kind) === 'connected';
   const sprites = useProject((s) => s.sprites);
@@ -1859,16 +1975,22 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         </div>
       </div>
       <p className="hint">
-        {activeTool === 'eraser'
-          ? 'tool: eraser — left-click/drag erases'
-          : activeTool === SELECT_TOOL_ID
-            ? 'tool: select — click a placement to select, drag to move, Escape/empty-click deselects'
-            : activeTool === TERRAIN_PAINT_TOOL_ID
-              ? 'tool: terrain paint — left-click/drag paints the active material slot; radius/hardness/slots live in the properties panel'
-              : activeTool === ''
-                ? 'pick a brush above — left-click/drag places it, right-click erases'
-                : `tool: ${activeTool}${dirLabel} — left-click/drag places, right-click erases`}
-        {' — E cycles the brush direction, shift+move sets the placement height, brush height/shadow/direction live in the properties panel, scroll pans, pinch zooms, middle-drag pans'}
+        {spacePan ? (
+          'pan mode — left-drag pans the view, release Space to continue'
+        ) : (
+          <>
+            {activeTool === 'eraser'
+              ? 'tool: eraser — left-click/drag erases'
+              : activeTool === SELECT_TOOL_ID
+                ? 'tool: select — click a placement to select, drag to move, Escape/empty-click deselects'
+                : activeTool === TERRAIN_PAINT_TOOL_ID
+                  ? 'tool: terrain paint — left-click/drag paints the active material slot; radius/hardness/slots live in the properties panel'
+                  : activeTool === ''
+                    ? 'pick a brush above — left-click/drag places it, right-click erases'
+                    : `tool: ${activeTool}${dirLabel} — left-click/drag places, right-click erases`}
+            {' — E cycles the brush direction, shift+move sets the placement height, brush height/shadow/direction live in the properties panel, scroll pans, pinch zooms, middle-drag pans, space-drag pans'}
+          </>
+        )}
       </p>
     </div>
   );

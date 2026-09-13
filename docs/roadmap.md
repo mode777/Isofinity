@@ -46,7 +46,8 @@ each line below has a full record there).
   blending, and the splat persisted as a PNG beside the world JSON
   (`isoinfinity-world/8`, `verify:terrain`; ADR 0013).
 - **World editor** — viewport navigation (scroll-pan/pinch-zoom/
-  middle-drag, three-finger touch), depth-tested brush ghost, light tool +
+  middle-drag/space-drag pan mode, three-finger touch), depth-tested
+  brush ghost, light tool +
   selectable light icons, Select tool with pixel-accurate g-buffer picking
   (ADR 0012, `verify:selection`), terrain paint tool, undo/redo
   (`verify:history`), per-world ground size (new-world dialog + panel

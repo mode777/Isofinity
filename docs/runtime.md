@@ -199,7 +199,12 @@ a 2D view transform — two-finger scroll (or a mouse wheel) pans, pinch
 (ctrl+wheel) zooms around the cursor, middle-drag pans (left paints,
 right erases), and corner `− / % / + / Fit` controls
 mirror the sprite viewport (shared `ViewTransform`/zoom constants in
-`src/app/bakeView.ts`). On touch screens, a three-finger drag pans by
+`src/app/bakeView.ts`). Holding Space enters a temporary **pan mode**:
+the cursor turns grab/grabbing and a left-drag pans — place/paint/
+select/erase presses (including the shift+move height gesture) are
+refused while it lasts, and a pan started with Space runs to pointer
+release even if Space goes up mid-drag; form controls keep the
+keystroke. On touch screens, a three-finger drag pans by
 its centroid (one finger keeps tap-to-place/drag-paint, two fingers are
 a neutral pre-gesture; trackpad three-finger gestures are OS-consumed
 and unreachable). Picking inverts the same transform, so
@@ -706,8 +711,9 @@ in the World editor and Select tool sections above. Ground picking
 inverts the shared projection analytically (`screenToGround`) after
 inverting the viewport's zoom/pan transform, no hit-testing. The
 checkerboard is a visual reference only. Viewport navigation mirrors the
-sprite viewport (see World editor above); the left/right placement
-bindings never move.
+sprite viewport (see World editor above): holding Space pans (left-drag,
+world-mutating presses suppressed while it lasts); the left/right
+placement bindings never move.
 
 ## Source layout
 
