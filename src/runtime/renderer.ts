@@ -486,6 +486,7 @@ uniform vec2 uOccluderOrigin;  // world x/z of cell (0,0)'s corner
 uniform vec2 uOccluderCell;    // world units per cell (x, z)
 uniform vec2 uOccluderSize;    // grid dimensions in cells (x, z)
 uniform float uOccluderMax;    // tallest occluder height (world units)
+uniform float uShadowBias;     // self-shadow bias (world units; tunable)
 uniform int uPointCount;
 uniform float uLightsOn; // 0 = dynamic lights off: the identity factor
 layout(std140) uniform PointLights {
@@ -521,7 +522,7 @@ float shadowVisibility(vec3 wp) {
     ivec2 cell = ivec2(floor(rel / uOccluderCell));
     float fh = texelFetch(uOccluder, cell, 0).r;
     float rayH = wp.y + rise * s;
-    if (fh > rayH + ${SHADOW_BIAS}) return 0.0;
+    if (fh > rayH + uShadowBias) return 0.0;
     if (rise >= 0.0 && rayH >= uOccluderMax) break;
     s += step;
   }
@@ -859,6 +860,9 @@ export class Renderer {
   private occluderCell: [number, number] = [1, 1];
   private occluderSize: [number, number] = [0, 0];
   private occluderMax = 0;
+  /** Self-shadow bias (world units); tunable at runtime by the editor's
+   *  temporary shadow-bias slider. */
+  private shadowBias = SHADOW_BIAS;
   private occluderUniforms: {
     sampler: WebGLUniformLocation;
     active: WebGLUniformLocation;
@@ -866,6 +870,7 @@ export class Renderer {
     cell: WebGLUniformLocation;
     size: WebGLUniformLocation;
     max: WebGLUniformLocation;
+    bias: WebGLUniformLocation;
   };
 
   constructor(
@@ -946,6 +951,7 @@ export class Renderer {
       cell: lu('uOccluderCell'),
       size: lu('uOccluderSize'),
       max: lu('uOccluderMax'),
+      bias: lu('uShadowBias'),
     };
     const blockIndex = gl.getUniformBlockIndex(this.lightProg, 'PointLights');
     gl.uniformBlockBinding(this.lightProg, blockIndex, 0);
@@ -1255,6 +1261,15 @@ export class Renderer {
     this.occluderCell = [field.cellX, field.cellZ];
     this.occluderSize = [field.width, field.height];
     this.occluderMax = field.maxHeight;
+  }
+
+  /**
+   * Self-shadow bias (world units) for the directional-shadow march. The
+   * editor exposes it as a temporary tuning slider while the default is
+   * dialled in; it is never serialized (ADR 0006).
+   */
+  setShadowBias(bias: number): void {
+    this.shadowBias = bias;
   }
 
   /**
@@ -1959,6 +1974,7 @@ export class Renderer {
     gl.uniform2f(this.occluderUniforms.cell, this.occluderCell[0], this.occluderCell[1]);
     gl.uniform2f(this.occluderUniforms.size, this.occluderSize[0], this.occluderSize[1]);
     gl.uniform1f(this.occluderUniforms.max, this.occluderMax);
+    gl.uniform1f(this.occluderUniforms.bias, this.shadowBias);
     if (active > 0) {
       // std140: each vec4 array is contiguous — all 16 posRadius entries,
       // then all 16 colorEnergy entries.

@@ -526,6 +526,8 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       const t = live.viewTransform ?? fitTransform(frame.canvasW, frame.canvasH, panel.w, panel.h);
       renderer.setLight(lightParams(live.light));
       renderer.setLightsEnabled(live.light.enabled);
+      // Temporary self-shadow bias tuning (in-memory only; ADR 0006).
+      renderer.setShadowBias(live.shadowBias);
       // Point lights: the deferred pass evaluates them; the editor converts
       // the sRGB picker color to linear per channel, as the key light does.
       const placedLights = live.world.listLights();

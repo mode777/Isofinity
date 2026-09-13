@@ -442,6 +442,13 @@ export interface WorldDocument {
    */
   shadowLevel: number;
   /**
+   * Directional-shadow self-shadow bias in world units, exposed only by the
+   * world properties panel's temporary tuning slider while the default is
+   * dialled in. In-memory editor state only — never written into world files
+   * (ADR 0006).
+   */
+  shadowBias: number;
+  /**
    * Viewport zoom/pan over the fixed projected world image; null = fit
    * (the whole ground plane letterboxed in the panel). In-memory editor
    * state only — never written into world files.
