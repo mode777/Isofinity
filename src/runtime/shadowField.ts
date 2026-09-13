@@ -20,8 +20,10 @@ import { SCREEN_RIGHT, SCREEN_UP, VIEW_DIR, type Vec3 } from '../shared/iso.js';
 export const SHADOW_CELL_SIZE = 1 / 16;
 /** Hard per-axis grid cap (keeps the CPU build and the texture bounded). */
 export const SHADOW_FIELD_TEXEL_CAP = 2048;
-/** Height bias to avoid self-shadow acne (world units). */
-export const SHADOW_BIAS = 0.02;
+/** Default normal-offset bias (world units) for the shadow ray start. */
+export const SHADOW_BIAS = 0.06;
+/** Small height epsilon on the compare (avoids coplanar re-hits). */
+export const SHADOW_BIAS_EPSILON = 0.005;
 /** March cap, in cells (bounds the worst-case per-pixel cost). */
 export const SHADOW_MAX_STEPS = 256;
 
@@ -186,8 +188,10 @@ function fieldHeight(field: ShadowField, x: number, z: number): number {
 }
 /**
  * CPU reference for the deferred height-field march: 1 = key light reaches
- * the receiver, 0 = occluded. Mirrors the GLSL `shadowVisibility` (same step,
- * bias, cap and bounds) so the shader can be validated against it.
+ * the receiver, 0 = occluded. Mirrors the GLSL `shadowVisibility` (same
+ * normal-offset, step, epsilon, cap and bounds) so the shader can be
+ * validated against it. `normal` is the receiver's world-space surface
+ * normal (up by default).
  */
 export function shadowVisibilityCPU(
   field: ShadowField,
@@ -195,21 +199,28 @@ export function shadowVisibilityCPU(
   py: number,
   pz: number,
   dir: Vec3,
+  normal: Vec3 = [0, 1, 0],
 ): number {
   const lxz = Math.hypot(dir[0], dir[2]);
   if (lxz < 1e-5) return 1;
   const hx = dir[0] / lxz;
   const hz = dir[2] / lxz;
   const rise = dir[1] / lxz;
-  if (rise >= 0 && py >= field.maxHeight) return 1;
+  const ndl = Math.max(dir[0] * normal[0] + dir[1] * normal[1] + dir[2] * normal[2], 0);
+  const nlen = Math.hypot(normal[0], normal[1], normal[2]) || 1;
+  const offset = (SHADOW_BIAS * (1 + 2 * (1 - ndl))) / nlen;
+  const ox = px + normal[0] * offset;
+  const oy = py + normal[1] * offset;
+  const oz = pz + normal[2] * offset;
+  if (rise >= 0 && oy >= field.maxHeight) return 1;
   const step = Math.min(field.cellX, field.cellZ);
   let s = step;
   for (let i = 0; i < SHADOW_MAX_STEPS; i++, s += step) {
-    const x = px + hx * s;
-    const z = pz + hz * s;
+    const x = ox + hx * s;
+    const z = oz + hz * s;
     const fh = fieldHeight(field, x, z);
-    const rayH = py + rise * s;
-    if (fh > rayH + SHADOW_BIAS) return 0;
+    const rayH = oy + rise * s;
+    if (fh > rayH + SHADOW_BIAS_EPSILON) return 0;
     // The ray only rises (the domain floor guarantees dir.y > 0): once it
     // clears the tallest occluder, nothing further can block it.
     if (rise >= 0 && rayH >= field.maxHeight) break;

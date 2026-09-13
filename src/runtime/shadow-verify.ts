@@ -154,12 +154,12 @@ function marchChecks(): void {
     originZ: 0,
     cellX: size.cellX,
     cellZ: size.cellZ,
-    maxHeight: 0.5,
+    maxHeight: 0.8,
   };
-  // A 0.5-high occluder at world (2, 0).
+  // A 0.8-high occluder at world (2, 0).
   const cx = Math.floor(2 / field.cellX);
   const cz = 0;
-  field.data[cz * field.width + cx] = 0.5;
+  field.data[cz * field.width + cx] = 0.8;
 
   const lxz = Math.hypot(1, 0);
   const light: [number, number, number] = [1 / lxz, 0.2 / lxz, 0];
@@ -170,8 +170,18 @@ function marchChecks(): void {
 
   // Lower the occluder below the ray: cleared.
   const low: ShadowField = { ...field, data: field.data.slice() };
-  low.data[cz * low.width + cx] = 0.25;
+  low.data[cz * low.width + cx] = 0.4;
   ok(shadowVisibilityCPU(low, 0, 0, 0, light) === 1, 'an occluder below the ray does not shadow');
+
+  // Normal offset lifts the ray origin: a receiver whose occluder only just
+  // exceeds the plain ray is no longer shadowed. Raise the occluder back and
+  // the true blocker still registers.
+  const justUnder: ShadowField = { ...field, data: field.data.slice() };
+  justUnder.data[cz * justUnder.width + cx] = 0.55;
+  ok(
+    shadowVisibilityCPU(justUnder, 0, 0, 0, light) === 1,
+    'normal offset clears an occluder a plain height bias would keep',
+  );
 
   // Extra world points splat on top (mesh compounding).
   const before = field.maxHeight;

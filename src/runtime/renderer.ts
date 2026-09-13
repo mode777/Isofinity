@@ -3,6 +3,7 @@ import { SH_IRRADIANCE_GLSL } from './shProbe.js';
 import type { MeshGeometry, MeshSurface } from './meshAsset.js';
 import {
   SHADOW_BIAS,
+  SHADOW_BIAS_EPSILON,
   SHADOW_MAX_STEPS,
   type ShadowField,
 } from './shadowField.js';
@@ -499,30 +500,37 @@ ${ISO_GLSL}
 /**
  * Reconstructed-occluder directional shadow (add-dynamic-directional-shadows):
  * march the key-light ray from the receiver through the height field and
- * return 1 when the key light reaches it, 0 when blocked. Mirrors
- * shadowVisibilityCPU in src/runtime/shadowField.ts.
+ * return 1 when the key light reaches it, 0 when blocked. The ray starts
+ * offset along the surface normal (a normal-offset bias, tunable), which is
+ * what keeps a large light-facing structure from shadowing its own surface:
+ * the field represents it as a solid column, so an unoffset ray grazes back
+ * into its footprint. Mirrors shadowVisibilityCPU in shadowField.ts.
  */
-float shadowVisibility(vec3 wp) {
+float shadowVisibility(vec3 wp, vec3 N) {
   if (uOccluderActive < 0.5) return 1.0;
   vec2 lh = uLightDir.xz;
   float lxz = length(lh);
   if (lxz < 1e-5) return 1.0;
   lh /= lxz;
   float rise = uLightDir.y / lxz;
+  // Normal-offset: push the ray origin off the surface, more at grazing
+  // incidence (where N.L is small) so a glancing ray clears the column.
+  float ndl = max(dot(N, uLightDir), 0.0);
+  vec3 origin = wp + normalize(N) * (uShadowBias * (1.0 + 2.0 * (1.0 - ndl)));
   // The ray only rises (the light domain floors elevation): once the
   // receiver clears the tallest occluder, nothing further can block it.
-  if (rise >= 0.0 && wp.y >= uOccluderMax) return 1.0;
+  if (rise >= 0.0 && origin.y >= uOccluderMax) return 1.0;
   float step = min(uOccluderCell.x, uOccluderCell.y);
   vec2 extent = uOccluderSize * uOccluderCell;
   float s = step;
   for (int i = 0; i < ${SHADOW_MAX_STEPS}; i++) {
-    vec2 pos = wp.xz + lh * s;
+    vec2 pos = origin.xz + lh * s;
     vec2 rel = pos - uOccluderOrigin;
     if (rel.x < 0.0 || rel.y < 0.0 || rel.x >= extent.x || rel.y >= extent.y) break;
     ivec2 cell = ivec2(floor(rel / uOccluderCell));
     float fh = texelFetch(uOccluder, cell, 0).r;
-    float rayH = wp.y + rise * s;
-    if (fh > rayH + uShadowBias) return 0.0;
+    float rayH = origin.y + rise * s;
+    if (fh > rayH + ${SHADOW_BIAS_EPSILON}) return 0.0;
     if (rise >= 0.0 && rayH >= uOccluderMax) break;
     s += step;
   }
@@ -544,7 +552,7 @@ void main() {
                       (uRes.y - gl_FragCoord.y - uView.w) / uView.y);
   vec2 s = vec2(worldPx.x - uProj.x, uProj.y - worldPx.y) / uProj.z;
   vec3 wp = SCREEN_RIGHT * s.x + SCREEN_UP * s.y + VIEW_DIR * d;
-  float vis = shadowVisibility(wp);
+  float vis = shadowVisibility(wp, N);
   vec3 factor = uAmbient + uKeyLight * (max(dot(N, uLightDir), 0.0) * vis);
   for (int i = 0; i < ${MAX_POINT_LIGHTS}; i++) {
     if (i >= uPointCount) break;

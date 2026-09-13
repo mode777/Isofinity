@@ -29,8 +29,12 @@ to a domain where that reconstruction is valid.
   nothing. **No bundle or world-format change; no source-model geometry.**
 - **The deferred light pass marches it.** From each receiver's reconstructed
   world position, a height-field DDA toward the key light multiplies only the
-  key term by a binary visibility (`renderer.ts`, `LIGHT_FRAG`). The CPU twin
-  `shadowVisibilityCPU` is the verification reference.
+  key term by a binary visibility (`renderer.ts`, `LIGHT_FRAG`). The ray
+  starts offset along the receiver's surface normal (a normal-offset bias,
+  larger at grazing incidence): the height field represents a large structure
+  as a solid column, so an unoffset ray from its own light-facing surface
+  grazes back into the footprint and self-shadows the whole object. The CPU
+  twin `shadowVisibilityCPU` is the verification reference.
 - **The key light is confined to a shadow-valid domain** (`src/shared/lightDomain.ts`):
   within `MAX_OFF_AXIS_DEG` (65°) of the camera view ray and above
   `MIN_ELEVATION_DEG` (10°), clamped on edit and on sun-position output. The

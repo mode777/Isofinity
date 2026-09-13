@@ -461,17 +461,17 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
           onChange={(v) => setLight(doc.docId, { ambientHex: v })}
         />
         {/* Temporary, non-persisted tuning aid for the directional-shadow
-            self-shadow bias (ADR 0006: in-memory editor state only). */}
+            normal-offset bias (ADR 0006: in-memory editor state only). */}
         <SliderRow
-          label="Shadow bias"
+          label="Shadow offset"
           value={doc.shadowBias}
           min={0}
-          max={0.5}
-          step={0.005}
-          format={(v) => v.toFixed(3)}
+          max={1}
+          step={0.01}
+          format={(v) => v.toFixed(2)}
           onChange={(v) => setShadowBias(doc.docId, v)}
         />
-        <p className="hint">temporary — tunes self-shadow acne; not saved</p>
+        <p className="hint">temporary — normal-offset bias; fixes large-structure self-shadow; not saved</p>
       </Section>
 
       <Section title="Sun position">
