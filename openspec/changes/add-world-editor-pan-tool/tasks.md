@@ -23,3 +23,9 @@
 
 - [x] 5.1 Run `npm run build` and `openspec validate --change add-world-editor-pan-tool --strict`; fix any failures. No Node verifier applies (no bundle/mesh/history/selection/terrain logic touched).
 - [ ] 5.2 Manual browser pass over the spec scenarios: space-drag pans at constant zoom, suppresses place/erase/select, mid-drag Space release completes the pan, form-control space keeps editing, existing wheel/middle-drag/touch pans and zoom controls unchanged. Leave the run to the user per AGENTS.md.
+
+## 6. Dedicated pan tool button
+
+- [x] 6.1 Add `PAN_TOOL_ID = 'pan'` to `src/app/store/world.ts` beside the other tool ids, an `IconPan` glyph to `src/app/components/icons.tsx` (16×16 stroke style), and a Pan button to the viewport tool bar (after Select) that calls `setTool`; exclude the pan tool from `placementMode` so the brush dropdown stays hidden, and give the bottom hint line a pan case. Verify: `npm run build` typechecks; the button renders, highlights when active, and the brush dropdown/brush hint disappear while it is active.
+- [x] 6.2 Admit the pan tool into the same pan drag path in `onDown` (Space held **or** pan tool active: left press starts the pan, right presses refused), guard the mouse/touch place fall-throughs in `onMove`/`onUp` against the pan tool, and make a single-finger touch drag pan under the pan tool (ended when a second finger lands; taps do nothing). Verify: with the pan tool, left-drag pans, right-click erases nothing, clicks select/place nothing, and touch single-finger drags pan.
+- [x] 6.3 Extend `syncCursor` to show grab/grabbing while the pan tool is active (re-syncing on tool change). Verify: the cursor turns grab on selecting the tool and grabbing during a drag, reverting on switching away.

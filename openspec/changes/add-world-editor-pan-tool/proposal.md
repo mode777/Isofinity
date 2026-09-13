@@ -14,6 +14,12 @@ paint), and costs no toolbar chrome.
   drag), and a left-button drag pans the viewport at constant zoom by
   applying the existing `panned()` view-transform update — the same
   mechanism, state, and invariants as middle-drag pan.
+- Add a dedicated **Pan tool** to the viewport tool bar (an icon button like
+  the other tools, per-document in-memory tool state): while it is the active
+  tool, a left-button drag (or a single-finger touch drag) pans and the same
+  grab/grabbing cursor shows; place/paint/select/move/erase/clear presses are
+  refused while it is active. Space keeps working with any tool, including
+  the pan tool itself.
 - While Space is held, viewport pointer actions that would mutate the world
   are suppressed: left press/drag does not place, paint, select, or move a
   selection; a right press does not erase or clear the selection. The gesture
@@ -40,7 +46,10 @@ paint), and costs no toolbar chrome.
 - `integrated-editor`: the "World editor viewport zoom and pan" requirement
   gains the space-hold pan gesture (cursor feedback, suppression of
   mutating pointer actions while held, drag continuation across an early
-  Space release) alongside the existing wheel / middle-drag / touch pans.
+  Space release) and the dedicated pan tool (drag pans, mutating presses
+  refused while selected) alongside the existing wheel / middle-drag /
+  touch pans; the "World editor viewport tool bar" requirement gains a Pan
+  tool button.
 
 ## Impact
 
@@ -63,8 +72,8 @@ paint), and costs no toolbar chrome.
 
 ## Non-goals
 
-- No toolbar button or persistent "pan tool" entry in the tool bar — holding
-  Space is the only activation (temporary mode, not a selected tool).
+- No additional pan activation modes beyond the Space hold and the pan tool
+  button (no keyboard shortcut like H, no persistent tool combos).
 - No change to the existing pan gestures (wheel scroll, ctrl+wheel zoom,
   middle-drag, three-finger touch drag) or their bindings.
 - No space-hold pan in the sprite editor viewport (future follow-up if

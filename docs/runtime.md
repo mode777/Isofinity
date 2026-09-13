@@ -204,7 +204,9 @@ the cursor turns grab/grabbing and a left-drag pans — place/paint/
 select/erase presses (including the shift+move height gesture) are
 refused while it lasts, and a pan started with Space runs to pointer
 release even if Space goes up mid-drag; form controls keep the
-keystroke. On touch screens, a three-finger drag pans by
+keystroke. The tool bar's pan tool pans the same way while it is the
+active tool (left-drag, or a single-finger touch drag; mutating presses
+refused). On touch screens, a three-finger drag pans by
 its centroid (one finger keeps tap-to-place/drag-paint, two fingers are
 a neutral pre-gesture; trackpad three-finger gestures are OS-consumed
 and unreachable). Picking inverts the same transform, so

@@ -27,9 +27,21 @@ and panning with the sprite editor's established viewport conventions:
   When the editor's key handling is suppressed because the focus is in a
   form control, holding Space SHALL NOT enter pan mode and SHALL keep the
   control's normal text-editing behavior.
+- The tool bar's dedicated pan tool SHALL pan the same way while it is
+  the active tool: a left-button drag (and a single-finger touch drag)
+  SHALL pan at constant zoom with the same grab/grabbing cursor, and
+  presses that would mutate the world SHALL be refused while the pan tool
+  is selected — a left press SHALL NOT place, paint, select, or move, and
+  a right press SHALL NOT erase or clear the selection (a pan-tool tap
+  SHALL do nothing). The pan tool SHALL be mutually exclusive with the
+  placing, painting, and selecting tools like any other tool; switching
+  to another tool SHALL restore that tool's normal press behavior.
+  Holding Space SHALL pan the same way with any active tool, the pan tool
+  included.
 - On touch screens, a three-finger drag SHALL pan the viewport at
   constant zoom without placing or erasing; a single finger SHALL keep
-  the pointer's place/paint behavior (tap places, drag paints); two
+  the pointer's place/paint behavior (tap places, drag paints) — except
+  under the pan tool, whose single-finger drag pans — and two
   fingers SHALL be a neutral pre-gesture that neither paints nor pans.
   Trackpad three-finger gestures are consumed by the operating system
   and never reach the browser, so they are explicitly out of scope.
@@ -47,8 +59,10 @@ cursor — and therefore where a placement lands — SHALL be identical at
 every zoom and pan offset. The transform SHALL be per-document in-memory
 editor state: preserved across tab switches and view recreations,
 never serialized into world files, defaulting to fit when a world is
-opened or created. Space-pan SHALL move the same transform and SHALL NOT
-mark the document dirty, be undoable, or change any saved world data.
+opened or created. Space-pan and the pan tool SHALL move the same
+transform and SHALL NOT mark the document dirty, be undoable, or change
+any saved world data; the active tool (pan tool included) is per-document
+in-memory editor state and never serialized either.
 
 #### Scenario: Pinch zoom keeps the cursor anchored
 
@@ -102,6 +116,27 @@ mark the document dirty, be undoable, or change any saved world data.
 - **THEN** the control receives the space keystroke as usual and the
   world viewport does not enter pan mode
 
+#### Scenario: Pan tool pans without mutating
+
+- **WHEN** the user selects the pan tool and left-drags, right-clicks,
+  and left-clicks across placed sprites
+- **THEN** the drags pan the view at constant zoom with the
+  grab/grabbing cursor, and nothing places, erases, selects, or
+  deselects
+
+#### Scenario: Switching away from the pan tool restores press behavior
+
+- **WHEN** the user switches from the pan tool back to a placement brush
+- **THEN** left-click/drag places again and right-click erases, with no
+  leftover pan-mode suppression
+
+#### Scenario: Pan tool single-finger touch drag pans
+
+- **WHEN** the user selects the pan tool on a touch screen and drags one
+  finger across the viewport (releasing without a drag as a tap)
+- **THEN** the finger drag pans the view, the tap does nothing, and with
+  any other tool the single-finger tap/drag behavior is unchanged
+
 #### Scenario: Three-finger touch drag pans without placing
 
 - **WHEN** the user drags three fingers across the world viewport on a
@@ -112,7 +147,7 @@ mark the document dirty, be undoable, or change any saved world data.
 #### Scenario: Single-finger touch keeps the painting behavior
 
 - **WHEN** the user taps, or drags one finger across, the world viewport
-  on a touch screen
+  on a touch screen with a placement brush active
 - **THEN** a tap places the selected brush at the point and a drag
   paints, exactly as a mouse click/drag does
 
@@ -136,3 +171,58 @@ mark the document dirty, be undoable, or change any saved world data.
 - **THEN** the zoom/pan is exactly as left; after saving, closing, and
   reopening the world, the viewport opens at the default fit view and
   the saved world file contains no view-transform data
+
+### Requirement: World editor viewport tool bar
+
+A world editor SHALL render a thin vertical tool bar docked inside the world
+viewport, Photoshop-style, offering one button per tool: Select, pan, pencil
+(placement), point light, terrain paint, and eraser. Each button SHALL show an
+icon instead of a text label, with a tooltip naming the tool (and its behavior
+hint), and the active tool's button SHALL be visually highlighted. Activating a
+tool button SHALL switch the editor to that tool with the same semantics the
+previous toolbar text buttons had (the pencil restores the last chosen brush).
+The tool bar SHALL overlay the viewport without affecting the view transform:
+hovering or clicking it SHALL NOT pan, zoom, place, erase, paint, or pick, and
+canvas interaction outside the bar SHALL behave exactly as before. The active
+tool SHALL be per-document in-memory editor state — it SHALL never be
+serialized into world files.
+
+#### Scenario: Tools are offered as icons
+
+- **WHEN** the user activates a world editor tab
+- **THEN** a thin vertical bar inside the viewport shows the Select, pan,
+  pencil, point-light, terrain-paint, and eraser tools as icon buttons, with
+  the active tool highlighted and each button's tooltip naming its tool
+
+#### Scenario: Activating a tool
+
+- **WHEN** the user clicks the eraser button in the tool bar
+- **THEN** the eraser becomes the active tool (clicks remove the picked
+  placement), the highlight moves to the eraser button, and no dialog or
+  mode other than the tool switch occurs
+
+#### Scenario: Activating the pan tool
+
+- **WHEN** the user clicks the pan button in the tool bar
+- **THEN** the pan tool becomes active (drags pan the view, mutating
+  presses are refused), the highlight moves to the pan button, and no
+  dialog or mode other than the tool switch occurs
+
+#### Scenario: Activating the terrain paint tool
+
+- **WHEN** the user clicks the terrain paint button in the tool bar
+- **THEN** the terrain paint tool becomes active, the Paint section appears in
+  the properties panel, and left-dragging over the ground paints the active
+  material slot
+
+#### Scenario: Pencil restores the last brush
+
+- **WHEN** the user had a sprite brush chosen, switches to the Select tool,
+  and then clicks the pencil button in the tool bar
+- **THEN** the pencil tool is active again with that same brush chosen
+
+#### Scenario: The tool bar does not eat canvas input
+
+- **WHEN** the user clicks or drags on the viewport outside the tool bar
+- **THEN** the tool bar neither places nor erases nor paints nor pans, and the
+  click behaves exactly as it would with the bar hidden

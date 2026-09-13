@@ -24,6 +24,7 @@ import { fitTransform, panned, ZOOM_STEP, zoomAround } from '../bakeView.js';
 import { lightParams, srgbHexToLinearRgb } from '../light.js';
 import {
   CHARACTER_BRUSH_ID,
+  PAN_TOOL_ID,
   POINT_LIGHT_TOOL_ID,
   SELECT_TOOL_ID,
   TERRAIN_PAINT_TOOL_ID,
@@ -62,6 +63,7 @@ import {
   IconLayers,
   IconLight,
   IconPaint,
+  IconPan,
   IconPencil,
   IconRedo,
   IconSave,
@@ -321,15 +323,27 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
   // native canvas listeners (no re-binding); `spacePanRef` tracks a
   // space-initiated drag so the cursor survives an early Space release;
   // `spacePan` is the render-side flag for the hint line. `syncCursor`
-  // flips the canvas between the CSS default, grab, and grabbing.
+  // flips the canvas between the CSS default, grab, and grabbing — grab
+  // also while the dedicated pan tool is the active tool (read live from
+  // the store so closures never see a stale tool).
   const spaceRef = useRef(false);
   const spacePanRef = useRef(false);
   const [spacePan, setSpacePan] = useState(false);
   const syncCursor = (): void => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.style.cursor = spacePanRef.current ? 'grabbing' : spaceRef.current ? 'grab' : '';
+    const d = useEditor.getState().docs[doc.docId];
+    const panTool = d?.kind === 'world' && d.tool === PAN_TOOL_ID;
+    canvas.style.cursor = spacePanRef.current
+      ? 'grabbing'
+      : spaceRef.current || panTool
+        ? 'grab'
+        : '';
   };
+  // Keep the cursor honest across tool switches made from the tool bar.
+  useEffect(() => {
+    syncCursor();
+  }, [doc.tool]);
 
   // Stable unless the document's layers change (place-in-world, load).
   const spriteSet = useMemo(() => layersToSet(doc.layers), [doc.layers]);
@@ -1272,6 +1286,9 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           // The Select tool never places; a touch drag with no pick panned
           // nothing until now, so just track hover.
           if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) return;
+          // The pan tool never places (its drag is a pan; this guards a
+          // pan that failed to start).
+          if (live?.kind === 'world' && live.tool === PAN_TOOL_ID) return;
           const a = anchorAt(pt.px);
           placeAt(doc.docId, a.x, a.z, a.y);
         }
@@ -1287,6 +1304,9 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         if (live?.kind === 'world' && live.tool === POINT_LIGHT_TOOL_ID) return;
         // The Select tool never places.
         if (live?.kind === 'world' && live.tool === SELECT_TOOL_ID) return;
+        // The pan tool never places (its drag is a pan; this guards a
+        // pan that failed to start).
+        if (live?.kind === 'world' && live.tool === PAN_TOOL_ID) return;
         // The eraser removes the picked placement along the drag.
         if (live?.kind === 'world' && live.tool === 'eraser') {
           erasePicked(live, pt.px);
@@ -1309,12 +1329,19 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           moved: false,
         });
         canvas.setPointerCapture(e.pointerId);
+        // The pan tool's single-finger drag pans; more fingers hand the
+        // gesture back to the touch machinery below.
+        if (touchPts.size === 2 && pan) endPan();
         if (touchPts.size === 3) {
           const [cx, cy] = touchCentroid();
           const t = liveRef.current.transform;
           touchPan = t ? { cx, cy, t } : null;
         } else if (touchPts.size === 1) {
           const live = useEditor.getState().docs[doc.docId];
+          if (live?.kind === 'world' && live.tool === PAN_TOOL_ID) {
+            startPan(e, 0);
+            return;
+          }
           if (live?.kind === 'world' && live.tool === TERRAIN_PAINT_TOOL_ID) {
             const pt = pointerPoint(e);
             if (pt) {
@@ -1347,12 +1374,17 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         startPan(e, 1);
         return;
       }
-      // Space pan mode: a left press pans instead of placing, and every
-      // other mutating press (right erase/clear) is refused while Space
-      // is down. Suppression applies at press time only — a gesture
-      // already in flight keeps its identity, and a pan started here
-      // runs to pointer release even if Space goes up mid-drag.
-      if (spaceRef.current) {
+      // Pan mode: Space held (any tool), or the dedicated pan tool. A
+      // left press pans instead of placing, and every other mutating
+      // press (right erase/clear) is refused. Suppression applies at
+      // press time only — a gesture already in flight keeps its
+      // identity, and a pan started here runs to pointer release even if
+      // Space goes up mid-drag.
+      const live = useEditor.getState().docs[doc.docId];
+      if (
+        spaceRef.current ||
+        (live?.kind === 'world' && live.tool === PAN_TOOL_ID)
+      ) {
         if (e.button === 0) {
           e.preventDefault();
           startPan(e, 0);
@@ -1425,6 +1457,15 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       }
     };
     const onUp = (e: PointerEvent): void => {
+      // The pan drag ends on its originating pointer/button; under the
+      // pan tool a touch release also swallows the tap (nothing places).
+      if (pan && e.pointerId === pan.pointerId && e.button === pan.button) {
+        endPan();
+        if (canvas.hasPointerCapture(e.pointerId)) {
+          canvas.releasePointerCapture(e.pointerId);
+        }
+        if (e.pointerType === 'touch') return;
+      }
       // A terrain paint stroke ends: record one undoable command.
       if (painting && e.pointerType !== 'touch') {
         painting = false;
@@ -1468,18 +1509,14 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
             erasePicked(live, pt.px);
             return;
           }
+          // The pan tool's tap and drag pan (or do nothing), never place.
+          if (live?.kind === 'world' && live.tool === PAN_TOOL_ID) return;
           hoverRef.current = pt;
           publishSnapHeight(pt.px);
           const a = anchorAt(pt.px);
           placeAt(doc.docId, a.x, a.z, a.y);
         }
         return;
-      }
-      if (pan && e.pointerId === pan.pointerId && e.button === pan.button) {
-        endPan();
-        if (canvas.hasPointerCapture(e.pointerId)) {
-          canvas.releasePointerCapture(e.pointerId);
-        }
       }
     };
     const onCancel = (e: PointerEvent): void => {
@@ -1656,7 +1693,8 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     activeTool !== 'eraser' &&
     activeTool !== SELECT_TOOL_ID &&
     activeTool !== POINT_LIGHT_TOOL_ID &&
-    activeTool !== TERRAIN_PAINT_TOOL_ID;
+    activeTool !== TERRAIN_PAINT_TOOL_ID &&
+    activeTool !== PAN_TOOL_ID;
 
   // Remembers the last pencil brush so the pencil button can switch back
   // from the eraser.
@@ -1887,6 +1925,13 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
             <IconSelect />
           </button>
           <button
+            className={`icon-btn${activeTool === PAN_TOOL_ID ? ' active' : ''}`}
+            title="Pan — left-click/drag pans the view, nothing places or erases; hold Space for a temporary pan with any tool"
+            onClick={() => setTool(doc.docId, PAN_TOOL_ID)}
+          >
+            <IconPan />
+          </button>
+          <button
             className={`icon-btn${placementMode ? ' active' : ''}`}
             title="Placement tool — left-click/drag places the selected brush, right-click erases"
             onClick={() => setTool(doc.docId, lastBrush.current)}
@@ -1985,9 +2030,11 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
                 ? 'tool: select — click a placement to select, drag to move, Escape/empty-click deselects'
                 : activeTool === TERRAIN_PAINT_TOOL_ID
                   ? 'tool: terrain paint — left-click/drag paints the active material slot; radius/hardness/slots live in the properties panel'
-                  : activeTool === ''
-                    ? 'pick a brush above — left-click/drag places it, right-click erases'
-                    : `tool: ${activeTool}${dirLabel} — left-click/drag places, right-click erases`}
+                  : activeTool === PAN_TOOL_ID
+                    ? 'tool: pan — left-click/drag pans the view; nothing places, erases, or selects'
+                    : activeTool === ''
+                      ? 'pick a brush above — left-click/drag places it, right-click erases'
+                      : `tool: ${activeTool}${dirLabel} — left-click/drag places, right-click erases`}
             {' — E cycles the brush direction, shift+move sets the placement height, brush height/shadow/direction live in the properties panel, scroll pans, pinch zooms, middle-drag pans, space-drag pans'}
           </>
         )}

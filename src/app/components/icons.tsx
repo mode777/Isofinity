@@ -73,6 +73,20 @@ export function IconSelect(): React.JSX.Element {
   );
 }
 
+/** Four-direction move arrows (pan tool). */
+export function IconPan(): React.JSX.Element {
+  return icon(
+    <>
+      <path d="M8 3.2v9.6" />
+      <path d="M3.2 8h9.6" />
+      <path d="M6.4 4.8 8 3.2l1.6 1.6" />
+      <path d="M6.4 11.2 8 12.8l1.6-1.6" />
+      <path d="M4.8 6.4 3.2 8l1.6 1.6" />
+      <path d="M11.2 6.4 12.8 8l-1.6 1.6" />
+    </>,
+  );
+}
+
 /** Pencil. */
 export function IconPencil(): React.JSX.Element {
   return icon(

@@ -1225,6 +1225,8 @@ export const POINT_LIGHT_TOOL_ID = 'point-light';
 
 /** The Select tool's id (selects/moves placements; never places). */
 export const SELECT_TOOL_ID = 'select';
+/** Dedicated pan tool: drags pan the view, mutating presses are refused. */
+export const PAN_TOOL_ID = 'pan';
 
 export function setTool(docId: string, tool: string): void {
   const doc = worldDoc(docId);

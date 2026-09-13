@@ -34,17 +34,19 @@ motivation.
 
 ## Decisions
 
-1. **Ephemeral component-local state, not a tool id.** Space-pan lives in
-   `WorldEditor.tsx`: a `spaceRef` boolean (read by the native canvas
-   listeners without re-binding, mirroring the existing `liveRef` pattern)
-   plus a small React state flag only for render-side feedback (cursor class,
-   hint line). It is never written into the document, so it is trivially never
-   serialized (ADR 0006) and cannot leak across tabs (each world editor
-   instance owns its listener; the flag resets on unmount).
-   *Alternative — a `'pan'` tool id in `store/world.ts`:* rejected because
-   pan mode is momentary and key-driven, not a selected tool; a tool id would
-   force a toolbar button, per-document tool state churn, and restore logic
-   for "which tool was active before Space".
+1. **Ephemeral component-local state for the Space hold, not a tool id.**
+   Space-pan lives in `WorldEditor.tsx`: a `spaceRef` boolean (read by the
+   native canvas listeners without re-binding, mirroring the existing
+   `liveRef` pattern) plus a small React state flag only for render-side
+   feedback (cursor class, hint line). It is never written into the document,
+   so it is trivially never serialized (ADR 0006) and cannot leak across tabs
+   (each world editor instance owns its listener; the flag resets on
+   unmount).
+   *Alternative — driving the Space hold through a `'pan'` tool id:*
+   rejected for the hold itself — pan mode is momentary and key-driven, so a
+   tool id would churn per-document tool state and need restore logic for
+   "which tool was active before Space". (A persistent pan tool id exists
+   too — see decision 7 — but for the button-selectable tool, not the hold.)
 2. **Reuse the middle-drag `pan` object, extended with the originating
    button.** `onDown` with Space held starts the same `pan` state the
    middle button uses (with `setPointerCapture`); `onUp`/`onCancel` release
@@ -82,6 +84,24 @@ motivation.
    `npm run build` plus browser checks of the new binding. Update
    `docs/runtime.md` (viewport paragraph + Input section), add a glossary
    entry, and a roadmap line.
+6. **The pan tool is a real tool id (`'pan'`), not a second mode flag.** The
+   dedicated tool-bar button writes the document's existing per-document
+   `tool` state (`PAN_TOOL_ID` in `store/world.ts`, in-memory, never
+   serialized — ADR 0006), so it composes with everything that already keys
+   off the tool: mutual exclusivity, the tool-bar highlight, the brush
+   dropdown's visibility (`placementMode`), and the hint line. Press
+   admission in `onDown` becomes "Space held **or** pan tool active" and
+   reuses the exact same `pan` drag object — one pan mechanism, two
+   activations.
+   *Alternative — a separate boolean "panning" UI mode beside the tool:*
+   rejected; it would need its own exclusivity rules, its own
+   serialization carve-out, and a second highlight, all duplicating tool
+   semantics the store already has.
+7. **Touch: single-finger drag pans under the pan tool.** The tool's purpose
+   is to pan, so on touch screens its single-finger drag starts the same pan
+   drag object (ended when a second finger lands, handing the gesture back
+   to the neutral/3-finger machinery), and a tap does nothing — never
+   places. With any other tool, touch behavior is untouched.
 
 ## Risks / Trade-offs
 

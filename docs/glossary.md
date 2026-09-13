@@ -66,10 +66,11 @@ the pointer for the real semantics.
   hide/show state for the ground, sprite, and mesh layers (ADR 0006):
   hidden layers are not drawn, not pickable, and supply no surface-snap
   heights; never saved, never dirty, never undoable.
-- **Pan mode** — the world viewport's temporary hold-Space navigation
-  state: while the key is down a left-drag pans the view (grab/grabbing
-  cursor) and place/paint/select/erase presses are refused; component-
-  local editor chrome (ADR 0006), never saved, never dirty, never a tool.
+- **Pan mode** — the world viewport's navigation state in which a drag
+  pans the view (grab/grabbing cursor) and place/paint/select/erase
+  presses are refused: entered by holding Space (temporary, any tool) or
+  by selecting the dedicated pan tool. Component-local/tool editor chrome
+  (ADR 0006), never saved, never dirty.
 
 ## World
 
