@@ -1,4 +1,4 @@
-import { VIEW_DIR, type Vec3 } from './iso.js';
+import { ISO_AZIMUTH_DEG, VIEW_DIR, type Vec3 } from './iso.js';
 
 /**
  * The shadow-valid key-light domain (see the add-dynamic-directional-shadows
@@ -20,6 +20,40 @@ export const MIN_ELEVATION_DEG = 10;
 
 const MAX_OFF_AXIS_COS = Math.cos((MAX_OFF_AXIS_DEG * Math.PI) / 180);
 const MIN_ELEVATION_SIN = Math.sin((MIN_ELEVATION_DEG * Math.PI) / 180);
+
+/**
+ * Slider-visible control window: an axis-aligned az/el rectangle inscribed
+ * in the cone, chosen so every corner stays comfortably inside it (the worst
+ * corner is ~60° off the view ray). The editor's key-light and sun-position
+ * controls are bounded to this window, so dragging a slider can never
+ * produce a direction the cone clamp would have to snap back — the sliders
+ * represent the constraint exactly. Derived from the fixed camera azimuth so
+ * a camera change moves the window with it.
+ */
+export const LIGHT_AZIMUTH_HALF_WIDTH_DEG = 60;
+export const LIGHT_ELEVATION_MIN_DEG = 15;
+export const LIGHT_ELEVATION_MAX_DEG = 85;
+export const LIGHT_AZIMUTH_MIN_DEG = ISO_AZIMUTH_DEG - LIGHT_AZIMUTH_HALF_WIDTH_DEG;
+export const LIGHT_AZIMUTH_MAX_DEG = ISO_AZIMUTH_DEG + LIGHT_AZIMUTH_HALF_WIDTH_DEG;
+
+/** Clamp an az/el pair into the slider-visible control window. Azimuth is
+ *  wrapped into the window's neighbourhood first, so a compass angle near
+ *  360° clamps to the near edge rather than the far one. */
+export function clampAzEl(
+  azimuthDeg: number,
+  elevationDeg: number,
+): { azimuthDeg: number; elevationDeg: number } {
+  const delta = ((azimuthDeg - ISO_AZIMUTH_DEG + 540) % 360) - 180;
+  const azimuth = Math.min(
+    LIGHT_AZIMUTH_MAX_DEG,
+    Math.max(LIGHT_AZIMUTH_MIN_DEG, ISO_AZIMUTH_DEG + delta),
+  );
+  const elevation = Math.min(
+    LIGHT_ELEVATION_MAX_DEG,
+    Math.max(LIGHT_ELEVATION_MIN_DEG, elevationDeg),
+  );
+  return { azimuthDeg: azimuth, elevationDeg: elevation };
+}
 
 const DEG = 180 / Math.PI;
 

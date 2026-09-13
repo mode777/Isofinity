@@ -212,8 +212,10 @@ the pointer for the real semantics.
   (ADR 0015).
 - **Light domain** — the shadow-valid key-light direction: within 65° of
   the camera view ray and at least 10° elevation (`src/shared/lightDomain.ts`).
-  The camera-facing sprite relief is a valid occluder only from this side,
-  so the manual key controls and the sun-position output clamp into it.
+  The camera-facing sprite relief is a valid occluder only from this side.
+  The editor's azimuth/elevation sliders are bounded to an axis-aligned
+  window inscribed in that cone, so drags never snap; typed and sun-computed
+  values clamp into the same window.
 - **Per-pixel occlusion** — each sprite fragment writes `gl_FragDepth`
   from baked g-buffer depth + the placement's full
   `dot(origin + height, viewDir)`; LEQUAL depth resolves

@@ -1,5 +1,12 @@
 import { useRef } from 'react';
 import type { ViewSlot } from '../../shared/iso.js';
+import {
+  clampAzEl,
+  LIGHT_AZIMUTH_MAX_DEG,
+  LIGHT_AZIMUTH_MIN_DEG,
+  LIGHT_ELEVATION_MAX_DEG,
+  LIGHT_ELEVATION_MIN_DEG,
+} from '../../shared/lightDomain.js';
 import type { WorldDocument } from '../document.js';
 import {
   PAINT_HARDNESS_MAX,
@@ -417,18 +424,18 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
         />
         <SliderRow
           label="Azimuth"
-          value={doc.light.azimuthDeg}
-          min={0}
-          max={360}
+          value={clampAzEl(doc.light.azimuthDeg, doc.light.elevationDeg).azimuthDeg}
+          min={LIGHT_AZIMUTH_MIN_DEG}
+          max={LIGHT_AZIMUTH_MAX_DEG}
           step={1}
           format={(v) => `${v}°`}
           onChange={(v) => setLight(doc.docId, { azimuthDeg: v })}
         />
         <SliderRow
           label="Elevation"
-          value={doc.light.elevationDeg}
-          min={5}
-          max={85}
+          value={clampAzEl(doc.light.azimuthDeg, doc.light.elevationDeg).elevationDeg}
+          min={LIGHT_ELEVATION_MIN_DEG}
+          max={LIGHT_ELEVATION_MAX_DEG}
           step={1}
           format={(v) => `${v}°`}
           onChange={(v) => setLight(doc.docId, { elevationDeg: v })}
@@ -482,7 +489,8 @@ export function WorldProperties(props: { doc: WorldDocument }): React.JSX.Elemen
           onChange={(v) => setSun(doc.docId, { lat: v })}
         />
         <p className="hint">
-          sun now: {Math.round(doc.light.azimuthDeg)}° / {Math.round(doc.light.elevationDeg)}°
+          sun now: {Math.round(clampAzEl(doc.light.azimuthDeg, doc.light.elevationDeg).azimuthDeg)}° /{' '}
+          {Math.round(clampAzEl(doc.light.azimuthDeg, doc.light.elevationDeg).elevationDeg)}°
         </p>
       </Section>
 

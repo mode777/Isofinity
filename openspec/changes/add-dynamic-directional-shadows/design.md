@@ -112,6 +112,14 @@ them visible but lowers relief fidelity. 65° is the chosen balance; both
 constants are single-source tunables so they can move without a spec change
 (the specs say "configured", not a literal).
 
+The editor's azimuth/elevation sliders are bounded to an axis-aligned window
+inscribed in the cone (azimuth ±60° about the camera azimuth, elevation
+15°–85°; `LIGHT_AZIMUTH_MIN/MAX_DEG`, `LIGHT_ELEVATION_MIN/MAX_DEG`) so a
+drag can never produce a direction the cone clamp would snap back — the
+sliders represent the constraint. Typed values and the sun-position output
+clamp into the same window (the azimuth clamp is wrap-aware). `verify:shadows`
+asserts the window is inscribed.
+
 Alternatives considered:
 
 - **The discussed 5° altitude / 170° arc.** 5° produces ~11× shadow lengths

@@ -450,8 +450,10 @@ over the composite:
   and character shadows compound as one region. The key-light direction is
   confined to a **shadow-valid domain** (`src/shared/lightDomain.ts`: within
   65° of the camera view ray and at least 10° elevation) because the
-  camera-facing relief is the occluder; the manual key controls and the
-  sun-position computation both clamp into it. It is automatic — no asset or
+  camera-facing relief is the occluder. The editor's azimuth/elevation
+  sliders are bounded to a window inscribed in that cone (azimuth 45°±60°,
+  elevation 15°–85°) so a drag never snaps back, and typed or sun-computed
+  values clamp into the same window. It is automatic — no asset or
   world setup — and is inert when the occluder is empty or the Dynamic light
   switch is off. `npm run verify:shadows` covers the domain clamp, the
   occluder build and the CPU march.

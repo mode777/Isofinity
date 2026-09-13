@@ -9,9 +9,14 @@
 import { DataUtils } from 'three';
 import { VIEW_DIR } from '../shared/iso.js';
 import {
+  clampAzEl,
   clampLightDirection,
   directionFromAzEl,
   isInLightDomain,
+  LIGHT_AZIMUTH_MAX_DEG,
+  LIGHT_AZIMUTH_MIN_DEG,
+  LIGHT_ELEVATION_MAX_DEG,
+  LIGHT_ELEVATION_MIN_DEG,
   MAX_OFF_AXIS_DEG,
 } from '../shared/lightDomain.js';
 import {
@@ -71,6 +76,31 @@ function domainChecks(): void {
   const far = clampLightDirection(directionFromAzEl(225, 30));
   const dot = far[0] * VIEW_DIR[0] + far[1] * VIEW_DIR[1] + far[2] * VIEW_DIR[2];
   ok(dot >= Math.cos((MAX_OFF_AXIS_DEG * Math.PI) / 180) - 1e-6, 'a far off-axis direction is pulled in');
+
+  // The editor's slider window is inscribed in the cone: every boundary
+  // az/el maps to a direction the cone clamp leaves untouched, so a slider
+  // drag never snaps back.
+  let windowInscribed = true;
+  for (let az = LIGHT_AZIMUTH_MIN_DEG; az <= LIGHT_AZIMUTH_MAX_DEG; az += 5) {
+    for (let el = LIGHT_ELEVATION_MIN_DEG; el <= LIGHT_ELEVATION_MAX_DEG; el += 5) {
+      const raw = directionFromAzEl(az, el);
+      const clamped = clampLightDirection(raw);
+      if (
+        Math.hypot(clamped[0] - raw[0], clamped[1] - raw[1], clamped[2] - raw[2]) > 1e-6
+      ) {
+        windowInscribed = false;
+      }
+    }
+  }
+  ok(windowInscribed, 'the slider window is inscribed in the shadow-valid cone');
+
+  // Azimuth clamping is wrap-aware: 350° (≡ -10°) clamps to the near edge
+  // of the window, not the far one (105°).
+  const wrapped = clampAzEl(350, 45);
+  ok(
+    wrapped.azimuthDeg < 0 && wrapped.azimuthDeg >= LIGHT_AZIMUTH_MIN_DEG,
+    `wrap clamps to the near edge (${wrapped.azimuthDeg}°)`,
+  );
 }
 
 function buildChecks(): void {

@@ -1,9 +1,5 @@
 import { sunDirection } from '../../shared/sun.js';
-import {
-  azElFromDirection,
-  clampLightDirection,
-  directionFromAzEl,
-} from '../../shared/lightDomain.js';
+import { clampAzEl } from '../../shared/lightDomain.js';
 import { type ExtraViewSlot, type ViewSlot } from '../../shared/iso.js';
 import {
   BUNDLE_EXT,
@@ -1517,14 +1513,11 @@ export function setLight(docId: string, patch: Partial<LightState>): void {
   if (!doc) return;
   update(docId, (d) => {
     const next = { ...d.light, ...patch };
-    // The key light is confined to the shadow-valid domain (the reconstructed
-    // relief is only a valid occluder on the camera's side).
+    // The key light is confined to the shadow-valid domain; the controls are
+    // bounded to the inscribed slider window so a drag never has to snap.
     if (patch.azimuthDeg !== undefined || patch.elevationDeg !== undefined) {
-      const dir = clampLightDirection(
-        directionFromAzEl(next.azimuthDeg, next.elevationDeg),
-      );
-      const a = azElFromDirection(dir);
-      next.azimuthDeg = Math.round(a.azimuthDeg) % 360;
+      const a = clampAzEl(next.azimuthDeg, next.elevationDeg);
+      next.azimuthDeg = Math.round(a.azimuthDeg);
       next.elevationDeg = Math.round(a.elevationDeg);
     }
     d.light = next;
@@ -1777,16 +1770,13 @@ export function setSun(docId: string, patch: Partial<SunState>): void {
     d.sun = { ...d.sun, ...patch };
     // Sun-position sliders overwrite the manual azimuth/elevation state.
     const sun = sunDirection(d.sun.day, d.sun.hour, d.sun.lat);
-    // The computed direction is clamped into the shadow-valid domain (the
-    // same cone/floor the manual controls use), so dawn/dusk/night never
-    // leave the range the directional shadow can represent.
-    const dir = clampLightDirection(
-      directionFromAzEl(sun.azimuthDeg, sun.elevationDeg),
-    );
-    const a = azElFromDirection(dir);
+    // The computed direction is clamped into the same slider window the
+    // manual controls use, so dawn/dusk/night never leave the range the
+    // directional shadow can represent (and the sliders show the result).
+    const a = clampAzEl(sun.azimuthDeg, sun.elevationDeg);
     d.light = {
       ...d.light,
-      azimuthDeg: Math.round(a.azimuthDeg) % 360,
+      azimuthDeg: Math.round(a.azimuthDeg),
       elevationDeg: Math.round(a.elevationDeg),
     };
   });

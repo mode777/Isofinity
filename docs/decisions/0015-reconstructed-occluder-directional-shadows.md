@@ -35,6 +35,10 @@ to a domain where that reconstruction is valid.
   within `MAX_OFF_AXIS_DEG` (65°) of the camera view ray and above
   `MIN_ELEVATION_DEG` (10°), clamped on edit and on sun-position output. The
   cone keeps the camera-facing relief well conditioned instead of edge-on.
+  The editor's azimuth/elevation sliders are bounded to an axis-aligned
+  window inscribed in the cone (azimuth ±60° about the camera azimuth,
+  elevation 15°–85°) so a drag never produces a direction the cone would
+  snap back; typed and sun-computed values clamp into the same window.
 - **Meshes compound.** Characters splat their per-frame CPU-skinned vertices
   into the same field, so sprite and character shadows are one union (`max`
   height per cell, shadowed once) with no separate overlay.
