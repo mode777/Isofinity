@@ -41,4 +41,4 @@
 
 - [x] 7.1 Add a Node-runnable `verify:shadows` check (occluder build math, height-field march vs. a reference, and light-domain clamping) and wire the npm script; verify it exits clean
 - [x] 7.2 Run `npm run build` (typecheck + production build) and confirm it passes
-- [ ] 7.3 Run the browser harnesses (`/scratch-verify.html`, `/mesh-debug.html`) and confirm a day/night light sweep casts consistent, non-degenerate shadows with sprite and character shadows compounding; leave the browser run to the user
+- [x] 7.3 Run the browser harnesses (`/scratch-verify.html`, `/mesh-debug.html`) and confirm a day/night light sweep casts consistent, non-degenerate shadows with sprite and character shadows compounding; leave the browser run to the user
