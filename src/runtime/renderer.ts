@@ -1,6 +1,11 @@
 import { SCREEN_RIGHT, SCREEN_UP, VIEW_DIR } from '../shared/iso.js';
 import { SH_IRRADIANCE_GLSL } from './shProbe.js';
 import type { MeshGeometry, MeshSurface } from './meshAsset.js';
+import {
+  SHADOW_BIAS,
+  SHADOW_MAX_STEPS,
+  type ShadowField,
+} from './shadowField.js';
 
 /** Joint-palette cap, mirroring `meshAsset.ts`. */
 export const MAX_MESH_JOINTS = 64;
@@ -475,6 +480,12 @@ uniform vec3 uProj;   // world-image origin px (x, y), px per unit
 uniform vec3 uLightDir;
 uniform vec3 uKeyLight;
 uniform vec3 uAmbient;
+uniform sampler2D uOccluder;   // reconstructed world-space height field
+uniform float uOccluderActive; // 0 = no occluder (visibility 1)
+uniform vec2 uOccluderOrigin;  // world x/z of cell (0,0)'s corner
+uniform vec2 uOccluderCell;    // world units per cell (x, z)
+uniform vec2 uOccluderSize;    // grid dimensions in cells (x, z)
+uniform float uOccluderMax;    // tallest occluder height (world units)
 uniform int uPointCount;
 uniform float uLightsOn; // 0 = dynamic lights off: the identity factor
 layout(std140) uniform PointLights {
@@ -484,6 +495,38 @@ layout(std140) uniform PointLights {
 out vec4 outColor;
 ${COLOR_CHUNK}
 ${ISO_GLSL}
+/**
+ * Reconstructed-occluder directional shadow (add-dynamic-directional-shadows):
+ * march the key-light ray from the receiver through the height field and
+ * return 1 when the key light reaches it, 0 when blocked. Mirrors
+ * shadowVisibilityCPU in src/runtime/shadowField.ts.
+ */
+float shadowVisibility(vec3 wp) {
+  if (uOccluderActive < 0.5) return 1.0;
+  vec2 lh = uLightDir.xz;
+  float lxz = length(lh);
+  if (lxz < 1e-5) return 1.0;
+  lh /= lxz;
+  float rise = uLightDir.y / lxz;
+  // The ray only rises (the light domain floors elevation): once the
+  // receiver clears the tallest occluder, nothing further can block it.
+  if (rise >= 0.0 && wp.y >= uOccluderMax) return 1.0;
+  float step = min(uOccluderCell.x, uOccluderCell.y);
+  vec2 extent = uOccluderSize * uOccluderCell;
+  float s = step;
+  for (int i = 0; i < ${SHADOW_MAX_STEPS}; i++) {
+    vec2 pos = wp.xz + lh * s;
+    vec2 rel = pos - uOccluderOrigin;
+    if (rel.x < 0.0 || rel.y < 0.0 || rel.x >= extent.x || rel.y >= extent.y) break;
+    ivec2 cell = ivec2(floor(rel / uOccluderCell));
+    float fh = texelFetch(uOccluder, cell, 0).r;
+    float rayH = wp.y + rise * s;
+    if (fh > rayH + ${SHADOW_BIAS}) return 0.0;
+    if (rise >= 0.0 && rayH >= uOccluderMax) break;
+    s += step;
+  }
+  return 1.0;
+}
 void main() {
   ivec2 uv = ivec2(gl_FragCoord.xy);
   vec4 g = texelFetch(uGbuf, uv, 0);
@@ -500,7 +543,8 @@ void main() {
                       (uRes.y - gl_FragCoord.y - uView.w) / uView.y);
   vec2 s = vec2(worldPx.x - uProj.x, uProj.y - worldPx.y) / uProj.z;
   vec3 wp = SCREEN_RIGHT * s.x + SCREEN_UP * s.y + VIEW_DIR * d;
-  vec3 factor = uAmbient + uKeyLight * max(dot(N, uLightDir), 0.0);
+  float vis = shadowVisibility(wp);
+  vec3 factor = uAmbient + uKeyLight * (max(dot(N, uLightDir), 0.0) * vis);
   for (int i = 0; i < ${MAX_POINT_LIGHTS}; i++) {
     if (i >= uPointCount) break;
     vec3 L = uPointPosRadius[i].xyz - wp;
@@ -808,6 +852,21 @@ export class Renderer {
       pointCount: WebGLUniformLocation;
       lightsOn: WebGLUniformLocation;
     };
+  // Reconstructed directional-shadow occluder (add-dynamic-directional-shadows).
+  private occluderTex: WebGLTexture | null = null;
+  private occluderActive = false;
+  private occluderOrigin: [number, number] = [0, 0];
+  private occluderCell: [number, number] = [1, 1];
+  private occluderSize: [number, number] = [0, 0];
+  private occluderMax = 0;
+  private occluderUniforms: {
+    sampler: WebGLUniformLocation;
+    active: WebGLUniformLocation;
+    origin: WebGLUniformLocation;
+    cell: WebGLUniformLocation;
+    size: WebGLUniformLocation;
+    max: WebGLUniformLocation;
+  };
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -879,6 +938,15 @@ export class Renderer {
     gl.uniform1i(lu('uGbuf'), 1);
     gl.uniform1i(lu('uAlbedo'), 0);
     gl.uniform1i(lu('uDepthLin'), 2);
+    gl.uniform1i(lu('uOccluder'), 3);
+    this.occluderUniforms = {
+      sampler: lu('uOccluder'),
+      active: lu('uOccluderActive'),
+      origin: lu('uOccluderOrigin'),
+      cell: lu('uOccluderCell'),
+      size: lu('uOccluderSize'),
+      max: lu('uOccluderMax'),
+    };
     const blockIndex = gl.getUniformBlockIndex(this.lightProg, 'PointLights');
     gl.uniformBlockBinding(this.lightProg, blockIndex, 0);
     this.pointUbo = gl.createBuffer()!;
@@ -1146,6 +1214,75 @@ export class Renderer {
   }
 
   /**
+   * Upload the reconstructed world-space occluder (null clears it, pinning
+   * the shadow visibility to 1). Rebuilt by the editor on world load and
+   * placement edits; engine state only, never serialized (ADR 0006).
+   */
+  setOccluder(field: ShadowField | null): void {
+    const gl = this.gl;
+    if (this.occluderTex !== null) {
+      gl.deleteTexture(this.occluderTex);
+      this.occluderTex = null;
+    }
+    if (!field) {
+      this.occluderActive = false;
+      this.occluderMax = 0;
+      return;
+    }
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    // Single-channel float height field, sampled with texelFetch (NEAREST —
+    // float textures are not guaranteed linearly filterable without an
+    // extension, and a shadow field must not interpolate across a cliff).
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.R32F,
+      field.width,
+      field.height,
+      0,
+      gl.RED,
+      gl.FLOAT,
+      field.data,
+    );
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.occluderTex = tex;
+    this.occluderActive = true;
+    this.occluderOrigin = [field.originX, field.originZ];
+    this.occluderCell = [field.cellX, field.cellZ];
+    this.occluderSize = [field.width, field.height];
+    this.occluderMax = field.maxHeight;
+  }
+
+  /**
+   * Read back the uploaded occluder field (verification harnesses only).
+   * Returns false when no occluder is set or the readback FBO is incomplete.
+   */
+  readOccluder(out: Float32Array): boolean {
+    if (!this.occluderTex) return false;
+    const gl = this.gl;
+    const fbo = gl.createFramebuffer()!;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      this.occluderTex,
+      0,
+    );
+    const complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    if (complete) {
+      gl.readPixels(0, 0, this.occluderSize[0], this.occluderSize[1], gl.RED, gl.FLOAT, out);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    return complete;
+  }
+
+  /**
    * Upload a character's skinned geometry + surface (null clears).
    * Callable again when the document's character changes; one upload per
    * asset, shared by every placement draw.
@@ -1279,6 +1416,7 @@ export class Renderer {
     const gl = this.gl;
     if (this.renderTex) gl.deleteTexture(this.renderTex);
     if (this.gbufferTex) gl.deleteTexture(this.gbufferTex);
+    if (this.occluderTex) gl.deleteTexture(this.occluderTex);
     this.deleteGeoTargets();
     gl.deleteBuffer(this.groundVbo);
     gl.deleteVertexArray(this.groundVao);
@@ -1814,6 +1952,13 @@ export class Renderer {
       : 0;
     gl.uniform1i(this.lightUniforms.pointCount, active);
     gl.uniform1f(this.lightUniforms.lightsOn, this.lightsEnabled ? 1 : 0);
+    // Reconstructed directional shadow: the occluder is inert when absent
+    // or when the dynamic-light switch pins the factor to identity.
+    gl.uniform1f(this.occluderUniforms.active, this.occluderActive && this.lightsEnabled ? 1 : 0);
+    gl.uniform2f(this.occluderUniforms.origin, this.occluderOrigin[0], this.occluderOrigin[1]);
+    gl.uniform2f(this.occluderUniforms.cell, this.occluderCell[0], this.occluderCell[1]);
+    gl.uniform2f(this.occluderUniforms.size, this.occluderSize[0], this.occluderSize[1]);
+    gl.uniform1f(this.occluderUniforms.max, this.occluderMax);
     if (active > 0) {
       // std140: each vec4 array is contiguous — all 16 posRadius entries,
       // then all 16 colorEnergy entries.
@@ -1838,6 +1983,8 @@ export class Renderer {
     gl.bindTexture(gl.TEXTURE_2D, this.gbufTex);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.depthLinTex);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, this.occluderTex);
     gl.bindVertexArray(this.lightVao);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 

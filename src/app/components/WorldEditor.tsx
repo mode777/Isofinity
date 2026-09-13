@@ -9,6 +9,13 @@ import { RUNTIME_PPU, layersToSet, viewLayerId } from '../../runtime/assets.js';
 import { meshYawMat, Renderer, type FlatBatch, type MeshDraw } from '../../runtime/renderer.js';
 import { CharacterPlayer, bindPosePalette } from '../../runtime/meshAsset.js';
 import { surfaceHeightAt } from '../../runtime/surfaceSnap.js';
+import {
+  buildLayerShadowPoints,
+  buildShadowField,
+  splatWorldPoints,
+  type ShadowField,
+  type ShadowPlacement,
+} from '../../runtime/shadowField.js';
 import { pickPlacementAt } from '../../runtime/selection.js';
 import { depthOf } from '../../runtime/world.js';
 import { DEFAULT_POINT_LIGHT, PRIMITIVE_KINDS } from '../document.js';
@@ -367,6 +374,16 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     let appliedGroundKey = '';
     let lastFrameTime = performance.now();
 
+    // Reconstructed directional-shadow occluder (engine state; ADR 0006):
+    // per-layer placement-local point clouds cached once, a static field
+    // rebuilt only when the placement set / ground size changes, and a
+    // per-frame copy while characters are placed (their skinned vertices
+    // splat on top of the static field before upload).
+    const shadowPoints = new Map<number, Float32Array>();
+    let staticShadowField: ShadowField | null = null;
+    let appliedShadowKey = '';
+    let uploadedShadowField: ShadowField | null = null;
+
     // Draws a soft contact-shadow ellipse on the ground under a raised
     // object: larger and fainter as the height grows, none at ground
     // level. A ground-plane circle projects to the correct isometric
@@ -585,6 +602,33 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       lastFrameTime = now;
 
       const placed = live.world.list();
+
+      // Static occluder: rebuild only when the visible placement set, ground
+      // size, or layer set changes. Hidden sprite layers cast nothing.
+      const shadowSprites = live.layerVisibility.sprites ? placed : [];
+      let shadowKey = `${live.ground.width}x${live.ground.depth}|${live.layers.length}|`;
+      for (const p of shadowSprites) {
+        const layer = placementLayerIndex(live, p.primId, p.dir);
+        shadowKey += `${layer}:${p.x.toFixed(3)},${p.y.toFixed(3)},${p.z.toFixed(3)};`;
+      }
+      if (shadowKey !== appliedShadowKey) {
+        appliedShadowKey = shadowKey;
+        const shadowPlacements: ShadowPlacement[] = shadowSprites.map((p) => {
+          const layer = placementLayerIndex(live, p.primId, p.dir);
+          if (layer >= 0 && !shadowPoints.has(layer)) {
+            shadowPoints.set(layer, buildLayerShadowPoints(spriteSet, layer));
+          }
+          return { x: p.x, y: p.y, z: p.z, layer };
+        });
+        staticShadowField = buildShadowField(
+          spriteSet,
+          shadowPlacements,
+          live.ground.width,
+          live.ground.depth,
+          shadowPoints,
+        );
+        uploadedShadowField = null;
+      }
       const hover = hoverRef.current;
       // The ghost preview: when a brush with a loaded layer is active and
       // the cursor is over the canvas, preview the placement (cursor-
@@ -692,6 +736,49 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           players.get(mp.id)!.player.update(dt);
         }
       }
+
+      // Directional-shadow occluder upload: the static field, plus a
+      // per-frame splat of visible characters' skinned world vertices so
+      // mesh and sprite shadows compound in the one field (max height per
+      // cell = union of occluders). Engine state only (ADR 0006).
+      if (staticShadowField) {
+        const shadowMeshes = live.layerVisibility.meshes ? meshPlaced : [];
+        if (shadowMeshes.length > 0 && live.character) {
+          const combined: ShadowField = {
+            ...staticShadowField,
+            data: staticShadowField.data.slice(),
+          };
+          const characterOffset = live.character.worldOffset;
+          const yaw = new Float32Array(9);
+          for (const mp of shadowMeshes) {
+            const entry = players.get(mp.id);
+            if (!entry) continue;
+            const geometry = live.character.geometry;
+            const pos = entry.player.skinnedPositions();
+            entry.player.skinInto(pos, entry.player.skinnedNormals());
+            meshYawMat(mp.yaw, yaw);
+            const world = new Float32Array(geometry.vertexCount * 3);
+            const ox = mp.x + characterOffset[0];
+            const oy = mp.y + characterOffset[1];
+            const oz = mp.z + characterOffset[2];
+            for (let i = 0; i < geometry.vertexCount; i++) {
+              const px = pos[i * 3];
+              const py = pos[i * 3 + 1];
+              const pz = pos[i * 3 + 2];
+              world[i * 3] = yaw[0] * px + yaw[3] * py + yaw[6] * pz + ox;
+              world[i * 3 + 1] = yaw[1] * px + yaw[4] * py + yaw[7] * pz + oy;
+              world[i * 3 + 2] = yaw[2] * px + yaw[5] * py + yaw[8] * pz + oz;
+            }
+            combined.maxHeight = splatWorldPoints(combined, world);
+          }
+          renderer.setOccluder(combined);
+          uploadedShadowField = combined;
+        } else if (staticShadowField !== uploadedShadowField) {
+          renderer.setOccluder(staticShadowField);
+          uploadedShadowField = staticShadowField;
+        }
+      }
+
       const meshDraws: MeshDraw[] = [];
       const off = live.character?.worldOffset ?? [0, 0, 0];
       // The mesh layer's visibility gates placed characters only; the

@@ -1,4 +1,9 @@
 import { sunDirection } from '../../shared/sun.js';
+import {
+  azElFromDirection,
+  clampLightDirection,
+  directionFromAzEl,
+} from '../../shared/lightDomain.js';
 import { type ExtraViewSlot, type ViewSlot } from '../../shared/iso.js';
 import {
   BUNDLE_EXT,
@@ -1511,7 +1516,18 @@ export function setLight(docId: string, patch: Partial<LightState>): void {
   const doc = worldDoc(docId);
   if (!doc) return;
   update(docId, (d) => {
-    d.light = { ...d.light, ...patch };
+    const next = { ...d.light, ...patch };
+    // The key light is confined to the shadow-valid domain (the reconstructed
+    // relief is only a valid occluder on the camera's side).
+    if (patch.azimuthDeg !== undefined || patch.elevationDeg !== undefined) {
+      const dir = clampLightDirection(
+        directionFromAzEl(next.azimuthDeg, next.elevationDeg),
+      );
+      const a = azElFromDirection(dir);
+      next.azimuthDeg = Math.round(a.azimuthDeg) % 360;
+      next.elevationDeg = Math.round(a.elevationDeg);
+    }
+    d.light = next;
   });
   ed().markDirty(docId);
 }
@@ -1761,11 +1777,17 @@ export function setSun(docId: string, patch: Partial<SunState>): void {
     d.sun = { ...d.sun, ...patch };
     // Sun-position sliders overwrite the manual azimuth/elevation state.
     const sun = sunDirection(d.sun.day, d.sun.hour, d.sun.lat);
-    const clampedEl = Math.min(85, Math.max(5, sun.elevationDeg));
+    // The computed direction is clamped into the shadow-valid domain (the
+    // same cone/floor the manual controls use), so dawn/dusk/night never
+    // leave the range the directional shadow can represent.
+    const dir = clampLightDirection(
+      directionFromAzEl(sun.azimuthDeg, sun.elevationDeg),
+    );
+    const a = azElFromDirection(dir);
     d.light = {
       ...d.light,
-      azimuthDeg: Math.round(sun.azimuthDeg) % 360,
-      elevationDeg: Math.round(clampedEl),
+      azimuthDeg: Math.round(a.azimuthDeg) % 360,
+      elevationDeg: Math.round(a.elevationDeg),
     };
   });
   ed().markDirty(docId);

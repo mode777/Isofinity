@@ -24,6 +24,7 @@ holds only what stays true after a change is archived.
 | [0012](0012-cpu-gbuffer-silhouette-picking.md) | Accepted | World-editor selection picks from the in-memory g-buffers on the CPU |
 | [0013](0013-ground-material-splat.md) | Accepted | Ground material splat: four slots, one RGBA coverage texture, displacement seams |
 | [0014](0014-lazy-sprite-view-decode.md) | Accepted | Sprite views decode lazily on first use and cache per source file |
+| [0015](0015-reconstructed-occluder-directional-shadows.md) | Accepted | Directional shadows from a runtime-reconstructed occluder, under a bounded key-light domain |
 
 ## Adding a decision
 

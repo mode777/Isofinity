@@ -63,6 +63,13 @@ each line below has a full record there).
   point, and decoded views are cached per source file for the session
   (`verify:bundles`; ADR 0014), so loading a large multi-view sprite no
   longer pays for directions the world never uses.
+- **Directional shadows** — the key directional light casts a real shadow
+  from a world-space occluder reconstructed at runtime from the placed
+  sprites' baked g-buffers, ray-marched in the deferred pass; characters
+  splat their live skinned vertices into the same field so sprite and mesh
+  shadows compound. The key light is confined to a shadow-valid domain
+  (cone around the camera view ray + elevation floor); fully automatic with
+  no authoring step (`verify:shadows`; ADR 0015).
 
 ## In progress
 
@@ -73,10 +80,11 @@ Nothing in flight.
 - Dynamic-mesh follow-ons: mesh placement serialization, locomotion,
   dynamic-ground geometry (the same batch, unskinned), multi-character
   instancing.
-- Real shadow mapping — placement heights made per-pixel world positions
-  reconstructable from the composited depth, which a light-space occluder
-  pass can consume. Optional x/z snapping alongside surface snap for
-  one-click aligned stacking.
+- Shadow follow-ons: remove the baked grounding shadow once directional
+  shadows are visually verified (contact/AO term to reconsider), a
+  layered/voxel occluder for overhangs, an optional user shadow toggle, and
+  a load-time per-view occluder point cache if rebuild cost shows. Optional
+  x/z snapping alongside surface snap for one-click aligned stacking.
 - Supersampling (render at N× and box-downsample), multi-cube composite
   assets, geometry-level clipping (CSG) instead of shader discard,
   KTX2/UASTC packaging for delivery (the merged g-buffer is already in the

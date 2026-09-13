@@ -1,5 +1,6 @@
 import type { LightParams } from '../runtime/renderer.js';
 import type { LightState } from './document.js';
+import { clampLightDirection } from '../shared/lightDomain.js';
 
 function srgbToLinear(c: number): number {
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
@@ -25,14 +26,18 @@ export function lightParams(light: LightState): LightParams {
   }
   const az = (light.azimuthDeg * Math.PI) / 180;
   const el = (light.elevationDeg * Math.PI) / 180;
-  const dir: [number, number, number] = [
+  // Defensive: the direction always lies in the shadow-valid domain, so the
+  // deferred shadow march can rely on the camera-facing relief. Stored
+  // values are already clamped on edit; this is the last gate before upload.
+  const dir = clampLightDirection([
     Math.cos(el) * Math.cos(az),
     Math.sin(el),
     Math.cos(el) * Math.sin(az),
-  ];
+  ]);
+  const dirMut: [number, number, number] = [dir[0], dir[1], dir[2]];
   const kr = srgbHexToLinearRgb(light.colorHex);
   return {
-    dir,
+    dir: dirMut,
     key: [kr[0] * light.intensity, kr[1] * light.intensity, kr[2] * light.intensity],
     ambient: srgbHexToLinearRgb(light.ambientHex),
   };

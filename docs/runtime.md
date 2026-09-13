@@ -436,13 +436,33 @@ albedo·AO surface (RT0, RGBA8), and a linear-depth texture (RT2, RGBA16F, depth
 and one fullscreen **deferred light pass** applies every dynamic light
 over the composite:
 
-- `color = linearToSrgb(srgbToLinear(RT0) * (ambient + key * max(dot(N, L), 0)) + point lights)`
+- `color = linearToSrgb(srgbToLinear(RT0) * (ambient + key * max(dot(N, L), 0) * shadow + point lights))`
   — the multiplicative factor (ADR 0003) is applied **exactly once, in the
   light pass, for every surface kind**. For sprites this reproduces the old
   forward per-fragment formula bit-for-bit (a sprite's RT0 texel *is* its
   baked render texel; ADR 0003's "treat baked light as AO" formalized);
   meshes and the ground bake their environment ambient (SH irradiance) into
   their RT0 texel at write time and receive the same factor.
+- **Directional shadow** (ADR 0015): the `key` term is scaled by a per-pixel
+  visibility from a ray marched through a world-space occluder reconstructed
+  from the placed sprites' baked g-buffers (`src/runtime/shadowField.ts`).
+  Characters splat their live skinned vertices into the same field, so sprite
+  and character shadows compound as one region. The key-light direction is
+  confined to a **shadow-valid domain** (`src/shared/lightDomain.ts`: within
+  65° of the camera view ray and at least 10° elevation) because the
+  camera-facing relief is the occluder; the manual key controls and the
+  sun-position computation both clamp into it. It is automatic — no asset or
+  world setup — and is inert when the occluder is empty or the Dynamic light
+  switch is off. `npm run verify:shadows` covers the domain clamp, the
+  occluder build and the CPU march.
+- Shadowing needs **no setup**: it derives from whatever bundles a world
+  already references, chooses its resolution from the ground size, and
+  rebuilds on load and placement edits. The only authoring knobs that affect
+  its fidelity are optional and already exist: material **alpha mode** (MASK
+  keeps foliage outlines; BLEND bakes opaque and shadows as a block), the
+  origin anchor and model scale, which baked **view slots** exist, and the
+  bake environment. Occluder detail follows the fixed bake resolution
+  (`PX_PER_UNIT = 128`); no per-asset shadow setting exists.
 - **World position** is reconstructed per pixel from the g-buffer depth
   (ADR 0001) — `worldPos = sx·screenRight + sy·screenUp + depth·viewDir`,
   the fixed-camera orthonormal frame — so point lights can evaluate
@@ -626,8 +646,10 @@ light pass sampling all three afterwards:
    plane's own depth — plus the up normal, so the deferred pass lights
    them as floor (`docs/decisions/0010`).
 6. **Deferred light pass** — a fullscreen quad over the default
-   framebuffer sampling RT0/RT1/RT2: reconstructs world position (ADR
-   0001), applies the ambient picker + key directional + point-light UBO
+   framebuffer sampling RT0/RT1/RT2 plus the reconstructed occluder
+   height field (an `R32F` texture, `texelFetch`): reconstructs world
+   position (ADR 0001), marches the key-light shadow ray, and applies the
+   ambient picker + key directional (× shadow visibility) + point-light UBO
    once (see Lighting). The **Dynamic light** switch pins the factor to
    identity, which presents RT0·AO unmodified — the pure prerendered
    composite.

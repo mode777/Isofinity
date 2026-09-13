@@ -11,7 +11,8 @@
     "verify:mesh": "esbuild src/runtime/mesh-verify.ts --bundle --platform=node --format=esm --outfile=/tmp/mesh-verify.mjs --loader:.glb=dataurl --log-level=warning && node /tmp/mesh-verify.mjs",
     "verify:history": "esbuild src/runtime/history-verify.ts --bundle --platform=node --format=esm --outfile=/tmp/history-verify.mjs --log-level=warning && node /tmp/history-verify.mjs",
     "verify:selection": "esbuild src/runtime/selection-verify.ts --bundle --platform=node --format=esm --outfile=/tmp/selection-verify.mjs --log-level=warning && node /tmp/selection-verify.mjs",
-    "verify:terrain": "esbuild src/app/terrain-verify.ts --bundle --platform=node --format=esm --outfile=/tmp/terrain-verify.mjs --log-level=warning && node /tmp/terrain-verify.mjs"
+    "verify:terrain": "esbuild src/app/terrain-verify.ts --bundle --platform=node --format=esm --outfile=/tmp/terrain-verify.mjs --log-level=warning && node /tmp/terrain-verify.mjs",
+    "verify:shadows": "esbuild src/runtime/shadow-verify.ts --bundle --platform=node --format=esm --outfile=/tmp/shadow-verify.mjs --log-level=warning && node /tmp/shadow-verify.mjs"
   },
   "devDependencies": {
     "@fission-ai/openspec": "^1.11.0",

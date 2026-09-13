@@ -245,6 +245,13 @@ for anti-aliasing, so sprite edges converge to true AA.
    through the sprite editor toolbar's render pass action, which implicitly
    re-bakes the raster g-buffer first so both passes stay pixel-aligned. No
    background image is ever captured into the pass.
+   **Dynamic-shadow coupling**: the runtime's key directional shadow is cast
+   from the reconstructed g-buffer (ADR 0015), not from the baked image. An
+   HDRI that contains a hard sun bakes its own directional shadow into the
+   render pass, which then doubles against the runtime shadow when the key
+   direction differs. Bake sprites for dynamically-shadowed worlds with a
+   sunless or overcast environment (or keep the baked grounding shadow off)
+   so the runtime key light owns all directional shadowing.
 - **Tonemapping/export**: the accumulated linear float target is composited
   through a fullscreen quad using three's `<tonemapping_fragment>`
   (ACES filmic) plus an explicit sRGB transfer and a display-referred

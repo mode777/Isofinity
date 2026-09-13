@@ -199,7 +199,21 @@ the pointer for the real semantics.
   light — ambient picker, key directional, point lights — once, over the
   composite, with world position reconstructed from the g-buffer depth
   (ADR 0001) and the ADR 0003 multiplicative factor applied exactly once
-  for every surface kind (ADR 0011).
+  for every surface kind (ADR 0011). The key directional term is also
+  scaled by the per-pixel **shadow visibility**.
+- **Occluder field** — the world-space vertical height field the
+  directional shadow marches, reconstructed at runtime from the placed
+  sprites' covered g-buffer texels (max height per ground cell, meshes
+  splatted in per frame); one `R32F` texture, engine state, never
+  serialized (`src/runtime/shadowField.ts`, ADR 0015).
+- **Shadow visibility** — the per-pixel 0/1 factor from a height-field DDA
+  toward the key light in the deferred pass; multiplies **only** the key
+  directional term, so ambient and the baked albedo·AO are untouched
+  (ADR 0015).
+- **Light domain** — the shadow-valid key-light direction: within 65° of
+  the camera view ray and at least 10° elevation (`src/shared/lightDomain.ts`).
+  The camera-facing sprite relief is a valid occluder only from this side,
+  so the manual key controls and the sun-position output clamp into it.
 - **Per-pixel occlusion** — each sprite fragment writes `gl_FragDepth`
   from baked g-buffer depth + the placement's full
   `dot(origin + height, viewDir)`; LEQUAL depth resolves
