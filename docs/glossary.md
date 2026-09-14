@@ -89,6 +89,10 @@ the pointer for the real semantics.
 - **Material slot** — one of up to four ground material bindings (0–3) the
   ground blends and paints at once. Each slot samples one layer of the
   material texture arrays.
+- **Material cache** — the session map of a material's decoded
+  (`src/app/groundMaterial.ts`) `GroundMaterialMaps`, keyed by a
+  workspace-scoped identity plus size/last-modified, so re-binding or
+  re-opening a world reuses decoded maps; in-memory only (ADR 0006).
 - **Splat (coverage)** — the world-space RGBA texture holding the four
   material-slot coverages: rgb = slots 0–2, alpha = slot 3 (derived as
   `1 - r - g - b`). Persisted as a PNG beside the world JSON.
@@ -101,7 +105,9 @@ the pointer for the real semantics.
 - **Sprite layer** — a world's loaded sprite asset: tight passes (no
   padding) in two texture arrays (render RGBA8 + g-buffer RGBA16F) plus
   per-layer size/origin (`src/runtime/assets.ts`); each layer is uploaded at
-  its own dimensions and added incrementally (ADR 0016). A multi-view asset
+  its own dimensions and added incrementally (ADR 0016), and a bundle render
+  pass stays the decoded `ImageBitmap` uploaded directly (ADR 0017). A
+  multi-view asset
   loads the north layer eagerly and one layer per extra view slot **on
   demand**; see **Lazy view**.
 - **Lazy view** — an extra bundle view slot (E/S/W) the world document

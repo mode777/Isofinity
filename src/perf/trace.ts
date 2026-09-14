@@ -61,7 +61,6 @@ export const TAGS = {
   spriteDepth: 'sprite.depth',
   spritePng: 'sprite.png',
   spriteBitmap: 'sprite.bitmap',
-  spriteReadback: 'sprite.readback',
   spriteNorth: 'sprite.north',
   spriteView: 'sprite.view',
   spritePadding: 'sprite.padding',

@@ -6,7 +6,14 @@
  * descriptor, `/7` tolerance, rejection cases). Run with:
  *   npm run verify:terrain
  */
-import { matchMaterialMaps, groundMaterialArraySize, type GroundMaterialMaps } from './groundMaterial.js';
+import {
+  clearMaterialCache,
+  groundMaterialArraySize,
+  loadGroundMaterial,
+  matchMaterialMaps,
+  type GroundMaterialMaps,
+} from './groundMaterial.js';
+import { strToU8, zipSync } from 'three/examples/jsm/libs/fflate.module.js';
 import { buildWorldFile, parseWorldFile } from './worldFile.js';
 import {
   DEFAULT_GROUND_TILE_SCALE,
@@ -70,7 +77,7 @@ const LIGHT: LightState = {
 };
 const SUN: SunState = { hour: 12, day: 80, lat: 45 };
 
-function main(): void {
+async function main(): Promise<void> {
   console.log('material slots:');
   {
     const disp = 'rock_disp_2k.png';
@@ -336,8 +343,55 @@ function main(): void {
     );
   }
 
+  console.log('material session cache:');
+  {
+    // The decoder is a browser API; stub it so the cache logic is testable
+    // (the archive bytes are never a real PNG).
+    const g = globalThis as unknown as {
+      createImageBitmap?: (src: unknown) => Promise<{ width: number; height: number; close(): void }>;
+    };
+    const previous = g.createImageBitmap;
+    g.createImageBitmap = async () => ({ width: 4, height: 4, close: () => {} });
+    try {
+      const archive = zipSync({ 'mat_diff_1k.png': strToU8('stand-in') })
+        .buffer as ArrayBuffer;
+      clearMaterialCache();
+      let reads = 0;
+      const source = {
+        key: 'ws1:materials/mat.material',
+        fileName: 'mat.material',
+        size: archive.byteLength,
+        lastModified: 1,
+        read: async (): Promise<ArrayBuffer> => {
+          reads++;
+          return archive;
+        },
+      };
+      const first = await loadGroundMaterial(source);
+      const second = await loadGroundMaterial(source);
+      ok(
+        first === second && reads === 1,
+        `a repeat load reuses the decoded maps (reads=${reads})`,
+      );
+
+      await loadGroundMaterial({ ...source, lastModified: 2 });
+      ok(reads === 2, 'a changed file identity re-decodes');
+
+      await loadGroundMaterial({ ...source, key: 'ws2:materials/mat.material' });
+      ok(reads === 3, 'a different workspace key decodes independently');
+
+      clearMaterialCache();
+      await loadGroundMaterial(source);
+      ok(reads === 4, 'clearing the cache forces a re-read');
+    } finally {
+      if (previous) g.createImageBitmap = previous;
+      else delete g.createImageBitmap;
+      clearMaterialCache();
+    }
+  }
+
   console.log(`\nterrain-verify: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 }
 
-main();
+void main();

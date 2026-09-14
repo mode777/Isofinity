@@ -403,7 +403,10 @@ workspace never reuses another workspace's data. The compressed bundle
 bytes are **retained** in that cache and every stored view is decoded from
 them, so resolving an extra view never re-reads the file; the bytes are
 released once all stored views resolve, and a session byte budget
-(256 MB) evicts them LRU-style past that (ADR 0014, amended). Placing into a
+(256 MB) evicts them LRU-style past that (ADR 0014, amended). The runtime
+decodes the render pass to the `ImageBitmap` itself and uploads it straight
+to the sprite texture array — no canvas `getImageData` readback (ADR 0017);
+the sprite editor's preview keeps the byte-returning decoder. Placing into a
 world **requires** the render pass. Row order differs per decoder and both
 must end top-down (row 0 = sprite top) for upload: the PNG decodes top-down
 and is uploaded **as-is**, while `EXRLoader` writes rows bottom-up in GL
@@ -432,7 +435,7 @@ nothing. Each completed phase logs one copyable line
 totalMs}` table and returns it; `__loadTraceClear()` empties the accumulator.
 The tags are: `sprite.read`, `sprite.manifest`, `sprite.inflate` (per zip
 entry), `sprite.exr`, `sprite.depth`, `sprite.png`, `sprite.bitmap`,
-`sprite.readback`, `sprite.north`,
+`sprite.north`,
 `sprite.view`, `sprite.padding`, `sprite.upload`, `world.open`,
 `world.asset`, `world.direction`, `renderer.build`, `material.parse`,
 `material.inflate`, `material.exr`, `material.image`, `material.srgb`,
@@ -610,7 +613,10 @@ extension in the workspace's `materials/` folder; maps are identified by
 precedence; the rest degrade with a notice; module
 `src/app/groundMaterial.ts`). All maps of all bound slots are normalized to
 one size and RGBA8 so they fit the texture arrays (EXR diffuse is
-converted, an accepted loss). The world environment
+converted, an accepted loss). Decoded material maps are retained in a
+workspace-scoped session cache, so re-binding a material or re-opening a
+world reuses them instead of re-parsing and re-decoding the archive
+(invalidated by the file's size/last-modified). The world environment
 (pickers in the properties panel: workspace `hdri/` or a raw `.hdr`/
 `.exr` file) sets the ambient probe for meshes and ground; note the
 one-way relationship: baked sprite texels keep the environment they were

@@ -82,8 +82,9 @@ export interface SpriteLayer {
   origin: Vec3;
   gbuffer: Uint16Array;
   /** Path-traced lit render (sRGB RGBA, top-down). Required: the runtime
-   *  only displays shaded prerendered images. */
-  render: Uint8Array;
+   *  only displays shaded prerendered images. Bundle loads keep the decoded
+   *  bitmap (uploaded directly, no CPU readback); boot bakes carry bytes. */
+  render: Uint8Array | ImageBitmap;
 }
 
 export interface SpriteSet {
@@ -99,7 +100,7 @@ export interface SpriteSet {
   anchors: Vec3[];
   ppus: number[];
   gbufferLayers: Uint16Array[];
-  renderLayers: Uint8Array[];
+  renderLayers: (Uint8Array | ImageBitmap)[];
 }
 
 /**
@@ -292,7 +293,7 @@ function buildViewLayer(
   info: BakeManifestInfo,
   spec: BakeViewSpec,
   gbuffer: Uint16Array,
-  render: Uint8Array,
+  render: Uint8Array | ImageBitmap,
   id: string,
 ): SpriteLayer {
   const anchor: Vec3 = info.provenance?.origin ?? [0, 0, 0];
@@ -339,7 +340,7 @@ async function decodeNorth(
   const renderBytes = entryBuffer(readBakeEntry(buffer, spec.renderFile));
   inflateR();
   const png = span(TAGS.spritePng, { asset: label, view: `${spec.width}x${spec.height}` });
-  const render = await decodePng(new Blob([renderBytes]), spec.width, spec.height);
+  const render = await decodePngBitmap(new Blob([renderBytes]), spec.width, spec.height);
   png();
   return buildViewLayer(info, spec, gbuffer, render, info.manifest.id);
 }
@@ -377,7 +378,7 @@ async function decodeExtra(
     slot: spec.slot,
     view: `${spec.width}x${spec.height}`,
   });
-  const render = await decodePng(new Blob([renderBytes]), spec.width, spec.height);
+  const render = await decodePngBitmap(new Blob([renderBytes]), spec.width, spec.height);
   png();
   return { ok: true, layer: buildViewLayer(info, spec, gbuffer, render, id) };
 }
@@ -623,6 +624,31 @@ export async function loadBundleLayer(
 }
 
 export async function decodePng(blob: Blob, w: number, h: number): Promise<Uint8Array> {
+  const bitmap = await createImageBitmap(blob, {
+    premultiplyAlpha: 'none',
+    colorSpaceConversion: 'none',
+  });
+  if (bitmap.width !== w || bitmap.height !== h) {
+    const got = `${bitmap.width}x${bitmap.height}`;
+    bitmap.close();
+    throw new Error(`render is ${got}, manifest says ${w}x${h}`);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  return new Uint8Array(ctx.getImageData(0, 0, w, h).data);
+}
+
+/**
+ * Decode a bundle render pass to the bitmap itself, for the runtime path
+ * where it is only ever a texture: the sprite texture upload takes the
+ * `ImageBitmap` directly, so there is no canvas `getImageData` readback.
+ * (The sprite editor's preview path keeps the byte-returning `decodePng`.)
+ */
+export async function decodePngBitmap(blob: Blob, w: number, h: number): Promise<ImageBitmap> {
   const bitmapSpan = span(TAGS.spriteBitmap, { view: `${w}x${h}` });
   const bitmap = await createImageBitmap(blob, {
     premultiplyAlpha: 'none',
@@ -634,16 +660,7 @@ export async function decodePng(blob: Blob, w: number, h: number): Promise<Uint8
     bitmap.close();
     throw new Error(`render is ${got}, manifest says ${w}x${h}`);
   }
-  const readback = span(TAGS.spriteReadback, { view: `${w}x${h}` });
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-  ctx.drawImage(bitmap, 0, 0);
-  bitmap.close();
-  const data = new Uint8Array(ctx.getImageData(0, 0, w, h).data);
-  readback();
-  return data;
+  return bitmap;
 }
 
 export function decodeExrGbuffer(buffer: ArrayBuffer, w: number, h: number): Uint16Array {

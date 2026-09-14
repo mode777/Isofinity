@@ -72,6 +72,12 @@ each line below has a full record there).
   the document (`verify:bundles`/`verify:selection`/`verify:shadows`; ADR
   0014 amended, ADR 0016); boot-baked primitives are cached per session.
   Removed CPU layer padding entirely.
+- **Texture decode** — bundle render passes stay the decoded `ImageBitmap`
+  and upload straight to the sprite texture array (no canvas `getImageData`
+  readback; `verify:bundles`/`verify:selection`/`verify:shadows`; ADR 0017),
+  and decoded ground-material maps are session-cached under a
+  workspace-scoped key (`verify:terrain`), so a re-open does not re-decode
+  them. Half-float g-buffer storage remains a separate planned follow-up.
 - **Load tracing** — opt-in, in-memory per-phase timings for sprite decode,
   world open and material decode/upload, logged as copyable
   `[loadtrace] <tag> <ms>ms` lines and summarized via `__loadTraceSummary()`

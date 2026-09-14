@@ -189,3 +189,54 @@ export async function parseGroundMaterial(
     parseSpan();
   }
 }
+
+/** A workspace material file as a lazily-read source, for the session cache. */
+export interface GroundMaterialSource {
+  /** Workspace-scoped identity, e.g. `ws1:materials/forest_leaves_02.material`. */
+  key: string;
+  /** Display/file name used in decode errors and `GroundMaterialMaps.name`. */
+  fileName: string;
+  size: number;
+  lastModified: number;
+  read: () => Promise<ArrayBuffer>;
+}
+
+interface CachedMaterial {
+  size: number;
+  lastModified: number;
+  maps: GroundMaterialMaps;
+}
+
+const materialCache = new Map<string, CachedMaterial>();
+
+/** Drop every decoded material retained for the session. */
+export function clearMaterialCache(): void {
+  materialCache.clear();
+}
+
+/**
+ * Load a material through the session cache: decoded maps are retained per
+ * workspace-scoped source identity and reused until the file's size or
+ * last-modified time changes. In-memory engine state only — never serialized
+ * (ADR 0006). `parseGroundMaterial` stays the pure decode path for callers
+ * that already hold the bytes.
+ */
+export async function loadGroundMaterial(
+  source: GroundMaterialSource,
+): Promise<GroundMaterialMaps> {
+  const existing = materialCache.get(source.key);
+  if (
+    existing &&
+    existing.size === source.size &&
+    existing.lastModified === source.lastModified
+  ) {
+    return existing.maps;
+  }
+  const maps = await parseGroundMaterial(await source.read(), source.fileName);
+  materialCache.set(source.key, {
+    size: source.size,
+    lastModified: source.lastModified,
+    maps,
+  });
+  return maps;
+}

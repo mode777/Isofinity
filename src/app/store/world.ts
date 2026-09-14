@@ -70,7 +70,7 @@ import {
   GROUND_MATERIAL_SLOTS,
   splatDimensions,
 } from '../document.js';
-import { parseGroundMaterial } from '../groundMaterial.js';
+import { loadGroundMaterial } from '../groundMaterial.js';
 import { equirectFromHdrBuffer } from '../hdr.js';
 import { buildWorldFile, parseWorldFile } from '../worldFile.js';
 import { nextDocId, useEditor, type EditorState } from './editor.js';
@@ -668,7 +668,13 @@ function skippedCount(
 async function applyGroundMaps(docId: string, fileName: string, slot: number): Promise<void> {
   try {
     const file = await readWorkspaceFile('materials', fileName);
-    const maps = await parseGroundMaterial(await file.arrayBuffer(), fileName);
+    const maps = await loadGroundMaterial({
+      key: `ws${useWorkspace.getState().epoch}:materials/${fileName}`,
+      fileName,
+      size: file.size,
+      lastModified: file.lastModified,
+      read: () => file.arrayBuffer(),
+    });
     const note = maps.notes.length > 0 ? ` (${maps.notes.join('; ')})` : '';
     update(docId, (d) => {
       if (d.ground.materials[slot] !== fileName) return;
@@ -914,7 +920,13 @@ export async function selectGroundMaterialFile(
   }
   const s = clampSlot(slot);
   try {
-    const maps = await parseGroundMaterial(await file.arrayBuffer(), file.name);
+    const maps = await loadGroundMaterial({
+      key: `file:materials/${file.name}`,
+      fileName: file.name,
+      size: file.size,
+      lastModified: file.lastModified,
+      read: () => file.arrayBuffer(),
+    });
     update(doc.docId, (d) => {
       d.ground.materials[s] = file.name;
       d.ground.maps[s] = maps;

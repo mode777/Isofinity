@@ -764,7 +764,7 @@ export class Renderer {
   private spriteProg: WebGLProgram;
   private renderTex: WebGLTexture | null = null;
   private gbufferTex: WebGLTexture | null = null;
-  private spriteRenderLayers: Uint8Array[] = [];
+  private spriteRenderLayers: (Uint8Array | ImageBitmap)[] = [];
   private spriteGbufferLayers: Uint16Array[] = [];
   private spriteSizes: [number, number][] = [];
   private spriteCapacityW = 0;
@@ -885,7 +885,7 @@ export class Renderer {
 
   constructor(
     canvas: HTMLCanvasElement,
-    renderLayers: Uint8Array[],
+    renderLayers: (Uint8Array | ImageBitmap)[],
     gbufferLayers: Uint16Array[],
     sizes: readonly [number, number][],
   ) {
@@ -1118,7 +1118,7 @@ export class Renderer {
 
   /** (Re)builds the sprite texture arrays from scratch; used at construction. */
   setSprites(
-    renderLayers: Uint8Array[],
+    renderLayers: (Uint8Array | ImageBitmap)[],
     gbufferLayers: Uint16Array[],
     sizes: readonly [number, number][],
   ): void {
@@ -1141,7 +1141,7 @@ export class Renderer {
    * appends matching layers in order.
    */
   addSpriteLayer(
-    render: Uint8Array,
+    render: Uint8Array | ImageBitmap,
     gbuffer: Uint16Array,
     width: number,
     height: number,
@@ -1239,21 +1239,40 @@ export class Renderer {
   private uploadSpriteLayerAt(index: number): void {
     const gl = this.gl;
     const [w, h] = this.spriteSizes[index];
+    const render = this.spriteRenderLayers[index];
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.renderTex!);
-    gl.texSubImage3D(
-      gl.TEXTURE_2D_ARRAY,
-      0,
-      0,
-      0,
-      index,
-      w,
-      h,
-      1,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      this.spriteRenderLayers[index],
-    );
+    if (render instanceof Uint8Array) {
+      gl.texSubImage3D(
+        gl.TEXTURE_2D_ARRAY,
+        0,
+        0,
+        0,
+        index,
+        w,
+        h,
+        1,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        render,
+      );
+    } else {
+      // Decoded render bitmap uploaded straight to the array (no CPU
+      // readback); the same TexImageSource overload the ground path uses.
+      gl.texSubImage3D(
+        gl.TEXTURE_2D_ARRAY,
+        0,
+        0,
+        0,
+        index,
+        w,
+        h,
+        1,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        render,
+      );
+    }
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.gbufferTex!);
     gl.texSubImage3D(

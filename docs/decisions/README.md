@@ -26,6 +26,7 @@ holds only what stays true after a change is archived.
 | [0014](0014-lazy-sprite-view-decode.md) | Accepted | Sprite views decode lazily on first use and cache per source file |
 | [0015](0015-reconstructed-occluder-directional-shadows.md) | Accepted | Directional shadows from a runtime-reconstructed occluder, under a bounded key-light domain |
 | [0016](0016-unpadded-incremental-sprite-upload.md) | Accepted | Sprite layers upload tight and incrementally (no padding, no per-layer renderer rebuild) |
+| [0017](0017-upload-from-decoded-bitmaps.md) | Accepted | Texture passes upload from decoded bitmaps, not CPU readbacks |
 
 ## Adding a decision
 
