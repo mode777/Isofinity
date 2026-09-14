@@ -440,6 +440,9 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     const totalSteps = totalAssets + directionTargets.length;
     let loadedAssets = 0;
     ed().setProgress({ label: loadingLabel, value: 0, max: totalSteps });
+    // The per-asset decode below runs in long synchronous bursts; yield once
+    // so React commits and paints the bar before the main thread is taken.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     // Everything validated — only now build the document.
     const docId = nextDocId('world');
     const doc: WorldDocument = {
