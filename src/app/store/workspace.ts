@@ -31,9 +31,13 @@ const setStatus = (text: string): void => useEditor.getState().setStatus(text);
 
 export const useWorkspace = create<WorkspaceStore>((set) => {
   // Single subscription mirroring the workspace state machine into the
-  // store; the underlying module owns the real state.
+  // store; the underlying module owns the real state. The listener fires
+  // immediately (during this initializer), so the epoch is tracked in a
+  // closure — an updater `set((s) => …)` would read an uninitialized state.
+  let connectionEpoch = 0;
   onWorkspaceChange((state) => {
-    set((s) => ({ state, epoch: state.kind === 'connected' ? s.epoch + 1 : s.epoch }));
+    if (state.kind === 'connected') connectionEpoch += 1;
+    set({ state, epoch: connectionEpoch });
     if (state.kind === 'connected') {
       setStatus(`Workspace connected: ${state.name} — hdri/, models/, sprites/, worlds/ ready`);
     } else if (state.kind === 'disconnected') {
