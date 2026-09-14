@@ -149,7 +149,11 @@ pixel-for-pixel with the g-buffer pass. Background pixels (no geometry)
 SHALL be transparent (alpha 0), except where the optional grounding shadow
 (see the grounding-shadow requirement) composites dark mid-alpha values
 into them; camera rays that miss the asset SHALL not contribute any
-background image or color into the pass beyond that shadow. The render pass
+background image or color into the pass beyond that shadow. This applies at
+partial coverage as well: a silhouette-edge texel's stored color SHALL be
+the asset's own lit radiance with the environment's contribution removed,
+at its coverage alpha — never an average with the environment plate — and
+a fully empty texel SHALL store RGB 0. The render pass
 SHALL be tone-mapped (ACES filmic) and sRGB-encoded before storage, and the
 downloaded PNG SHALL be pixel-identical to the on-screen preview of that
 pass. Accumulation SHALL proceed incrementally over a tile grid — each
@@ -174,6 +178,22 @@ environment reproduces the same bytes.
 - **THEN** pixels not covered by geometry are fully transparent while lit
   object pixels are opaque
 
+#### Scenario: Silhouette edges carry no environment contamination
+
+- **WHEN** a render-pass texel has partial coverage (its alpha is strictly
+  between 0 and 1, the antialiased edge of the asset's silhouette or of an
+  interior gap)
+- **THEN** its stored RGB equals the tone-mapped asset radiance with the
+  background-plate contribution removed — compositing it over any backdrop
+  at its coverage alpha reproduces the uncontaminated edge rather than a
+  bright seam — instead of an average of asset and environment radiance
+
+#### Scenario: Empty pixels carry no background color
+
+- **WHEN** the render pass finishes with the grounding-shadow toggle off
+- **THEN** every fully transparent texel stores RGB 0 (the pass carries no
+  environment radiance in pixels the asset does not cover)
+
 #### Scenario: Export matches the preview
 
 - **WHEN** the user downloads the render pass after inspecting it on screen
@@ -195,7 +215,6 @@ environment reproduces the same bytes.
   twice on any machine
 - **THEN** both runs use the same tile grid for the same frame size and
   produce byte-identical render passes
-
 ### Requirement: Render pass shows a live converging preview
 
 While a render pass accumulates, the sprite editor's viewport SHALL display
