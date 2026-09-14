@@ -927,9 +927,9 @@ span.dirtree-caret {
   margin: 0;
   padding: 0;
   display: grid;
-  /* Tiles cap at the thumbnail's native 128×128; tracks shrink (never
-     grow beyond it) and the cluster centers in the pane. */
-  grid-template-columns: repeat(auto-fill, minmax(0, 8rem));
+  /* Fixed 128px tracks: tiles can never exceed the thumbnail's native
+     size; the cluster centers in the pane. */
+  grid-template-columns: repeat(auto-fill, 8rem);
   justify-content: center;
   gap: 0.4rem;
 }
@@ -950,6 +950,7 @@ span.dirtree-caret {
   align-items: center;
   justify-content: center;
   width: 100%;
+  max-width: 8rem;
   aspect-ratio: 1;
   border: 1px solid var(--panel-border);
   border-radius: 4px;
