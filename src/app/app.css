@@ -922,7 +922,10 @@ span.dirtree-caret {
   gap: 0.4rem;
 }
 
-.asset-browser-list {
+/* Scoped below to out-rank the shared .file-dialog-files ul/li-button
+   rules, which would otherwise force the save dialog's full-width list
+   layout onto the tile grid. */
+.file-dialog-files .asset-browser-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -934,7 +937,7 @@ span.dirtree-caret {
   gap: 0.4rem;
 }
 
-.asset-browser-entry {
+.asset-browser-list .asset-browser-entry {
   display: flex;
   flex-direction: column;
   align-items: stretch;
