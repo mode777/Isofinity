@@ -13,6 +13,7 @@ import {
   ShaderMaterial,
   UnsignedByteType,
   Vector2,
+  Vector3,
   WebGLRenderTarget,
   WebGLRenderer,
   type Material,
@@ -68,6 +69,38 @@ export function tileGridFor(width: number, height: number): number {
   return Math.min(TILE_GRID_MAX, Math.max(1, Math.ceil(Math.sqrt(px / TILE_BUDGET_PX))));
 }
 
+/** Row count of one full-frame background readback band. */
+const BACKGROUND_BAND_ROWS = 256;
+
+/** A pixel rectangle inside a render target, in GL coordinates. */
+interface PxRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Whole frame split into bounded bands: the committed pass's probe rects. */
+function bandRects(width: number, height: number): PxRect[] {
+  const rects: PxRect[] = [];
+  for (let y = 0; y < height; y += BACKGROUND_BAND_ROWS) {
+    rects.push({ x: 0, y, w: width, h: Math.min(BACKGROUND_BAND_ROWS, height - y) });
+  }
+  return rects;
+}
+
+/** Corner tile cells, probed in order while accumulation is still running. */
+function tileProbeRects(width: number, height: number, tiles: number): PxRect[] {
+  const tw = Math.min(Math.ceil(width / tiles), width);
+  const th = Math.min(Math.ceil(height / tiles), height);
+  return [
+    { x: 0, y: 0, w: tw, h: th },
+    { x: width - tw, y: 0, w: tw, h: th },
+    { x: 0, y: height - th, w: tw, h: th },
+    { x: width - tw, y: height - th, w: tw, h: th },
+  ];
+}
+
 export const DEFAULT_PT_SETTINGS: PtSettings = {
   samples: 32,
   bounces: 5,
@@ -115,6 +148,10 @@ export interface PtExtras {
 const TONEMAP_FRAG = `
 uniform sampler2D uMap;
 uniform float uSaturation;
+// Linear environment radiance returned by a missed camera ray — constant
+// across the frame for the orthographic bake camera, measured from the
+// pass's own empty pixels (estimateBackground).
+uniform vec3 uBackground;
 varying vec2 vUv;
 vec3 linearToSrgb(vec3 c) {
   vec3 lo = c * 12.92;
@@ -123,7 +160,19 @@ vec3 linearToSrgb(vec3 c) {
 }
 void main() {
   vec4 texel = texture2D(uMap, vUv);
-  gl_FragColor = vec4(texel.rgb, texel.a);
+  if (texel.a <= 0.0) {
+    // Pure miss: the pass carries no background color (empty texels RGB 0).
+    gl_FragColor = vec4(0.0);
+  } else {
+    // Partial coverage: accumulation averaged the asset with the plate.
+    // Remove the plate's share and divide out the coverage so ACES sees the
+    // asset's own radiance (straight alpha, no environment contamination).
+    vec3 unmixed = max(
+      (texel.rgb - (1.0 - texel.a) * uBackground) / max(texel.a, 1.0 / 255.0),
+      vec3(0.0)
+    );
+    gl_FragColor = vec4(unmixed, texel.a);
+  }
   // Three's ACES fit + exposure, exactly what the on-screen path uses.
   #include <tonemapping_fragment>
   // Rendering into a plain RGBA8 target leaves <colorspace_fragment> a
@@ -232,6 +281,12 @@ export class PtBaker {
   private disposed = false;
   private previewTarget: WebGLRenderTarget | null = null;
   private previewPixels: Uint8Array | null = null;
+  /**
+   * Background-plate estimate cached for the running pass's previews; the
+   * committed pass always re-estimates on the converged target. Null until
+   * a probe succeeds (cleared at pass start).
+   */
+  private previewBackground: [number, number, number] | null = null;
 
   private tonemapMaterial: ShaderMaterial;
   private tonemapQuad: FullScreenQuad;
@@ -245,7 +300,11 @@ export class PtBaker {
     this.tonemapMaterial = new ShaderMaterial({
       vertexShader: TONEMAP_VERT,
       fragmentShader: TONEMAP_FRAG,
-      uniforms: { uMap: { value: null }, uSaturation: { value: 1 } },
+      uniforms: {
+        uMap: { value: null },
+        uSaturation: { value: 1 },
+        uBackground: { value: new Vector3() },
+      },
       depthTest: false,
       depthWrite: false,
     });
@@ -366,6 +425,10 @@ export class PtBaker {
       tracer.updateEnvironment();
     }
     tracer.reset();
+    // Each pass measures its own plate: a new pass may target another view
+    // slot or environment, and the committed estimate must come from this
+    // pass's converged target.
+    this.previewBackground = null;
 
     // Derived per pass from the frame size: the grid shapes the accumulated
     // bytes (the RNG state advances per tile draw), so it is deterministic
@@ -481,11 +544,56 @@ export class PtBaker {
     });
 
     if (this.disposed || isCancelled?.()) return null;
-    return this.tonemap(tracer.target);
+    // Fresh full-frame estimate on the converged target: every empty pixel
+    // settles to the same value regardless of tile order, so the committed
+    // bytes stay deterministic for a fixed sample count and tile grid.
+    const background = this.estimateBackground(
+      tracer.target,
+      bandRects(tracer.target.width, tracer.target.height),
+    );
+    return this.tonemap(tracer.target, background);
+  }
+
+  /**
+   * Mean linear RGB over fully-missed pixels (alpha 0, nonzero rgb) of the
+   * accumulated target: the environment radiance a miss ray returns. With
+   * the orthographic bake camera every miss samples the same direction, so
+   * the plate is constant across the frame and empty pixels converge to it
+   * exactly. Rects are probed in order and the first with qualifying pixels
+   * decides the value; null when none qualify (nothing sampled yet, or no
+   * empty pixel — where the estimate is unused either way).
+   */
+  private estimateBackground(
+    target: WebGLRenderTarget,
+    rects: PxRect[],
+  ): [number, number, number] | null {
+    const renderer = getRenderer();
+    for (const rect of rects) {
+      const pixels = new Float32Array(rect.w * rect.h * 4);
+      renderer.readRenderTargetPixels(target, rect.x, rect.y, rect.w, rect.h, pixels);
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let count = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i + 3] !== 0) continue;
+        if (pixels[i] === 0 && pixels[i + 1] === 0 && pixels[i + 2] === 0) continue;
+        r += pixels[i];
+        g += pixels[i + 1];
+        b += pixels[i + 2];
+        count += 1;
+      }
+      if (count === 0) continue;
+      return [r / count, g / count, b / count];
+    }
+    return null;
   }
 
   /** ACES tonemap + sRGB encode into RGBA8, readback in GL order. */
-  private tonemap(source: WebGLRenderTarget): PtImage {
+  private tonemap(
+    source: WebGLRenderTarget,
+    background: [number, number, number] | null,
+  ): PtImage {
     const w = source.width;
     const h = source.height;
     const target = new WebGLRenderTarget(w, h, {
@@ -495,7 +603,7 @@ export class PtBaker {
       magFilter: NearestFilter,
       depthBuffer: false,
     });
-    this.tonemapInto(source, target);
+    this.tonemapInto(source, target, background);
     const rgba = new Uint8Array(w * h * 4);
     getRenderer().readRenderTargetPixels(target, 0, 0, w, h, rgba);
     target.dispose();
@@ -527,15 +635,34 @@ export class PtBaker {
       });
       this.previewPixels = new Uint8Array(w * h * 4);
     }
-    this.tonemapInto(source, this.previewTarget);
+    // Cheap corner-tile probe on first need, then cached for the pass:
+    // preview bytes are transient, so the running estimate is good enough —
+    // the committed pass re-estimates on the converged target.
+    if (this.previewBackground === null) {
+      const tiles = this.settings.tiles ?? tileGridFor(source.width, source.height);
+      this.previewBackground = this.estimateBackground(
+        source,
+        tileProbeRects(source.width, source.height, tiles),
+      );
+    }
+    this.tonemapInto(source, this.previewTarget, this.previewBackground);
     const rgba = this.previewPixels!;
     getRenderer().readRenderTargetPixels(this.previewTarget, 0, 0, w, h, rgba);
     return { width: w, height: h, rgba: rgba.slice() };
   }
 
-  private tonemapInto(source: WebGLRenderTarget, target: WebGLRenderTarget): void {
+  private tonemapInto(
+    source: WebGLRenderTarget,
+    target: WebGLRenderTarget,
+    background: [number, number, number] | null,
+  ): void {
     const renderer = getRenderer();
     this.tonemapMaterial.uniforms.uMap.value = source.texture;
+    (this.tonemapMaterial.uniforms.uBackground.value as Vector3).set(
+      background?.[0] ?? 0,
+      background?.[1] ?? 0,
+      background?.[2] ?? 0,
+    );
     renderer.setRenderTarget(target);
     this.tonemapQuad.render(renderer);
     renderer.setRenderTarget(null);

@@ -1175,6 +1175,40 @@ async function main(): Promise<void> {
     }
   }
 
+  // 10. Render-pass background-plate unmix (the TONEMAP_FRAG math,
+  //     mirrored): partial-coverage texels store mix(asset, plate, 1-a) in
+  //     linear pre-tonemap space; removing the plate's share and dividing
+  //     out the coverage must recover the asset's own radiance, alpha 0
+  //     must zero the texel, and the epsilon floor must keep
+  //     tiny-coverage results finite and non-negative.
+  {
+    console.log('test: render-pass background-plate unmix');
+    const EPS = 1 / 255;
+    const unmix = (rgb: number[], a: number, bg: number[]): number[] =>
+      a <= 0
+        ? [0, 0, 0]
+        : rgb.map((c, i) => Math.max((c - (1 - a) * bg[i]) / Math.max(a, EPS), 0));
+    const plate = [1.7, 1.2, 0.9];
+    let worst = 0;
+    for (const coverage of [1, 0.9, 0.75, 0.5, 0.25, 0.1, 2 / 255]) {
+      for (const obj of [
+        [0.04, 0.2, 0.6],
+        [0.9, 0.5, 0.1],
+        [0, 0, 0],
+        [2.5, 1.5, 0.05],
+      ]) {
+        const stored = obj.map((o, i) => coverage * o + (1 - coverage) * plate[i]);
+        const back = unmix(stored, coverage, plate);
+        for (let i = 0; i < 3; i++) worst = Math.max(worst, Math.abs(back[i] - obj[i]));
+      }
+    }
+    ok(worst < 1e-9, `unmix recovers the asset radiance across coverages (worst ${worst.toExponential(2)})`);
+    ok(unmix([0.5, 0.5, 0.5], 0, plate).every((v) => v === 0), 'alpha 0 zeroes the texel');
+    const floored = unmix([0.5, 0.5, 0.5], 0.001, plate);
+    ok(floored.every((v) => Number.isFinite(v) && v >= 0), 'the epsilon floor keeps tiny-coverage texels finite');
+    ok(unmix([0.05, 0.05, 0.05], 0.9, plate).every((v) => v === 0), 'a rounding shortfall below the plate share clamps to 0');
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 }

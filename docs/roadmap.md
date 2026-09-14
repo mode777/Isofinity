@@ -98,6 +98,13 @@ each line below has a full record there).
   shadows compound. The key light is confined to a shadow-valid domain
   (cone around the camera view ray + elevation floor); fully automatic with
   no authoring step (`verify:shadows`; ADR 0015).
+- **Render-pass edge unmix** — sprite bakes no longer show bright seams
+  around silhouettes over dark backdrops: the tonemap removes the
+  environment plate's contribution from partial-coverage texels and zeroes
+  empty texels (the plate is one constant for the ortho bake camera,
+  measured from the pass's own empty pixels; `verify:bundles`; ADR 0019).
+  No format bump — `/7` render-pass bytes change, old bundles keep their
+  fringes until re-baked.
 
 ## In progress
 
@@ -105,6 +112,10 @@ Nothing in flight.
 
 ## Planned
 
+- Premultiplied render-pass storage (ADR 0019 follow-up): kill the residual
+  dark bilinear-filter shimmer at zoom — premultiplied bake output, runtime
+  `(ONE, ONE_MINUS_SRC_ALPHA)` blending, and every render-pass consumer in
+  one format-semantics change.
 - Dynamic-mesh follow-ons: mesh placement serialization, locomotion,
   dynamic-ground geometry (the same batch, unskinned), multi-character
   instancing.

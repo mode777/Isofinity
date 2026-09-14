@@ -159,6 +159,15 @@ planned KTX2/UASTC delivery would carry.
   its g-buffer normal is non-zero; background pixels are all-zero (clear
   color `(0,0,0,0)`). The engine uses this for hit-testing and occlusion,
   and the render pass's alpha is the antialiased display coverage.
+- Edge semantics (ADR 0019): the path tracer records a miss only in alpha
+  while still returning the environment plate's radiance, so a silhouette
+  texel accumulates `coverage · asset + (1 − coverage) · plate` in linear
+  space. The tonemap removes the plate's share and divides out the
+  coverage before ACES — the plate is one constant for the whole frame
+  (the orthographic bake camera misses in a single direction), measured
+  from the pass's own empty pixels. Stored edge RGB is therefore the
+  asset's own tone-mapped radiance at straight coverage alpha, never an
+  average with the environment; fully empty texels store RGB 0.
 - G-buffer emptiness: since the g-buffer alpha is depth (not coverage),
   empty pixels are detected as `length(normal) == 0`. Testing `a == 0`
   alone would be wrong — depth 0 is a real value at the cube's `(0,0,0)`
@@ -311,6 +320,13 @@ rejected by name):
 | `/5` | Albedo/ao passes removed (ADR 0002); `provenance` block added | loads N-only; without `provenance` → view-only |
 | `/6` | Multi-view: optional `views[]` table + per-slot zip entries (ADR 0005) | loads; the parser exposes every view slot — `parseBake` decodes them all, while the world runtime lists them from the manifest and decodes each only when that direction is first used. A decoded view whose g-buffer depth lies outside the manifest's recorded `depth.range` is a stale camera-frame slot (pre-ADR-0005 bakes) and is skipped, not placeable, when resolved; the north view failing the check rejects the load |
 | `/7` | G-buffer stored half-float (`encoding: exr-f16-linear`); optional 128×128 `thumbnail` field + `<id>-thumb.png` (ADR 0018) | loads; `/4`–`/6` full-float g-buffers decode through the same half-float path, and a bundle without a thumbnail loads with none |
+
+No format bump for the edge-unmix fix (change `fix-sprite-edge-fringe`,
+ADR 0019): `/7` render-pass bytes changed — silhouette edges are unmixed
+from the environment plate and empty texels store RGB 0 — but the manifest,
+pass list, and channel semantics are unchanged. Pre-fix bundles keep their
+edge fringes until re-baked; provenance makes the re-bake an in-place
+refresh.
 
 Records camera angles and view direction, `pxPerUnit`, sprite size, origin,
 depth semantics/range and per-pass channel semantics

@@ -1835,6 +1835,8 @@ async function main(): Promise<void> {
   // 5. Primitive regression hashes (compare against pre-change bundles).
   {
     log('test: primitive bundle hashes');
+    log('  (bytes differ from pre-edge-unmix bakes by design: silhouette')
+    log('   edges are unmixed from the background plate, empty texels 0.)');
     const factories: Record<string, () => ReturnType<typeof getSphere>> = {
       sphere: getSphere,
       donut: getDonut,
