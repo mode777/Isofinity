@@ -623,22 +623,27 @@ export async function loadBundleLayer(
 }
 
 export async function decodePng(blob: Blob, w: number, h: number): Promise<Uint8Array> {
+  const bitmapSpan = span(TAGS.spriteBitmap, { view: `${w}x${h}` });
   const bitmap = await createImageBitmap(blob, {
     premultiplyAlpha: 'none',
     colorSpaceConversion: 'none',
   });
+  bitmapSpan();
   if (bitmap.width !== w || bitmap.height !== h) {
     const got = `${bitmap.width}x${bitmap.height}`;
     bitmap.close();
     throw new Error(`render is ${got}, manifest says ${w}x${h}`);
   }
+  const readback = span(TAGS.spriteReadback, { view: `${w}x${h}` });
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   ctx.drawImage(bitmap, 0, 0);
   bitmap.close();
-  return new Uint8Array(ctx.getImageData(0, 0, w, h).data);
+  const data = new Uint8Array(ctx.getImageData(0, 0, w, h).data);
+  readback();
+  return data;
 }
 
 export function decodeExrGbuffer(buffer: ArrayBuffer, w: number, h: number): Uint16Array {

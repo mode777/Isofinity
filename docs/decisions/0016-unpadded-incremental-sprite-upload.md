@@ -25,14 +25,14 @@ maximum. `maxW`/`maxH` remain informational only.
 
 `Renderer` (`src/runtime/renderer.ts`) holds one `TEXTURE_2D_ARRAY` per pass
 and uploads each layer with `texSubImage3D` at `(0, 0)` using the layer's
-own `w x h`. The array is allocated with power-of-two dimension and slice
-headroom; `addSpriteLayer` appends and uploads only the new slice while it
-fits, and reallocates (re-uploading the layers it retained references to)
-only when a layer exceeds the allocation or the slice capacity grows.
-`setSprites` is the construction/full-rebuild path. The world viewport keeps
-one `Renderer` for the document's lifetime and applies layer changes through
-the delta method instead of reconstructing the renderer
-(`src/app/components/WorldEditor.tsx`).
+own `w x h`. The array is allocated at the current maximum dimensions (exact,
+not rounded up) with a small slice headroom; `addSpriteLayer` appends and
+uploads only the new slice while it fits, and reallocates (re-uploading the
+layers it retained references to) only when a layer exceeds the allocation or
+the slice capacity grows. `setSprites` is the construction/full-rebuild path.
+The world viewport keeps one `Renderer` for the document's lifetime and
+applies layer changes through the delta method instead of reconstructing the
+renderer (`src/app/components/WorldEditor.tsx`).
 
 ## Consequences
 

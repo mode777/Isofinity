@@ -431,7 +431,8 @@ nothing. Each completed phase logs one copyable line
 `globalThis.__loadTrace`. `__loadTraceSummary()` prints a per-tag `{count,
 totalMs}` table and returns it; `__loadTraceClear()` empties the accumulator.
 The tags are: `sprite.read`, `sprite.manifest`, `sprite.inflate` (per zip
-entry), `sprite.exr`, `sprite.depth`, `sprite.png`, `sprite.north`,
+entry), `sprite.exr`, `sprite.depth`, `sprite.png`, `sprite.bitmap`,
+`sprite.readback`, `sprite.north`,
 `sprite.view`, `sprite.padding`, `sprite.upload`, `world.open`,
 `world.asset`, `world.direction`, `renderer.build`, `material.parse`,
 `material.inflate`, `material.exr`, `material.image`, `material.srgb`,

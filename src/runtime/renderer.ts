@@ -1168,20 +1168,18 @@ export class Renderer {
     upload();
   }
 
-  private nextCapacity(value: number): number {
-    let cap = 1;
-    while (cap < value) cap *= 2;
-    return cap;
-  }
-
   private rebuildSpriteTextures(): void {
     const gl = this.gl;
     const count = this.spriteRenderLayers.length;
     const maxW = Math.max(1, ...this.spriteSizes.map((s) => s[0]));
     const maxH = Math.max(1, ...this.spriteSizes.map((s) => s[1]));
-    const capW = this.nextCapacity(maxW);
-    const capH = this.nextCapacity(maxH);
-    const capLayers = Math.max(1, this.nextCapacity(Math.max(1, count)));
+    // Exact dimensions (WebGL2 supports NPOT) and a small slice headroom:
+    // rounding dimensions up to powers of two and doubling the slice count
+    // over-allocated the GPU arrays by ~2x (and doubled again past 16
+    // layers), which showed up as load stalls.
+    const capW = maxW;
+    const capH = maxH;
+    const capLayers = Math.max(4, count + 4);
     if (this.renderTex !== null) gl.deleteTexture(this.renderTex);
     if (this.gbufferTex !== null) gl.deleteTexture(this.gbufferTex);
     this.renderTex = this.createSpriteArray(
