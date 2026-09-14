@@ -185,8 +185,9 @@ The **asset browser** is the visual brush picker behind the toolbar's "…"
 button: a modal using the file-dialog chrome — the workspace `sprites/`
 folder as a collapsible tree on the left, sprite entries with their baked
 128×128 thumbnails (the `isoinfinity-bake/7` thumbnail pass; a generic
-fallback icon when a bundle carries none) in the file area, a Built-ins
-group (the test primitives and the character), and a search field in the
+fallback icon when a bundle carries none) in the file area as a grid of
+tiles, a Built-ins pseudo-folder at the top of the tree holding the test
+primitives and the character, and a search field in the
 dialog's top-right corner that matches asset names and paths
 case-insensitively across every subfolder and the built-ins. Clicking an
 entry acquires it as the pencil's brush (layer reuse, bundle load, or

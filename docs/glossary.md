@@ -78,7 +78,8 @@ the pointer for the real semantics.
   (ADR 0006), never saved, never dirty.
 - **Asset browser** — the world editor's modal brush picker behind the
   toolbar's "…" button: a file-browser over the workspace `sprites/`
-  folder with baked bundle thumbnails, a Built-ins group, and a top-right
+  folder with baked bundle thumbnails as tiles, a Built-ins pseudo-folder
+  for the built-in brushes, and a top-right
   search across all subfolders; picking an entry acquires it as the
   pencil's brush. Dialog-local chrome plus a per-document
   previously-used list (ADR 0006), never serialized.

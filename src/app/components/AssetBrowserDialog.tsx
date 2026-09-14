@@ -110,9 +110,21 @@ export function AssetBrowserDialog(props: {
   const [cur, setCur] = useState('');
   const [query, setQuery] = useState('');
 
-  const tree = useMemo(() => buildDirTree(sprites, 'sprites'), [sprites]);
+  // The Built-ins pseudo-folder's tree path. A NUL byte cannot occur in a
+  // workspace file name, so it can never collide with a real subfolder.
+  const BUILTINS_DIR = '\0built-ins';
+
+  // The sprites/ tree plus the synthetic Built-ins folder, pinned to the
+  // top of the root so the built-in brushes are as discoverable as the
+  // workspace folders.
+  const tree = useMemo(() => {
+    const t = buildDirTree(sprites, 'sprites');
+    t.dirs.unshift({ name: 'Built-ins', path: BUILTINS_DIR, dirs: [], files: [] });
+    return t;
+  }, [sprites]);
   const filesHere = useMemo(() => filesAt(tree, cur), [tree, cur]);
-  const fullPath = `sprites/${cur ? `${cur}/` : ''}`;
+  const inBuiltins = cur === BUILTINS_DIR;
+  const fullPath = `sprites/${cur && !inBuiltins ? `${cur}/` : ''}`;
 
   const builtIns = useMemo<AssetEntry[]>(
     () => [
@@ -236,7 +248,7 @@ export function AssetBrowserDialog(props: {
           </div>
           <div className="file-dialog-files">
             <div className="file-dialog-crumb" title={searching ? `Search: ${q}` : fullPath}>
-              {searching ? `Search: ${query.trim()}` : fullPath}
+              {searching ? `Search: ${query.trim()}` : inBuiltins ? 'Built-ins/' : fullPath}
             </div>
             <div className="asset-browser-files">
               {searching ? (
@@ -254,24 +266,20 @@ export function AssetBrowserDialog(props: {
                 ) : (
                   <p className="hint">No assets match</p>
                 )
+              ) : inBuiltins ? (
+                <ul className="asset-browser-list">
+                  {builtIns.map((entry) => (
+                    <AssetEntryRow key={entry.id} entry={entry} onPick={pick} />
+                  ))}
+                </ul>
+              ) : folderEntries.length > 0 ? (
+                <ul className="asset-browser-list">
+                  {folderEntries.map((entry) => (
+                    <AssetEntryRow key={entry.id} entry={entry} onPick={pick} />
+                  ))}
+                </ul>
               ) : (
-                <>
-                  {folderEntries.length > 0 ? (
-                    <ul className="asset-browser-list">
-                      {folderEntries.map((entry) => (
-                        <AssetEntryRow key={entry.id} entry={entry} onPick={pick} />
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="hint">No sprites here</p>
-                  )}
-                  <p className="asset-browser-group">Built-ins</p>
-                  <ul className="asset-browser-list">
-                    {builtIns.map((entry) => (
-                      <AssetEntryRow key={entry.id} entry={entry} onPick={pick} />
-                    ))}
-                  </ul>
-                </>
+                <p className="hint">No sprites here</p>
               )}
             </div>
           </div>
