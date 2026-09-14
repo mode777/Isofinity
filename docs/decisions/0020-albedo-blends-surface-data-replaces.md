@@ -17,22 +17,26 @@ ambient-only backdrop.
 
 ## Decision
 
-Per-draw-buffer blend state (`gl.blendFunci`), set by each blended pass at
-draw time:
+The blend function stays uniform; replace/preserve semantics ride on each
+fragment output's **own alpha** (the `SRC_ALPHA` factor reads the alpha of
+the same output):
 
-- **Sprites:** RT0 composites straight alpha; RT1 (world normal + depth)
-  and RT2 (linear depth) use `(ONE, ZERO)` — replace. A silhouette
-  fragment writes its own baked surface data; the backdrop shows through
-  via the albedo blend alone. The deferred pass then shades every pixel
-  with one surface's own data.
-- **Contact shadows:** RT1/RT2 use `(ZERO, ONE)` — keep. This replaces the
-  old zero-weight-output trick, which only preserved the data behind under
-  the uniform blend.
+- **Sprites:** `outAlbedo` keeps the coverage alpha — RT0 composites with
+  the backdrop. `outGbuf` and `outDepth` ship alpha 1 — RT1 (world normal +
+  depth) and RT2 (linear depth) **replace**: a silhouette fragment carries
+  its own baked surface data, and the deferred pass shades every pixel with
+  one surface's own data.
+- **Contact shadows:** zero-weight, zero-alpha RT1/RT2 outputs — `dst·1 +
+  src·0` preserves the surface behind, exactly as before.
 
 The invariant for any future blended writer: **albedo may composite with
-the backdrop; surface data may not.** Whatever a blended fragment writes to
-the g-buffer or depth attachments must be one surface's own data, replaced
-or preserved — never a coverage-weighted mix.
+the backdrop; surface data may not.** A blended fragment must ship surface
+data with alpha 1 (replace) or alpha 0 (preserve) — never coverage-weighted.
+
+> WebGL2 note: per-draw-buffer blend entry points (`blendFunci` etc. from
+> ES 3.0) are **not exposed** by the WebGL 2 API — per-output alpha is the
+> portable mechanism. (A first attempt used `blendFunci` through a typed
+> shim and crashed at runtime.)
 
 ## Consequences
 
@@ -51,10 +55,12 @@ or preserved — never a coverage-weighted mix.
 ## Rejected alternatives
 
 - **Dual-source blending** (indexed fragment outputs) — same result with
-  edits to every fragment shader's output declarations; per-buffer blend is
-  state-only.
+  edits to every fragment shader's output declarations.
+- **Per-draw-buffer blend (`blendFunci`)** — not exposed by the WebGL 2
+  API; a typed shim compiled but threw `undefined is not a function` at the
+  first draw.
 - **Second, blend-disabled sprite pass for surface data** — doubles the
-  sprite draw cost; state-only blending achieves it free.
+  sprite draw cost; the alpha mechanism achieves it free.
 - **Fixing it in the light pass** (reconstructing per-surface factors) —
   the g-buffer would still hold ill-defined data; the defect is at the
   write, not the read.

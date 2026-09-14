@@ -15,14 +15,13 @@ fix this: the blending happens fresh every frame in the compositor.
 
 ## What Changes
 
-- Per-draw-buffer blend state in the geometry pass (WebGL2 `gl.blendFunci`):
-  sprite fragments keep alpha-blending albedo (draw buffer 0) but REPLACE
-  the g-buffer and linear-depth attachments (draw buffers 1/2), so
-  silhouette pixels carry the object's own baked normal and depth — never
-  a blend with the surface behind.
-- The contact-shadow pass's zero-weight trick (zero-alpha outputs that only
-  preserved the data behind under uniform blending) becomes an explicit
-  keep-blend `(ZERO, ONE)` on buffers 1/2; albedo keeps its alpha blend.
+- The sprite fragment writes its surface data with alpha 1, so under the
+  shared blend function the g-buffer and linear-depth attachments REPLACE
+  (each output's own alpha is its blend weight): silhouette pixels carry
+  the object's own baked normal and depth — never a blend with the surface
+  behind. Only the albedo attachment composites with the backdrop.
+- Contact shadows already preserved the data behind them (zero-weight
+  outputs under the shared blend) and are unchanged.
 - The deferred light pass and both fragment shaders are unchanged: they
   already assume the g-buffer holds one surface's data per pixel.
 - Residual edge error drops to `(1-c)·backdropTexel·(factorObj −

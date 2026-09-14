@@ -342,14 +342,19 @@ void main() {
     if (vHeight != 0.0 || a <= 0.0) discard;
     gl_FragDepth = uDepthA * (vGroundDepth + 1e-3) + uDepthB;
     outAlbedo = vec4(r.rgb, a);
-    outGbuf = vec4(0.0, 1.0, 0.0, a); // up normal, ground-plane surface
+    outGbuf = vec4(0.0, 1.0, 0.0, 1.0); // up normal, ground-plane surface (replaces, ADR 0020)
     outDepth = vec4(vGroundDepth, 0.0, 0.0, 1.0);
     return;
   }
   float d = g.a + vDepthOff;
   gl_FragDepth = uDepthA * d + uDepthB;
   outAlbedo = vec4(r.rgb, r.a);
-  outGbuf = vec4(g.rgb, r.a);
+  // Surface data ships with alpha 1 so the shared SRC_ALPHA blend replaces
+  // it: a silhouette fragment carries its own baked normal/depth, never a
+  // coverage-weighted mix with the surface behind (ADR 0020). Only RT0's
+  // alpha stays at the coverage, so albedo alone composites with the
+  // backdrop.
+  outGbuf = vec4(g.rgb, 1.0);
   outDepth = vec4(d, 0.0, 0.0, 1.0);
 }
 `;
@@ -474,7 +479,7 @@ void main() {
 const LIGHT_FRAG = `#version 300 es
 precision highp float;
 precision highp int;
-uniform sampler2D uGbuf;    // RT1: rgb = world normal, a = blend weight
+uniform sampler2D uGbuf;    // RT1: rgb = world normal (a = 1 where written)
 uniform sampler2D uAlbedo;  // RT0: rgb = display texel (albedo·AO), a = AO hook
 uniform sampler2D uDepthLin; // RT2: r = linear reference-plane depth
 uniform vec2 uRes;
@@ -590,22 +595,6 @@ function link(gl: WebGL2RenderingContext, vertSrc: string, fragSrc: string): Web
     throw new Error(`Program link failed: ${gl.getProgramInfoLog(prog)}`);
   }
   return prog;
-}
-
-/**
- * Per-draw-buffer blend (gl.blendFunci) — WebGL2 core, but missing from
- * the TypeScript DOM lib's WebGL2RenderingContext.
- */
-function blendBuffer(
-  gl: WebGL2RenderingContext,
-  buffer: number,
-  src: number,
-  dst: number,
-): void {
-  type PerBufferBlend = WebGL2RenderingContext & {
-    blendFunci(buffer: number, src: number, dst: number): void;
-  };
-  (gl as PerBufferBlend).blendFunci(buffer, src, dst);
 }
 
 export const DEPTH_LINEAR_RANGE = 64;
@@ -2008,14 +1997,10 @@ export class Renderer {
       gl.drawArrays(gl.TRIANGLES, 0, this.groundVerts);
     }
 
-    // 2. Contact shadows: color-only (the g-buffer/depth attachments use a
-    //    keep-blend, preserving the surface data behind them), still no
-    //    depth interaction.
+    // 2. Contact shadows: color-only (g-buffer/depth outputs are
+    //    zero-weight), still no depth interaction.
     if (shadows && shadows.verts > 0) {
       gl.enable(gl.BLEND);
-      blendBuffer(gl, 0, gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-      blendBuffer(gl, 1, gl.ZERO, gl.ONE);
-      blendBuffer(gl, 2, gl.ZERO, gl.ONE);
       gl.useProgram(this.flatShadowProg);
       gl.bindVertexArray(this.shadowVao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.shadowVbo);
@@ -2053,16 +2038,13 @@ export class Renderer {
     }
 
     // 4. Sprites: blended, per-pixel depth-tested against each other and
-    //    against any mesh depth written above. Per-draw-buffer blend: only
-    //    the albedo attachment composites at coverage — surface data
-    //    (g-buffer normal + linear depth) replaces, so a silhouette
-    //    fragment is shaded as the object, never as a blend with the
-    //    surface behind it (ADR 0020).
+    //    against any mesh depth written above. Only the albedo attachment
+    //    composites at coverage: the sprite fragment writes its surface
+    //    data with alpha 1 (ADR 0020), so under the shared SRC_ALPHA blend
+    //    the g-buffer/depth attachments replace — a silhouette fragment is
+    //    shaded as the object, never as a blend with the surface behind.
     if (count > 0) {
       gl.enable(gl.BLEND);
-      blendBuffer(gl, 0, gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-      blendBuffer(gl, 1, gl.ONE, gl.ZERO);
-      blendBuffer(gl, 2, gl.ONE, gl.ZERO);
       gl.enable(gl.DEPTH_TEST);
       gl.useProgram(this.spriteProg);
       gl.activeTexture(gl.TEXTURE0);

@@ -1,7 +1,8 @@
-## 1. Per-buffer blend state
+## 1. Sprite surface data written unblended
 
-- [x] 1.1 In `src/runtime/renderer.ts`, set per-draw-buffer blend state at the sprite pass's `gl.enable(gl.BLEND)`: buffer 0 `(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)`, buffers 1 and 2 `(ONE, ZERO)`. Verify `npx tsc --noEmit` passes.
-- [x] 1.2 At the contact-shadow pass's `gl.enable(gl.BLEND)`, set buffers 1 and 2 to `(ZERO, ONE)` (keep), leaving buffer 0 at the alpha blend; update the FLAT_SHADOW_FRAG comment to describe the explicit keep-blend instead of the zero-weight trick. Verify `npx tsc --noEmit` passes.
+- [x] 1.1 In `src/runtime/renderer.ts`, SPRITE_FRAG ships surface data with alpha 1 (`outGbuf = vec4(g.rgb, 1.0)` in the object branch, `vec4(0, 1, 0, 1)` in the grounding-shadow branch) so the shared `SRC_ALPHA` blend replaces RT1; RT2 already replaced via its alpha-1 output; only RT0 keeps the coverage alpha. Verify `npx tsc --noEmit` passes.
+- [x] 1.2 Contact shadows keep the zero-weight trick (unchanged); FLAT_SHADOW_FRAG comment reworded to match. Verify `npx tsc --noEmit` passes.
+- [x] 1.3 PIVOT (browser crash): `gl.blendFunci` is not exposed by the WebGL 2 API — the typed shim called `undefined` at the first draw and blacked the canvas. The first attempt (per-draw-buffer blend state at both passes) was fully reverted and replaced by 1.1's per-output-alpha form, which needs no extra blend state.
 
 ## 2. Static gates
 

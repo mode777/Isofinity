@@ -107,10 +107,10 @@ each line below has a full record there).
   fringes until re-baked.
 - **Unblended sprite surface data** — silhouettes no longer shade as a
   coverage-weighted mix of object and backdrop (the pale ring in front of
-  shadows): the sprite pass blends only albedo per draw buffer, while the
-  g-buffer and depth attachments replace, so the deferred pass shades every
-  fragment with its own surface's data; contact shadows use an explicit
-  keep-blend (`verify:selection`/`verify:shadows`; ADR 0020).
+  shadows): sprite fragments ship surface data with alpha 1 so the
+  g-buffer and depth attachments replace under the shared blend while only
+  albedo composites; the deferred pass shades every fragment with its own
+  surface's data (`verify:selection`/`verify:shadows`; ADR 0020).
 
 ## In progress
 
