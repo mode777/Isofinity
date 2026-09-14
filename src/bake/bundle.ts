@@ -29,20 +29,35 @@ const MIME_BY_EXT: Record<string, string> = {
 // timezone (local year stays 1980 in UTC offsets ±14h).
 const FIXED_MTIME = new Date(Date.UTC(1980, 1, 1));
 
+/** Thumbnail edge length in pixels (square PNG). */
+export const THUMBNAIL_SIZE = 128;
+
 export async function buildBundle(
   result: BakeResult,
   pt?: PtExtras,
   provenance?: BakeProvenance,
   extraViews: BundleExtraView[] = [],
+  thumbnail?: Uint8Array,
 ): Promise<Uint8Array<ArrayBuffer>> {
   const manifest = buildManifest(result, pt, provenance, extraViews);
+  if (thumbnail) {
+    manifest.thumbnail = {
+      file: `${result.id}-thumb.png`,
+      width: THUMBNAIL_SIZE,
+      height: THUMBNAIL_SIZE,
+    };
+  }
   const entries: Record<string, [Uint8Array, { level: 0 | 6; mtime: Date }]> = {
     [MANIFEST_ENTRY]: [strToU8(JSON.stringify(manifest, null, 2)), { level: 6, mtime: FIXED_MTIME }],
+    // The g-buffer EXR is uncompressed half-float; the bundle deflates it.
     [manifest.passes.gbuffer.file]: [
       await encodeExr(result.gbuffer, result.width, result.height),
       { level: 6, mtime: FIXED_MTIME },
     ],
   };
+  if (manifest.thumbnail && thumbnail) {
+    entries[manifest.thumbnail.file] = [thumbnail, { level: 0, mtime: FIXED_MTIME }];
+  }
   if (manifest.passes.render && pt?.render) {
     entries[manifest.passes.render.file] = [
       await encodePngBytes(pt.render.rgba, pt.render.width, pt.render.height),
@@ -119,9 +134,9 @@ function validateBakeManifest(manifest: BakeManifest): void {
     throw new Error(`bake bundle: unsupported format ${String(manifest.format)}`);
   }
   const minor = manifest.format.slice(prefix.length);
-  if (minor !== '4' && minor !== '5' && minor !== '6') {
+  if (minor !== '4' && minor !== '5' && minor !== '6' && minor !== '7') {
     throw new Error(
-      `bake bundle: unsupported format ${manifest.format} — expected isoinfinity-bake/4, /5 or /6`,
+      `bake bundle: unsupported format ${manifest.format} — expected isoinfinity-bake/4, /5, /6 or /7`,
     );
   }
 }

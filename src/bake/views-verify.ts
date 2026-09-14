@@ -1,6 +1,6 @@
 /**
  * Node-runnable verification for the multi-view bundle logic (no WebGL,
- * no DOM): /6 manifest shape, parse round trips, /4+/5 compatibility,
+ * no DOM): /7 manifest shape, parse round trips, /4-/6 compatibility,
  * remove-view omission, and the load-time depth-validity guard. Run with:
  *   npx esbuild src/bake/views-verify.ts --bundle --platform=node \
  *     --format=esm --outfile=/tmp/views-verify.mjs && node /tmp/views-verify.mjs
@@ -9,8 +9,9 @@ import { buildBundle, parseBake, parseBakeManifest, type BakeProvenance } from '
 import { applySlotModelRotation, PAD_PX } from './bake.js';
 import type { BakeResult } from './bake.js';
 import { buildManifest, encodeExr } from './export.js';
-import { strToU8, zipSync } from 'three/examples/jsm/libs/fflate.module.js';
-import { Object3D } from 'three';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'three/examples/jsm/libs/fflate.module.js';
+import { DataTexture, FloatType, Object3D, RGBAFormat } from 'three';
+import { EXRExporter, NO_COMPRESSION } from 'three/examples/jsm/exporters/EXRExporter.js';
 import { depthRange, frameIsoBox, projectBoxFrame, ISO_AZIMUTH_DEG } from './iso.js';
 import {
   slotAnchorPoint,
@@ -90,6 +91,18 @@ function fakeResult(azimuthDeg: number, width = 66, height = 40): BakeResult {
   };
 }
 
+/** Legacy full-float g-buffer encoder, for the compatibility cases. */
+async function encodeExrF32(rgba: Float32Array, width: number, height: number): Promise<Uint8Array> {
+  const texture = new DataTexture(rgba, width, height, RGBAFormat, FloatType);
+  texture.needsUpdate = true;
+  const bytes = await new EXRExporter().parse(texture, {
+    type: FloatType,
+    compression: NO_COMPRESSION,
+  });
+  texture.dispose();
+  return bytes;
+}
+
 async function main(): Promise<void> {
   const north = fakeResult(slotAzimuthDeg('n'));
   const east = fakeResult(slotAzimuthDeg('e'));
@@ -101,7 +114,7 @@ async function main(): Promise<void> {
       { slot: 'e', result: east },
     ]);
     const parsed = parseBake(bytes.buffer as ArrayBuffer);
-    ok(parsed.manifest.format === 'isoinfinity-bake/6', `format /6 (got ${parsed.manifest.format})`);
+    ok(parsed.manifest.format === 'isoinfinity-bake/7', `format /7 (got ${parsed.manifest.format})`);
     ok(approx(parsed.manifest.camera.azimuthDeg, 45, 1e-6), 'top-level camera stays the north view');
     const table = parsed.manifest.views ?? [];
     ok(table.length === 2 && table[0].slot === 'n' && table[1].slot === 'e',
@@ -122,6 +135,30 @@ async function main(): Promise<void> {
       'parsed e view keeps its sprite rect');
     ok(parsed.render === null && parsed.views[0].render === null,
       'no render passes in a raster-only bundle');
+  }
+
+  // 1c. /7 thumbnail entry + manifest field; the bundle core treats the
+  //     bytes as opaque (generation lives on the DOM save path).
+  {
+    console.log('test: /7 thumbnail entry and manifest field');
+    const thumb = new Uint8Array([137, 80, 78, 71]);
+    const withThumb = await buildBundle(north, undefined, undefined, [], thumb);
+    const files = unzipSync(withThumb);
+    const manifest = JSON.parse(strFromU8(files['manifest.json'])) as {
+      thumbnail?: { file: string; width: number; height: number };
+    };
+    ok(
+      manifest.thumbnail?.file === `${north.id}-thumb.png` &&
+        manifest.thumbnail.width === 128 &&
+        manifest.thumbnail.height === 128 &&
+        files[`${north.id}-thumb.png`]?.length === thumb.length,
+      `thumbnail entry + manifest field present (got ${JSON.stringify(manifest.thumbnail)})`,
+    );
+    const withoutThumb = await buildBundle(north, undefined, undefined, []);
+    const manifest2 = JSON.parse(strFromU8(unzipSync(withoutThumb)['manifest.json'])) as {
+      thumbnail?: unknown;
+    };
+    ok(manifest2.thumbnail === undefined, 'no thumbnail field when not provided');
   }
 
   // 1b. The authored-anchor slot mapping mirrors the slot model rotation:
@@ -337,11 +374,11 @@ async function main(): Promise<void> {
 
     let threw = '';
     try {
-      parseBake(makeZip(base('isoinfinity-bake/7', gbufferPasses)).buffer as ArrayBuffer);
+      parseBake(makeZip(base('isoinfinity-bake/8', gbufferPasses)).buffer as ArrayBuffer);
     } catch (err) {
       threw = err instanceof Error ? err.message : String(err);
     }
-    ok(threw.includes('isoinfinity-bake/7'), `unknown format rejected by name (got "${threw}")`);
+    ok(threw.includes('isoinfinity-bake/8'), `unknown format rejected by name (got "${threw}")`);
 
     // A /6 manifest with an unknown slot is rejected by name.
     const badSlot = base('isoinfinity-bake/6', gbufferPasses);
@@ -757,6 +794,50 @@ async function main(): Promise<void> {
       'two keys never share a decoded view',
     );
     clearBundleCache();
+  }
+
+  // 5f. Compatibility: a full-float (/6) and a half-float (/7) g-buffer of
+  //     the same content decode to the same half-float texture data.
+  {
+    console.log('test: full-float and half-float g-buffers decode equivalently');
+    const result = fakeResult(slotAzimuthDeg('n'), 8, 8);
+    result.gbuffer[3] = 0.9;
+    const f16 = await encodeExr(result.gbuffer, result.width, result.height);
+    const f32 = await encodeExrF32(result.gbuffer, result.width, result.height);
+    const manifestFor = (format: string, encoding: string): Record<string, unknown> => ({
+      format,
+      id: 'compat',
+      pxPerUnit: 128,
+      cube: { size: [1, 1, 1], origin: [0, 0, 0] },
+      depth: { definition: 'dot', range: depthRange([1, 1, 1]) },
+      sprite: { width: 8, height: 8, originPx: [0, 0] },
+      passes: {
+        gbuffer: { file: 'compat-gbuffer.exr', encoding, channels: 'rgb=world-normal a=ray-depth' },
+        render: {
+          file: 'compat-render.png',
+          encoding: 'png-r8-srgb',
+          channels: 'rgb=tonemapped-render a=coverage',
+        },
+      },
+    });
+    const bundle16 = zipSync({
+      'manifest.json': strToU8(JSON.stringify(manifestFor('isoinfinity-bake/7', 'exr-f16-linear'))),
+      'compat-gbuffer.exr': f16,
+      'compat-render.png': new Uint8Array(4),
+    }).buffer as ArrayBuffer;
+    const bundle32 = zipSync({
+      'manifest.json': strToU8(JSON.stringify(manifestFor('isoinfinity-bake/6', 'exr-f32-linear'))),
+      'compat-gbuffer.exr': f32,
+      'compat-render.png': new Uint8Array(4),
+    }).buffer as ArrayBuffer;
+    const v16 = await loadBundleViews(bundle16);
+    const v32 = await loadBundleViews(bundle32);
+    ok(v16.north.width === 8 && v32.north.width === 8, '/7 and /6 bundles both load');
+    ok(
+      v16.north.gbuffer.length === v32.north.gbuffer.length &&
+        v16.north.gbuffer.every((b, i) => b === v32.north.gbuffer[i]),
+      'full-float and half-float g-buffers decode to identical half data',
+    );
   }
 
   // 6. Grounding shadow: provenance flag round trip + default omission.

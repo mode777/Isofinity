@@ -130,7 +130,7 @@ disabled when the document is view-only.
 - A picked preset applies immediately — a failed application (missing
   HDRI, unknown format) reports a named error and reverts the dropdown.
 
-### Provenance (isoinfinity-bake/6)
+### Provenance (isoinfinity-bake/7)
 
 Saved bundles carry a `provenance` manifest section: the source (primitive
 name, or workspace model file + scale), the path-trace settings, the

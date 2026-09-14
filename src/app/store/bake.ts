@@ -6,6 +6,7 @@ import {
   type BundleExtraView,
 } from '../../bake/bundle.js';
 import { debugPositionCanvas, download } from '../../bake/export.js';
+import { renderThumbnail } from '../thumbnail.js';
 import { composeGroundShadow, groundShadowFrame, groundShadowPadPx } from '../../bake/shadow.js';
 import { loadGltf, detectSpecGloss, readGlbJsonSlice, type GltfSource } from '../../bake/gltf.js';
 import { convertSpecGlossToMR } from '../../bake/specgloss.js';
@@ -1091,7 +1092,14 @@ export async function saveSprite(docId: string, rawName?: string): Promise<void>
         const passes = doc.extraViews[slot];
         return passes ? [{ slot, result: passes.result, render: passes.render }] : [];
       });
-      bytes = await buildBundle(doc.result, extras, provenanceOf(doc) ?? undefined, extraViews);
+      const thumbnail = doc.render ? await renderThumbnail(doc.render) : undefined;
+      bytes = await buildBundle(
+        doc.result,
+        extras,
+        provenanceOf(doc) ?? undefined,
+        extraViews,
+        thumbnail,
+      );
     }
     const ws = useWorkspaceState();
     if (ws === 'connected') {

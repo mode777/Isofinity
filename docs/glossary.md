@@ -10,9 +10,14 @@ the pointer for the real semantics.
   **render** pass. There are no others (albedo/ao removed — ADR 0002).
 - **G-buffer** — merged raster pass: rgb = world-space normal, a = linear
   ray depth. A pixel is "empty" iff `length(normal) == 0` (depth 0 is a
-  real value; never test `a == 0`).
+  real value; never test `a == 0`). Stored as a half-float EXR since `/7`
+  (`exr-f16-linear`; full-float `exr-f32-linear` in older bundles, both
+  decode through the same half-float load path).
 - **Render pass** — path-traced lit color (ACES, sRGB) with antialiased
   alpha. Required before a sprite can be placed into a world.
+- **Thumbnail** — a 128×128 RGBA PNG of the N render, stored as
+  `<id>-thumb.png` and referenced by the manifest `thumbnail` field (`/7`).
+  Generated on the browser save path; not shown in the UI yet.
 - **View slot** — one bake facing: `n`/`e`/`s`/`w` at 90° azimuth steps.
   All slots render from the one fixed camera with the model yaw-rotated
   (ADR 0005). Worlds consume `n` plus every extra slot that carries a
@@ -26,8 +31,8 @@ the pointer for the real semantics.
 - **Bundle** — `<id>.sprite`: a zip (pure transport) of manifest + passes,
   one per view slot (ADR 0004).
 - **Manifest** — `manifest.json` inside the bundle; `format:
-  isoinfinity-bake/6`, camera/sprite/passes data for N, optional `views[]`
-  table for E/S/W.
+  isoinfinity-bake/7`, camera/sprite/passes data for N, optional `views[]`
+  table for E/S/W, optional `thumbnail`.
 - **Provenance** — manifest block (since `/5`): source, path-trace
   settings, environment, and the optional origin anchor. View-independent;
   lets a sprite re-bake in place. Missing/unresolvable ⇒ the document opens

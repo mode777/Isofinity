@@ -135,12 +135,13 @@ file + a row in its index). Full design/process records stay in
   switches without saving; one live editor context per editor kind.
   Shell/model details: `docs/runtime.md`.
 - Bake pipeline (`src/bake/`): bakes test primitives and glTF models into
-  per-asset sprite passes — a merged g-buffer (float EXR: rgb = world
-  normals, a = linear ray depth) and a path-traced `render` pass
+  per-asset sprite passes — a merged g-buffer (half-float EXR since `/7`:
+  rgb = world normals, a = linear ray depth) and a path-traced `render` pass
   (HDRI-lit, ACES; required for placement) — shipped as `<id>.sprite`
-  zip-byte bundles with a manifest (`format: isoinfinity-bake/6`: N/E/S/W
-  view slots, view-independent `provenance` so sprites re-bake in place;
-  `/4`+`/5` open view-only/N-only). Worlds consume the N view. Pipeline
+  zip-byte bundles with a manifest (`format: isoinfinity-bake/7`: N/E/S/W
+  view slots, view-independent `provenance` so sprites re-bake in place, an
+  optional 128×128 `thumbnail`; `/4`–`/6` full-float bundles still load).
+  Worlds consume the N view. Pipeline
   details: `docs/bake-pipeline.md`.
 - Workspace binding (File System Access API, `src/shared/workspace.ts`;
   convention: `hdri/`, `models/`, `sprites/`, `worlds/`, `presets/`,

@@ -1464,7 +1464,7 @@ async function main(): Promise<void> {
     ok(approx(result.size[0], 6, 1e-3) && approx(result.size[1], 2, 1e-3), `scale-2 size [6,2,0] (got [${result.size}])`);
     const bytes = await buildBundle(result);
     const parsed = parseBake(bytes.buffer as ArrayBuffer);
-    ok(parsed.manifest.format === 'isoinfinity-bake/6', `manifest format (got ${parsed.manifest.format})`);
+    ok(parsed.manifest.format === 'isoinfinity-bake/7', `manifest format (got ${parsed.manifest.format})`);
     ok(parsed.render === null, 'no optional passes in a raster-only bundle');
     ok(approx(parsed.manifest.cube.size[0], 6, 1e-3) && approx(parsed.manifest.cube.size[1], 2, 1e-3),
       `manifest cube.size records scaled box (got [${parsed.manifest.cube.size}])`);
@@ -1662,14 +1662,14 @@ async function main(): Promise<void> {
     );
     ok(v4.render !== null, 'v4 bundle exposes the render pass blob when present');
 
-    const broken = base('isoinfinity-bake/7', gbufferPasses);
+    const broken = base('isoinfinity-bake/8', gbufferPasses);
     let threw = '';
     try {
       parseBake(makeZip(broken).buffer as ArrayBuffer);
     } catch (err) {
       threw = err instanceof Error ? err.message : String(err);
     }
-    ok(threw.includes('isoinfinity-bake/7'), `unknown format rejected by name (got "${threw}")`);
+    ok(threw.includes('isoinfinity-bake/8'), `unknown format rejected by name (got "${threw}")`);
   }
 
   // 4. Smooth curved glTF geometry bakes unit-length varying normals.

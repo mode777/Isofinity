@@ -78,6 +78,11 @@ each line below has a full record there).
   and decoded ground-material maps are session-cached under a
   workspace-scoped key (`verify:terrain`), so a re-open does not re-decode
   them. Half-float g-buffer storage remains a separate planned follow-up.
+- **Half-float g-buffer + thumbnails** — new bakes are format `/7`: the
+  g-buffer is stored half-float (`exr-f16-linear`, deflated by the bundle)
+  and every bundle with a render pass carries a 128×128 `<id>-thumb.png` +
+  manifest `thumbnail` field (`verify:bundles`; ADR 0018). `/4`–`/6`
+  full-float bundles keep loading through the same half-float decode path.
 - **Load tracing** — opt-in, in-memory per-phase timings for sprite decode,
   world open and material decode/upload, logged as copyable
   `[loadtrace] <tag> <ms>ms` lines and summarized via `__loadTraceSummary()`

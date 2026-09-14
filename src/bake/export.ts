@@ -1,4 +1,4 @@
-import { DataTexture, FloatType, RGBAFormat, Vector3 } from 'three';
+import { DataTexture, DataUtils, HalfFloatType, RGBAFormat, Vector3 } from 'three';
 import { EXRExporter, NO_COMPRESSION } from 'three/examples/jsm/exporters/EXRExporter.js';
 import { PAD_PX, type BakeResult } from './bake.js';
 import { depthRange, frameIsoBox, reconstructWorldPos } from './iso.js';
@@ -79,10 +79,18 @@ export async function encodeExr(
   width: number,
   height: number,
 ): Promise<Uint8Array> {
-  const texture = new DataTexture(rgba, width, height, RGBAFormat, FloatType);
+  // Store at the precision the runtime uses (half float) and convert without
+  // changing row order: the runtime re-flips the scanlines on decode exactly
+  // as it did for the full-float storage. The EXR is left uncompressed and
+  // deflated by the bundle: three's EXR-native ZIP does not round-trip
+  // through its own EXRLoader (verified), so the outer deflate is the
+  // compression that actually works.
+  const half = new Uint16Array(rgba.length);
+  for (let i = 0; i < rgba.length; i++) half[i] = DataUtils.toHalfFloat(rgba[i]);
+  const texture = new DataTexture(half, width, height, RGBAFormat, HalfFloatType);
   texture.needsUpdate = true;
   const bytes = await new EXRExporter().parse(texture, {
-    type: FloatType,
+    type: HalfFloatType,
     compression: NO_COMPRESSION,
   });
   texture.dispose();
@@ -153,6 +161,11 @@ export interface BakeManifest {
    * the north view's); one entry per additional baked view.
    */
   views?: BakeViewEntry[];
+  /**
+   * A square thumbnail pass (`/7`): a 128x128 RGBA PNG of the N-view
+   * render, present when the bundle carries a render pass.
+   */
+  thumbnail?: { file: string; width: number; height: number };
   /** Present when the render pass is baked: the environment used for it. */
   environment?: {
     hdri: string;
@@ -220,7 +233,7 @@ export function buildManifest(
   extraViews: BundleExtraView[] = [],
 ): BakeManifest {
   const manifest: BakeManifest = {
-    format: 'isoinfinity-bake/6',
+    format: 'isoinfinity-bake/7',
     id: result.id,
     cube: { size: [result.size[0], result.size[1], result.size[2]], origin: [0, 0, 0] },
     camera: {

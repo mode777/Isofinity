@@ -301,7 +301,7 @@ sprite texel size into per-instance attributes.
 
 ### Manifest (`<id>-bake.json`)
 
-Format history (the parser accepts `/4`, `/5`, `/6`; anything else is
+Format history (the parser accepts `/4`, `/5`, `/6`, `/7`; anything else is
 rejected by name):
 
 | Format | Delta | Parser tolerance |
@@ -310,15 +310,21 @@ rejected by name):
 | `/4` | Single-file `.sprite` zip; albedo PNG ships alongside the g-buffer (ao appears in path-traced-era manifests) | loads; albedo/ao entries ignored |
 | `/5` | Albedo/ao passes removed (ADR 0002); `provenance` block added | loads N-only; without `provenance` → view-only |
 | `/6` | Multi-view: optional `views[]` table + per-slot zip entries (ADR 0005) | loads; the parser exposes every view slot — `parseBake` decodes them all, while the world runtime lists them from the manifest and decodes each only when that direction is first used. A decoded view whose g-buffer depth lies outside the manifest's recorded `depth.range` is a stale camera-frame slot (pre-ADR-0005 bakes) and is skipped, not placeable, when resolved; the north view failing the check rejects the load |
+| `/7` | G-buffer stored half-float (`encoding: exr-f16-linear`); optional 128×128 `thumbnail` field + `<id>-thumb.png` (ADR 0018) | loads; `/4`–`/6` full-float g-buffers decode through the same half-float path, and a bundle without a thumbnail loads with none |
 
 Records camera angles and view direction, `pxPerUnit`, sprite size, origin,
 depth semantics/range and per-pass channel semantics
-(`format: "isoinfinity-bake/6"`; the history and tolerance table above —
+(`format: "isoinfinity-bake/7"`; the history and tolerance table above —
 v4 and earlier stored an albedo PNG alongside the g-buffer and their
 manifests may still
 record albedo/ao pass entries — the parser resolves only the g-buffer and
 optional render entries and ignores the rest, so old bundles keep loading
-unchanged; the g-buffer EXR keeps the v3 byte conventions exactly). The
+unchanged; the g-buffer EXR keeps the v3 byte conventions exactly, only its
+precision changed in `/7`). `/7` stores the g-buffer as a **half-float** EXR
+(`encoding: exr-f16-linear`) and adds an optional `thumbnail` field
+(`file`, `width`, `height`) pointing at a 128×128 `<id>-thumb.png` derived
+from the N render; `/4`–`/6` full-float (`exr-f32-linear`) g-buffers keep
+decoding through the same half-float load path. The
 editor-facing `provenance` block (added in `/5`) records the bake source (a
 primitive name, or a workspace model file name + uniform scale), the
 path-trace settings (sample count, bounces, texture size, and the render
@@ -357,10 +363,11 @@ the parser never looked at extensions:
 ```
 <id>.sprite
 ├─ manifest.json                  deflated
-├─ <id>-gbuffer.exr               deflated (raw float + zero padding compress well)
+├─ <id>-gbuffer.exr               deflated (half float since /7; raw float earlier)
 ├─ <id>-render.png                stored, when baked
-├─ <id>-<slot>-gbuffer.exr        deflated, per non-N stored view slot (/6)
-└─ <id>-<slot>-render.png         stored, per non-N stored view slot (/6)
+├─ <id>-thumb.png                 stored 128x128 N-render thumbnail, when baked (/7)
+├─ <id>-<slot>-gbuffer.exr        deflated, per non-N stored view slot (/6, /7)
+└─ <id>-<slot>-render.png         stored, per non-N stored view slot (/6, /7)
 ```
 
 Entry names are exactly the file names the manifest's `passes`/`views`
@@ -370,7 +377,7 @@ stays individually diffable. Entries carry a fixed mtime so re-baking the
 same primitive with the same settings yields identical bytes. `parseBake()`
 (`src/bake/bundle.ts`) is the eager reader used by the sprite editor: unzip,
 validate the `format`
-prefix (`/4`, `/5` and `/6` accepted, anything else rejected by name),
+prefix (`/4`–`/7` accepted, anything else rejected by name),
 resolve entries via the manifest — the g-buffer entry is required, the
 render entry is optional, and legacy albedo/ao entries are ignored — and
 expose which optional passes are present plus the `provenance` block when

@@ -26,7 +26,10 @@ particular) do not auto-extract it on download.
 - The container format has never needed a version of its own; format
   evolution lives entirely in the manifest's `format` field.
 - G-buffer EXRs deflate well (raw float + zero padding); render PNGs are
-  stored uncompressed inside the zip.
+  stored uncompressed inside the zip. As of format `/7` the g-buffer entry is
+  **half-float** and is still deflated by the bundle — EXR-native compression
+  is not used because three's exporter ZIP does not round-trip through its
+  loader (ADR 0018) — and bundles may add a stored `<id>-thumb.png`.
 
 ## Rejected alternatives
 
