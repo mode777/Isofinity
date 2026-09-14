@@ -9,13 +9,13 @@ occlusion and hit-testing stay driven by the baked g-buffer in every mode.
 
 ### Requirement: Bundles must carry a rendered pass
 
-The editor's bundle parser SHALL accept `isoinfinity-bake/4` and
-`isoinfinity-bake/5` format prefixes (unknown prefixes fail with a named
+The editor's bundle parser SHALL accept `isoinfinity-bake/4` through
+`isoinfinity-bake/7` format prefixes (unknown prefixes fail with a named
 error), but a bundle SHALL NOT be placed unless it carries its rendered
 pass: loading a bundle without `<id>-render.png` SHALL fail with a named
-error and place no sprite. A `/4` or `/5` bundle that includes the rendered
-pass SHALL load as today: the lit image is uploaded as the sprite's display
-layer.
+error and place no sprite. A `/4`–`/7` bundle that includes the rendered
+pass SHALL load as today: the decoded render pass is uploaded as the
+sprite's display layer.
 
 #### Scenario: v3 bundle is rejected
 
@@ -42,45 +42,60 @@ layer.
 ### Requirement: Extra bundle views are placeable per view
 
 When a sprite bundle is loaded into a world document — as a brush or on
-world open — each view slot it stores (the north view plus any extra
-E/S/W views) SHALL load as a placeable view of the same asset, provided
-that view carries its own rendered pass and its decoded g-buffer depth
-lies within the manifest's recorded depth range (compared with a small
-half-precision epsilon). Depth outside the range — negative depth in
-particular, the signature of a view-slot pass baked against a rotated
-camera instead of the fixed one — makes the view unplaceable: an extra
-view SHALL be skipped with a named status note naming the slot and the
-stale-depth cause (a re-bake of the sprite fixes it), while the bundle's
-placeable views still load; the north view failing the check SHALL fail
-the whole bundle load with a named error, as a missing rendered pass
-does. A view without a rendered pass SHALL NOT be placeable: it SHALL be
-skipped with a status note while the bundle's placeable views still load
-(the same rendered-pass rule a whole bundle follows today). Each view
-SHALL keep its own baked sprite size and origin; a `/4` or `/5` bundle
-(or any bundle storing only north) SHALL load exactly as today — a
-single north-facing view.
+world open — its north view SHALL be decoded and validated at load, and
+each extra view slot it stores (E/S/W) SHALL be registered as a pending
+direction of the same asset and resolved on first use: the first time a
+placement direction, brush direction, or direction switch selects that
+slot, the runtime SHALL decode the view's g-buffer and rendered pass and
+make it placeable, provided that view carries its own rendered pass and
+its decoded g-buffer depth lies within the manifest's recorded depth
+range (compared with a small half-precision epsilon). Depth outside the
+range — negative depth in particular, the signature of a view-slot pass
+baked against a rotated camera instead of the fixed one — makes the view
+unplaceable: the slot SHALL be skipped with a named status note naming
+the slot and the stale-depth cause (a re-bake of the sprite fixes it) and
+the direction SHALL fall back to north. A view without a rendered pass
+SHALL likewise not be placeable: it SHALL be skipped with a status note
+on first use and the direction SHALL fall back to north. The north view
+failing the load-time check SHALL fail the whole bundle load with a named
+error, as a missing rendered pass does. Each view SHALL keep its own
+baked sprite size and origin; a `/4` or `/5` bundle (or any bundle
+storing only north) SHALL load exactly as today — a single north-facing
+view. Resolving a slot SHALL only decode that slot's passes; the passes
+of unused slots SHALL NOT be inflated or decoded. Resolving an extra view
+SHALL NOT re-read the bundle file: the bytes read for the bundle SHALL be
+read at most once per load and reused for every view of that asset, so
+adding a direction never repeats the file read.
 
 #### Scenario: Multi-view bundle exposes all its directions
 
 - **WHEN** the user picks a sprite whose `/6` bundle stores N, E, S, and W,
   all with render passes and in-range depth
-- **THEN** the world document holds all four views of that asset and every
-  direction is placeable
+- **THEN** the world document opens with the north view immediately and
+  each of E, S, and W becomes placeable when first selected, with every
+  direction placeable once resolved
+
+#### Scenario: Only requested views are decoded
+
+- **WHEN** a multi-view bundle is loaded and only the north direction is
+  ever used
+- **THEN** the extra views' g-buffer and render passes are never inflated
+  or decoded
 
 #### Scenario: View without a render pass is not placeable
 
 - **WHEN** a bundle's east view has a g-buffer but no rendered pass
-- **THEN** east is skipped with a status note and the remaining placeable
-  views (at least north) still load
+- **THEN** selecting east skips it with a status note, falls back to
+  north, and the remaining placeable views (at least north) still load
 
 #### Scenario: Stale-depth view is not placeable
 
 - **WHEN** a bundle's east view carries a render pass but its decoded
   g-buffer contains negative depth values (outside the manifest's
   recorded depth range)
-- **THEN** east is skipped with a named status note identifying the slot
-  and the stale-depth cause, and the remaining placeable views (at least
-  north) still load
+- **THEN** selecting east skips it with a named status note identifying
+  the slot and the stale-depth cause, falls back to north, and the
+  remaining placeable views (at least north) still load
 
 #### Scenario: Stale-depth north fails the load
 
@@ -94,6 +109,13 @@ single north-facing view.
 - **WHEN** the user picks a `/4` or `/5` bundle as a brush
 - **THEN** only the north view loads and no direction control is offered
   for it
+
+#### Scenario: Resolving an extra view does not re-read the bundle
+
+- **WHEN** a multi-view bundle is loaded and a direction other than north is
+  later resolved
+- **THEN** the bundle file is read at most once for that load and the extra
+  view resolves from the already-read bytes
 
 ### Requirement: Per-pixel occlusion stays g-buffer driven
 
@@ -410,3 +432,125 @@ height) and SHALL NOT require separate draws or batches.
 - **THEN** the baked shadow pixels do not composite while the placement's
   contact-shadow ellipse still shows, and lowering it back to the ground
   restores the baked patch
+### Requirement: G-buffers load from either EXR precision
+
+The runtime SHALL decode a bundle's g-buffer whether it is stored as a
+half-float (`exr-f16-linear`) or a full-float (`exr-f32-linear`) EXR,
+producing the same half-float RGBA texture data in either case, so a bundle
+baked before the half-float storage change loads without re-baking. A
+g-buffer that cannot be decoded SHALL fail with a named error and place no
+sprite.
+
+#### Scenario: Half-float g-buffer loads
+
+- **WHEN** the runtime loads a `/7` bundle whose g-buffer is a half-float EXR
+- **THEN** the g-buffer decodes to the half-float texture data and the sprite
+  places normally
+
+#### Scenario: Full-float g-buffer loads
+
+- **WHEN** the runtime loads a `/4`, `/5` or `/6` bundle whose g-buffer is a
+  full-float EXR
+- **THEN** the g-buffer decodes to the same half-float texture data as an
+  equivalent half-float storage and the sprite places normally
+
+### Requirement: Rendered passes upload without a CPU readback
+
+When a sprite bundle's render pass is decoded, the runtime SHALL retain it as
+a GPU-uploadable bitmap (`ImageBitmap`) and upload that bitmap directly into
+the sprite render texture array. It SHALL NOT copy the decoded pixels back to
+CPU memory (no 2D-canvas `drawImage` + `getImageData`) only to re-upload
+them. Boot-baked passes, which are produced as CPU byte buffers, MAY continue
+to upload from those buffers. The displayed result SHALL be pixel-identical
+to uploading CPU bytes.
+
+#### Scenario: A bundle render pass uploads from its decoded bitmap
+
+- **WHEN** a sprite bundle is loaded into a world
+- **THEN** its render pass is uploaded from the decoded bitmap and no
+  render-pass canvas pixel readback (`getImageData`) phase runs for it
+
+#### Scenario: Display is unchanged
+
+- **WHEN** the same render content is loaded as a bundle (bitmap upload) and
+  as a boot-baked primitive (byte upload)
+- **THEN** the composited sprite pixels are identical
+
+### Requirement: Sprite layers upload at their own size
+
+Each sprite layer's uploaded texture SHALL be its own baked dimensions, not
+a rectangle padded to the largest sprite in the document. Adding a sprite
+layer to an open world SHALL NOT rebuild or re-upload any layer already
+present, except when the texture allocation must grow to fit the new layer
+(a layer exceeding the allocated dimensions or a full slice capacity), which
+re-uploads the existing layers once. Placing a large sprite SHALL NOT
+increase the texture storage or upload work of any other layer.
+
+#### Scenario: A small layer is not inflated to the largest sprite
+
+- **WHEN** a world holds both a large and a small sprite and the sprite
+  textures are (re)built
+- **THEN** the small sprite's uploaded layer is its own dimensions and is not
+  padded to the large sprite's size
+
+#### Scenario: Adding a layer leaves existing layers untouched
+
+- **WHEN** a new sprite layer is added that fits the current allocation
+  (for example by resolving a new direction or acquiring a new brush)
+- **THEN** layers already uploaded are not rebuilt or re-uploaded
+
+### Requirement: Resolved sprite views are cached per source bundle
+
+A sprite view decoded for a world document SHALL be cached in memory
+against its source workspace file for the session, so re-opening a world
+or re-picking a brush that references the same file reuses the decoded
+view data rather than reading, inflating, and decoding it again. The
+cache SHALL be invalidated when the source file's identity changes
+(size or last-modified). The cache SHALL be in-memory editor state only
+and SHALL NOT be serialized into worlds, bundles, or any persisted
+format.
+
+#### Scenario: Re-picking a loaded sprite does not decode again
+
+- **WHEN** the user picks a sprite brush whose bundle was already loaded
+  earlier in the session
+- **THEN** the brush becomes available without reading or decoding the
+  bundle again
+
+#### Scenario: Re-opening a world reuses decoded views
+
+- **WHEN** the user re-opens a world whose sprites were decoded earlier
+  in the session and whose files are unchanged
+- **THEN** the referenced views are served from the cache instead of the
+  bundle files
+
+#### Scenario: Editing a bundle invalidates its cached views
+
+- **WHEN** a cached bundle file is replaced (its size or last-modified
+  time changes) and loaded again
+- **THEN** the runtime decodes the new bundle and does not serve stale
+  view data
+
+### Requirement: Decoded-view cache is workspace-scoped
+
+The per-session decoded-view cache SHALL key each entry by a
+workspace-scoped identity (the connected workspace plus the file's relative
+path) together with the file's size and last-modified time. Loading a
+sprite from a second workspace whose relative path matches a cached entry
+SHALL decode that workspace's bytes rather than reuse another workspace's
+decoded views.
+
+#### Scenario: Switching workspaces does not serve stale views
+
+- **WHEN** the user loads `sprites/tree.sprite` from one workspace, then
+  reconnects to a different workspace and loads its own
+  `sprites/tree.sprite`
+- **THEN** the second load decodes the second workspace's bytes; the first
+  workspace's decoded views are not reused
+
+#### Scenario: An unchanged file still reuses its decoded views
+
+- **WHEN** the same workspace file is loaded again in the same session and
+  its size and last-modified time are unchanged
+- **THEN** its decoded views are reused from the cache with no re-read and no
+  re-decode

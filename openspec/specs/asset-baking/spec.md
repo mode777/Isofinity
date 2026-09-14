@@ -91,26 +91,25 @@ manifest `size` SHALL record the scaled box extent.
 
 A glTF bake SHALL produce the same outputs as a primitive bake — g-buffer
 EXR (rgb = world-space normal, a = linear ray depth against the global
-reference plane), manifest with format `isoinfinity-bake/6`, single zip
+reference plane), manifest with format `isoinfinity-bake/7`, single zip
 bundle — readable by the editor's bundle parser without modification. The
 g-buffer normals SHALL come from the mesh geometry, not derived from depth.
-The g-buffer EXR SHALL follow exactly the byte-level conventions of format
-`/3`, `/4` and `/5`. Each stored view contributes its own pass entries per
-the multi-view format requirement; the N view's entries keep the
-historical naming (`<id>-gbuffer.exr`, `<id>-render.png`). When produced,
-a view's render pass SHALL be included as an additional bundle entry
-referenced by that view's record in the manifest; the manifest SHALL
-record which optional passes each view carries and the
+The g-buffer SHALL use the `/7` half-float encoding. Each stored view
+contributes its own pass entries per the multi-view format requirement; the
+N view's entries keep the historical naming (`<id>-gbuffer.exr`,
+`<id>-render.png`). When produced, a view's render pass SHALL be included as
+an additional bundle entry referenced by that view's record in the manifest;
+the manifest SHALL record which optional passes each view carries and the
 environment/tonemap/renderer settings used for them. The editor bundle
-parser SHALL accept `/4`, `/5` and `/6` bundles, SHALL require only the N
-view's g-buffer entry, and SHALL ignore pass entries recorded by older
-manifests that it no longer consumes (for example albedo or ao); a `/4`,
-`/5` or `/6` bundle MAY omit the optional passes.
+parser SHALL accept `/4`–`/7` bundles, SHALL require only the N view's
+g-buffer entry, and SHALL ignore pass entries recorded by older manifests
+that it no longer consumes (for example albedo or ao); a `/4`–`/6` bundle MAY
+omit the optional passes.
 
 #### Scenario: glTF bundle downloads and validates
 
 - **WHEN** the user bakes a glTF source and downloads the bundle
-- **THEN** the zip contains a valid `isoinfinity-bake/6` manifest plus the
+- **THEN** the zip contains a valid `isoinfinity-bake/7` manifest plus the
   N view's g-buffer pass, and the editor's bundle parser accepts it
 
 #### Scenario: Curved glTF geometry bakes correct normals
@@ -359,7 +358,7 @@ with and without a workspace.
 
 While a workspace is connected, the bake tool's bundle save SHALL write the
 bundle into the workspace as `sprites/<id>.sprite` and report the save in
-the status area; the bytes SHALL be the unchanged `isoinfinity-bake/4` zip
+the status area; the bytes SHALL be the current `isoinfinity-bake/7` zip
 bundle. The browser-download path SHALL remain available as the fallback
 (with no workspace connected it is the default), also producing
 `<id>.sprite`. The debug position image SHALL keep downloading as a file
@@ -931,3 +930,44 @@ format SHALL continue to load whether or not they carry the field.
   `groundShadow` field
 - **THEN** the toggle restores to on (without changing the stored passes
   of that bundle)
+### Requirement: Bundle format /7 stores half-float g-buffers and a thumbnail
+
+A saved bake SHALL be an `isoinfinity-bake/7` bundle: a single zip whose
+g-buffer pass is a **half-float** EXR (`encoding: exr-f16-linear`, the same
+`rgb = world normal`, `a = ray depth` channels), deflated in the bundle as
+before, and which — when the bundle
+carries a render pass — additionally contains a `128x128` RGBA PNG thumbnail
+entry (`<id>-thumb.png`) referenced by a top-level manifest `thumbnail` field
+(`file`, `width`, `height`). The thumbnail SHALL be derived from the N view's
+render pass, preserving its aspect ratio and filling the remainder
+transparently; it SHALL NOT be produced when the bundle has no render pass.
+The N view's pass entries SHALL keep the historical naming. Older `/4`–`/6`
+bundles SHALL remain readable: their full-float (`exr-f32-linear`) g-buffers
+and, for `/6`, their per-view passes load unchanged, and a bundle without a
+thumbnail field loads with no thumbnail.
+
+#### Scenario: A /7 bundle is half-float and carries a thumbnail
+
+- **WHEN** the user saves a bake that has a render pass
+- **THEN** the bundle's manifest is `/7`, its g-buffer entry is a half-float
+  EXR, and it contains a `<id>-thumb.png` entry referenced by the manifest
+  `thumbnail` field at 128×128
+
+#### Scenario: The thumbnail comes from the north render
+
+- **WHEN** a bake with N/E/S/W views is saved
+- **THEN** the thumbnail is derived from the N view's render pass, and no
+  per-view thumbnail entry is written
+
+#### Scenario: A bundle without a render pass has no thumbnail
+
+- **WHEN** the user saves a bake that has no render pass
+- **THEN** the bundle is `/7` with a half-float g-buffer and no thumbnail
+  entry or manifest `thumbnail` field
+
+#### Scenario: Older full-float bundles load unchanged
+
+- **WHEN** the user opens a `/4`, `/5` or `/6` bundle whose g-buffer is a
+  full-float EXR and which has no thumbnail
+- **THEN** the bundle loads exactly as before, with no thumbnail and no
+  re-bake required

@@ -22,7 +22,7 @@
 ## 5. Verification gate
 
 - [x] 5.1 Run `npm run build` and `openspec validate --change add-world-editor-pan-tool --strict`; fix any failures. No Node verifier applies (no bundle/mesh/history/selection/terrain logic touched).
-- [ ] 5.2 Manual browser pass over the spec scenarios: space-drag pans at constant zoom, suppresses place/erase/select, mid-drag Space release completes the pan, form-control space keeps editing, existing wheel/middle-drag/touch pans and zoom controls unchanged. Leave the run to the user per AGENTS.md.
+- [x] 5.2 Manual browser pass over the spec scenarios: space-drag pans at constant zoom, suppresses place/erase/select, mid-drag Space release completes the pan, form-control space keeps editing, existing wheel/middle-drag/touch pans and zoom controls unchanged. Leave the run to the user per AGENTS.md.
 
 ## 6. Dedicated pan tool button
 
