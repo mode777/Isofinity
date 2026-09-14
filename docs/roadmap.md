@@ -105,6 +105,12 @@ each line below has a full record there).
   measured from the pass's own empty pixels; `verify:bundles`; ADR 0019).
   No format bump — `/7` render-pass bytes change, old bundles keep their
   fringes until re-baked.
+- **Unblended sprite surface data** — silhouettes no longer shade as a
+  coverage-weighted mix of object and backdrop (the pale ring in front of
+  shadows): the sprite pass blends only albedo per draw buffer, while the
+  g-buffer and depth attachments replace, so the deferred pass shades every
+  fragment with its own surface's data; contact shadows use an explicit
+  keep-blend (`verify:selection`/`verify:shadows`; ADR 0020).
 
 ## In progress
 

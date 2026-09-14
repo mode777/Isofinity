@@ -29,6 +29,7 @@ holds only what stays true after a change is archived.
 | [0017](0017-upload-from-decoded-bitmaps.md) | Accepted | Texture passes upload from decoded bitmaps, not CPU readbacks |
 | [0018](0018-half-float-gbuffer-and-thumbnail.md) | Accepted | Half-float g-buffer storage and per-asset thumbnails (`/7`) |
 | [0019](0019-straight-unmixed-render-alpha.md) | Accepted | Render passes store straight alpha with the environment plate unmixed at tonemap (never premultiplied) |
+| [0020](0020-albedo-blends-surface-data-replaces.md) | Accepted | Albedo blends, surface data replaces — never coverage-blend the g-buffer/depth attachments across draws |
 
 ## Adding a decision
 

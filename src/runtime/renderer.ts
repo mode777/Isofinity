@@ -247,8 +247,9 @@ void main() {
 `;
 
 // Contact shadows: color-only composite (straight source, the blend
-// applies the alpha); g-buffer and depth outputs are zero-weight so
-// blending preserves the surface data behind them.
+// applies the alpha); the pass draws with a keep-blend on the g-buffer
+// and depth attachments, so their (zero) outputs never disturb the
+// surface data behind the shadow.
 const FLAT_SHADOW_FRAG = `#version 300 es
 precision highp float;
 in vec4 vColor;
@@ -589,6 +590,22 @@ function link(gl: WebGL2RenderingContext, vertSrc: string, fragSrc: string): Web
     throw new Error(`Program link failed: ${gl.getProgramInfoLog(prog)}`);
   }
   return prog;
+}
+
+/**
+ * Per-draw-buffer blend (gl.blendFunci) — WebGL2 core, but missing from
+ * the TypeScript DOM lib's WebGL2RenderingContext.
+ */
+function blendBuffer(
+  gl: WebGL2RenderingContext,
+  buffer: number,
+  src: number,
+  dst: number,
+): void {
+  type PerBufferBlend = WebGL2RenderingContext & {
+    blendFunci(buffer: number, src: number, dst: number): void;
+  };
+  (gl as PerBufferBlend).blendFunci(buffer, src, dst);
 }
 
 export const DEPTH_LINEAR_RANGE = 64;
@@ -1991,10 +2008,14 @@ export class Renderer {
       gl.drawArrays(gl.TRIANGLES, 0, this.groundVerts);
     }
 
-    // 2. Contact shadows: color-only (g-buffer/depth outputs are
-    //    zero-weight), still no depth interaction.
+    // 2. Contact shadows: color-only (the g-buffer/depth attachments use a
+    //    keep-blend, preserving the surface data behind them), still no
+    //    depth interaction.
     if (shadows && shadows.verts > 0) {
       gl.enable(gl.BLEND);
+      blendBuffer(gl, 0, gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      blendBuffer(gl, 1, gl.ZERO, gl.ONE);
+      blendBuffer(gl, 2, gl.ZERO, gl.ONE);
       gl.useProgram(this.flatShadowProg);
       gl.bindVertexArray(this.shadowVao);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.shadowVbo);
@@ -2032,9 +2053,16 @@ export class Renderer {
     }
 
     // 4. Sprites: blended, per-pixel depth-tested against each other and
-    //    against any mesh depth written above.
+    //    against any mesh depth written above. Per-draw-buffer blend: only
+    //    the albedo attachment composites at coverage — surface data
+    //    (g-buffer normal + linear depth) replaces, so a silhouette
+    //    fragment is shaded as the object, never as a blend with the
+    //    surface behind it (ADR 0020).
     if (count > 0) {
       gl.enable(gl.BLEND);
+      blendBuffer(gl, 0, gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      blendBuffer(gl, 1, gl.ONE, gl.ZERO);
+      blendBuffer(gl, 2, gl.ONE, gl.ZERO);
       gl.enable(gl.DEPTH_TEST);
       gl.useProgram(this.spriteProg);
       gl.activeTexture(gl.TEXTURE0);

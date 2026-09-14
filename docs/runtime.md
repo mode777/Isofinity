@@ -661,8 +661,11 @@ shadows, overlay) carry per-vertex RGBA (`[x, y, r, g, b, a]`, 6 floats
 per vertex). The offscreen geometry framebuffer (recreated on resize)
 holds RT0 (RGBA8 display texel = albedo·AO), RT1 (RGBA16F: world normal +
 linear depth — the bake g-buffer layout), and RT2 (RGBA16F: linear depth in r, for
-the light pass's position reconstruction); blending is per-attachment
-straight alpha (each output's own alpha is its blend weight), with the
+the light pass's position reconstruction); blending is per-draw-buffer
+(ADR 0020): RT0 composites straight alpha (the output's own alpha is its
+blend weight), while RT1/RT2 replace for sprites (a silhouette fragment
+writes its own surface data — never a coverage-weighted mix with the
+surface behind) and keep for contact shadows, with the
 light pass sampling all three afterwards:
 
 1. **Ground** — the ground's cell top faces (y=0) as a static vertex-color
@@ -676,8 +679,8 @@ light pass sampling all three afterwards:
 2. **Contact shadows** — for every placement (and ghost) standing above
    the ground: a soft black ellipse on the ground at the placement's
    ground cell, CPU-projected ground-plane circle, larger and fainter as
-   the height grows. Blended into RT0 only (zero-weight g-buffer/depth
-   outputs preserve the surface data behind), no window-depth
+   the height grows. Blended into RT0 only (the g-buffer/depth attachments
+   use a keep-blend, preserving the surface data behind), no window-depth
    interaction — all sprites composite over it. Editor chrome only.
 3. **Meshes** (skinned characters) — one draw call per placed character:
    the vertex shader blends four joint influences against a per-character
@@ -712,7 +715,11 @@ light pass sampling all three afterwards:
    included, at any height. The linear map keeps the whole reachable
    placement range inside [0,1] with ample 24-bit precision. The same
    fragment routes its data into the MRT targets: baked render texel →
-   RT0, baked normal + offset depth → RT1/RT2. Grounding-shadow fragments
+   RT0 (composited at the coverage alpha), baked normal + offset depth →
+   RT1/RT2 (written unblended — a silhouette fragment carries its own
+   surface data, never a coverage-weighted mix with what is behind it,
+   so the deferred pass shades it as the object, ADR 0020).
+   Grounding-shadow fragments
    (g-buffer-empty, blue-tinted render pixels) instead write the analytic
    ground-plane depth of their screen position — the GLSL twin of the
    shared `groundFromWorldImagePx`/`groundDepth` helpers, biased a hair
