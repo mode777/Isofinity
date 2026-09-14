@@ -435,6 +435,13 @@ export interface WorldDocument {
    */
   brushDir: ViewSlot;
   /**
+   * Brushes this document has already used, most recently used first;
+   * sprite entries keep their bundle file name so the toolbar's
+   * previously-used dropdown can re-acquire them. In-memory editor state
+   * only — never written into world files (ADR 0006).
+   */
+  recentBrushes: { id: string; fileName?: string }[];
+  /**
    * Grounding-shadow strength for new placements (0 = off, 1 = full),
    * like the brush height level: set before placing, carried by each
    * placement, persisted per placement in `isoinfinity-world/5` (omitted

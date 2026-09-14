@@ -166,16 +166,35 @@ The world editor is full-bleed: like the sprite editor it fills the
 center region without the generic document padding, with only a thin
 inset around the toolbar, viewport, and hint line. The toolbar row keeps
 Save, save as, undo, and redo as icon buttons, a divider, then the active
-tool's contextual controls — the brush dropdown and the surface-snap
+tool's contextual controls — the brush controls and the surface-snap
 toggle (an icon button whose highlighted state shows snap is on), shown
 only while a placement (pencil) tool is active; hiding them never
-resets the chosen brush or snap state. Tool selection itself lives in a
+resets the chosen brush, recent list, or snap state. The brush controls
+are a label naming the current brush, a "…" picker button opening the
+asset browser (next paragraph), and a previously-used-brushes dropdown
+(most recently used first; empty until a brush has been picked in this
+document). Tool selection itself lives in a
 thin vertical icon bar docked inside the viewport's top-left corner
 (Photoshop-style): Select, pencil, point light, and eraser, one icon per
 tool with the active tool highlighted. The bar overlays the canvas
 without touching the view transform — canvas input outside the bar is
 unaffected. All of this is editor chrome; the tool, brush, and snap
 state stay per-document in-memory editor state (ADR 0006).
+
+The **asset browser** is the visual brush picker behind the toolbar's "…"
+button: a modal using the file-dialog chrome — the workspace `sprites/`
+folder as a collapsible tree on the left, sprite entries with their baked
+128×128 thumbnails (the `isoinfinity-bake/7` thumbnail pass; a generic
+fallback icon when a bundle carries none) in the file area, a Built-ins
+group (the test primitives and the character), and a search field in the
+dialog's top-right corner that matches asset names and paths
+case-insensitively across every subfolder and the built-ins. Clicking an
+entry acquires it as the pencil's brush (layer reuse, bundle load, or
+primitive bake — the same `selectBrush` path as any brush pick) and
+closes the dialog; a failed pick reports through the status bar and
+leaves the dialog open. Browser navigation and search are dialog-local
+chrome; the previously-used list is per-document in-memory editor state —
+neither is ever serialized (ADR 0006).
 
 The viewport's top-right corner mirrors the tool bar with a
 **layer-visibility control**: an icon button opening a small dropdown of
@@ -263,9 +282,10 @@ direction is per-document in-memory editor state — never saved. The same
 Brush section holds the brush's placement height (a precise field with a
 −2…+2 slider) and grounding-shadow strength, and appears only while the brush
 tool is active; the toolbar
-keeps only the icon save/save-as/undo/redo buttons, the brush dropdown,
-and the surface-snap toggle (the dropdown and snap hidden outside
-placement mode). The selected-placement section likewise appears only
+keeps only the icon save/save-as/undo/redo buttons, the brush controls
+(current-brush label, "…" asset-browser picker, previously-used-brushes
+dropdown), and the surface-snap toggle (hidden outside placement mode).
+The selected-placement section likewise appears only
 while the Select tool is active.
 
 ### Select tool

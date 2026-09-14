@@ -54,7 +54,10 @@ each line below has a full record there).
   resize, 1–128 units; `isoinfinity-world/7`), tool-gated panels/chrome, a
   viewport layer-visibility dropdown (top-right) hiding/showing the ground,
   sprite, and mesh layers (transient per-document state; hidden layers stop
-  rendering, picking, and snapping). **Removed:** the
+  rendering, picking, and snapping), and the asset-browser brush picker
+  (file-browser modal with sprite thumbnails and cross-folder search; the
+  toolbar shows the current-brush label, a "…" picker, and a
+  previously-used-brushes dropdown). **Removed:** the
   sprite editor's "Place in world" hand-off — sprites reach a world by
   saving to `sprites/` and picking as a brush; worlds are created only
   explicitly (with a size).

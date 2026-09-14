@@ -346,6 +346,7 @@ export function newWorldDoc(
     surfaceSnap: false,
     snappedHeight: null,
     brushDir: 'n',
+    recentBrushes: [],
     shadowLevel: 1,
     viewTransform: null,
     layerVisibility: { ...ALL_LAYERS_VISIBLE },
@@ -472,6 +473,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
       surfaceSnap: false,
       snappedHeight: null,
       brushDir: 'n',
+      recentBrushes: [],
     shadowLevel: 1,
       viewTransform: null,
       layerVisibility: { ...ALL_LAYERS_VISIBLE },
@@ -1837,24 +1839,43 @@ const brushStatus = (id: string): string =>
   `brush: ${id} — left-click/drag places, right-click erases`;
 
 /**
+ * Record a successfully acquired brush at the front of the document's
+ * previously-used list (deduped by id). In-memory editor state only —
+ * never serialized into world files (ADR 0006).
+ */
+function rememberBrush(docId: string, brush: Brush): void {
+  const entry =
+    brush.kind === 'sprite'
+      ? { id: brush.id, fileName: brush.fileName }
+      : brush.kind === 'character'
+        ? { id: CHARACTER_BRUSH_ID }
+        : { id: brush.id };
+  update(docId, (d) => {
+    d.recentBrushes = [entry, ...d.recentBrushes.filter((r) => r.id !== entry.id)];
+  });
+}
+
+/**
  * Make a brush placeable in the world: reuse its layer when the document
  * already holds it, else load a saved sprite bundle (workspace sprites/)
  * or bake the primitive on the fly, and append the result as a layer.
  * Progress and failures land in the status bar; the tool only changes on
- * success.
+ * success. Resolves `true` when the brush became placeable, `false` when
+ * nothing changed (busy, or the acquisition failed).
  */
-export async function selectBrush(docId: string, brush: Brush): Promise<void> {
+export async function selectBrush(docId: string, brush: Brush): Promise<boolean> {
   const doc = worldDoc(docId);
-  if (!doc) return;
+  if (!doc) return false;
   if (brush.kind === 'character') {
     if (doc.character) {
       setTool(docId, CHARACTER_BRUSH_ID);
+      rememberBrush(docId, brush);
       ed().setStatus(brushStatus(CHARACTER_BRUSH_ID));
-      return;
+      return true;
     }
     if (brushBusy.has(docId)) {
       ed().setStatus('Still loading the previous brush — one moment');
-      return;
+      return false;
     }
     brushBusy.add(docId);
     try {
@@ -1865,31 +1886,34 @@ export async function selectBrush(docId: string, brush: Brush): Promise<void> {
         d.character = asset;
         d.tool = CHARACTER_BRUSH_ID;
       });
+      rememberBrush(docId, brush);
       void updateShProbe(docId);
       ed().markDirty(docId);
       ed().setStatus(brushStatus(CHARACTER_BRUSH_ID));
+      return true;
     } catch (err) {
       ed().setStatus(
         `Character failed to load: ${err instanceof Error ? err.message : String(err)}`,
       );
       console.error(err);
+      return false;
     } finally {
       brushBusy.delete(docId);
     }
-    return;
   }
   if (doc.layers.some((l) => l.id === brush.id)) {
     setTool(docId, brush.id);
+    rememberBrush(docId, brush);
     ed().setStatus(brushStatus(brush.id));
-    return;
+    return true;
   }
   if (brushBusy.has(docId)) {
     ed().setStatus('Still loading the previous brush — one moment');
-    return;
+    return false;
   }
   if (brush.kind === 'primitive' && anyBakeBusy()) {
     ed().setStatus('A path-traced pass is running — pick the brush again when it finishes');
-    return;
+    return false;
   }
   brushBusy.add(docId);
   try {
@@ -1924,13 +1948,16 @@ export async function selectBrush(docId: string, brush: Brush): Promise<void> {
       }
       d.tool = brush.id;
     });
+    rememberBrush(docId, brush);
     ed().markDirty(docId);
     ed().setStatus(brushStatus(brush.id) + skippedNote);
+    return true;
   } catch (err) {
     ed().setStatus(
       `Brush "${brush.id}" failed to load: ${err instanceof Error ? err.message : String(err)}`,
     );
     console.error(err);
+    return false;
   } finally {
     brushBusy.delete(docId);
   }

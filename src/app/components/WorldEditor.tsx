@@ -54,10 +54,12 @@ import {
   setWorldViewTransform,
   suggestWorldName,
   undoWorld,
+  type Brush,
 } from '../store/world.js';
 import { useEditor } from '../store/editor.js';
 import { useProject } from '../store/project.js';
 import { useWorkspace } from '../store/workspace.js';
+import { AssetBrowserDialog } from './AssetBrowserDialog.js';
 import { EditorToolbar } from './EditorToolbar.js';
 import {
   IconEraser,
@@ -1716,7 +1718,6 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
   }, []);
 
   const connected = useWorkspace((s) => s.state.kind) === 'connected';
-  const sprites = useProject((s) => s.sprites);
   const worlds = useProject((s) => s.worlds);
   const setStatus = useEditor((s) => s.setStatus);
   const activeTool = doc.tool;
@@ -1735,31 +1736,32 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
   // from the eraser.
   const lastBrush = useRef(activeTool === 'eraser' ? '' : activeTool);
 
-  const brushEntries = useMemo(() => {
-    const primitives = PRIMITIVE_KINDS.map((p) => ({
-      value: `p:${p}`,
-      label: p,
-      kind: 'primitive' as const,
-      brush: { kind: 'primitive' as const, id: p },
-    }));
-    const character = {
-      value: `c:${CHARACTER_BRUSH_ID}`,
-      label: CHARACTER_BRUSH_ID,
-      kind: 'character' as const,
-      brush: { kind: 'character' as const },
-    };
-    const spriteEntries = (connected ? sprites : []).map((fileName) => {
-      const id = fileName.replace(/\.(sprite|zip)$/i, '');
+  // Previously used brushes (most recent first) rebuilt into brush records
+  // for the toolbar's quick-switch dropdown; per-document editor chrome.
+  const recentEntries = useMemo(() => {
+    return doc.recentBrushes.map((r) => {
+      if (r.id === CHARACTER_BRUSH_ID) {
+        return { value: `c:${r.id}`, label: r.id, brush: { kind: 'character' } as Brush };
+      }
+      if ((PRIMITIVE_KINDS as readonly string[]).includes(r.id)) {
+        return { value: `p:${r.id}`, label: r.id, brush: { kind: 'primitive', id: r.id } as Brush };
+      }
       return {
-        value: `s:${fileName}`,
-        label: id,
-        kind: 'sprite' as const,
-        brush: { kind: 'sprite' as const, id, fileName },
+        value: `s:${r.id}`,
+        label: r.id,
+        brush: { kind: 'sprite', id: r.id, fileName: r.fileName } as Brush,
       };
     });
-    return [...primitives, character, ...spriteEntries];
-  }, [connected, sprites]);
-  const selectedEntry = brushEntries.find((e) => e.label === activeTool);
+  }, [doc.recentBrushes]);
+
+  /** Acquire a brush; remembers it for the pencil and reports success. */
+  const pickBrush = async (brush: Brush): Promise<boolean> => {
+    const ok = await selectBrush(doc.docId, brush);
+    if (ok) lastBrush.current = brush.kind === 'character' ? CHARACTER_BRUSH_ID : brush.id;
+    return ok;
+  };
+
+  const [assetBrowserOpen, setAssetBrowserOpen] = useState(false);
 
   // The active brush's placeable directions; more than one means a
   // multi-view sprite brush — the only case the direction control and
@@ -1826,6 +1828,12 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
 
   return (
     <div className="world-editor">
+      {assetBrowserOpen ? (
+        <AssetBrowserDialog
+          onPick={(brush) => pickBrush(brush)}
+          onClose={() => setAssetBrowserOpen(false)}
+        />
+      ) : null}
       {saveDialog ? (
         <WorkspaceFileDialog
           mode="save"
@@ -1883,51 +1891,47 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         <span className="toolbar-separator" aria-hidden="true" />
         {placementMode ? (
           <>
+            <span
+              className="brush-label"
+              title={
+                activeTool
+                  ? `Placement brush: ${activeTool}${dirLabel}`
+                  : 'No brush chosen yet — click … to pick one'
+              }
+            >
+              {activeTool || 'no brush'}
+            </span>
+            <button
+              className="icon-btn"
+              title="Pick a placement brush — browse the workspace's sprites/ folder (with thumbnails) and the built-ins, or search across folders"
+              aria-haspopup="dialog"
+              onClick={() => setAssetBrowserOpen(true)}
+            >
+              …
+            </button>
             <select
-              aria-label="Placement brush"
-              title="Placement brush — built-in primitives and workspace sprites"
-              value={selectedEntry?.value ?? ''}
+              aria-label="Previously used brushes"
+              title="Previously used brushes — most recently used first"
+              value=""
+              disabled={recentEntries.length === 0}
               onChange={(e) => {
-                // Release focus: a focused select would both keep the E-key
+                // Release focus: a focused select would keep the E-key
                 // shortcut ignored and let the browser's select types-ahead
                 // treat E as "jump to the option starting with E".
                 e.currentTarget.blur();
-                const entry = brushEntries.find((b) => b.value === e.target.value);
+                const entry = recentEntries.find((b) => b.value === e.target.value);
                 if (!entry) return;
-                lastBrush.current = entry.label;
-                void selectBrush(doc.docId, entry.brush);
+                void pickBrush(entry.brush);
               }}
             >
-              <option value="">brush…</option>
-              <optgroup label="Primitives">
-                {brushEntries
-                  .filter((b) => b.kind === 'primitive')
-                  .map((b) => (
-                    <option key={b.value} value={b.value}>
-                      {b.label}
-                    </option>
-                  ))}
-              </optgroup>
-              <optgroup label="Character">
-                {brushEntries
-                  .filter((b) => b.kind === 'character')
-                  .map((b) => (
-                    <option key={b.value} value={b.value}>
-                      {b.label}
-                    </option>
-                  ))}
-              </optgroup>
-              {connected ? (
-                <optgroup label="Sprites">
-                  {brushEntries
-                    .filter((b) => b.kind === 'sprite')
-                    .map((b) => (
-                      <option key={b.value} value={b.value}>
-                        {b.label}
-                      </option>
-                    ))}
-                </optgroup>
-              ) : null}
+              <option value="" disabled>
+                recent…
+              </option>
+              {recentEntries.map((b) => (
+                <option key={b.value} value={b.value}>
+                  {b.label}
+                </option>
+              ))}
             </select>
             <button
               className={`icon-btn${doc.surfaceSnap ? ' active' : ''}`}

@@ -76,6 +76,12 @@ the pointer for the real semantics.
   presses are refused: entered by holding Space (temporary, any tool) or
   by selecting the dedicated pan tool. Component-local/tool editor chrome
   (ADR 0006), never saved, never dirty.
+- **Asset browser** — the world editor's modal brush picker behind the
+  toolbar's "…" button: a file-browser over the workspace `sprites/`
+  folder with baked bundle thumbnails, a Built-ins group, and a top-right
+  search across all subfolders; picking an entry acquires it as the
+  pencil's brush. Dialog-local chrome plus a per-document
+  previously-used list (ADR 0006), never serialized.
 
 ## World
 

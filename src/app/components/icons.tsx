@@ -189,3 +189,14 @@ export function IconDelete(): React.JSX.Element {
     </>,
   );
 }
+
+/** Picture frame with mountains (asset thumbnail fallback). */
+export function IconImage(): React.JSX.Element {
+  return icon(
+    <>
+      <rect x="2" y="3" width="12" height="10" rx="1" />
+      <path d="M3.5 11.5l3.2-3.2 2.1 2.1 2.4-2.4 2.3 3.5" />
+      <path d="M10 6.2v.01" />
+    </>,
+  );
+}
