@@ -806,8 +806,13 @@ image's native pixel size (100% = one image pixel per screen pixel) and
 SHALL update as zoom changes. Mouse-wheel zooming SHALL zoom around the
 cursor position; dragging SHALL pan; zoom SHALL be clamped to a finite
 range. The fit action SHALL restore a zoom and pan that shows the whole
-image. In the Realtime 3D view the same controls SHALL zoom and pan the 3D
-camera's view of the mesh.
+image. Activating the zoom percentage readout SHALL reset the view's
+zoom to 100% (zoom = 1), anchored at the panel center like the zoom
+buttons, so the point currently at the panel center stays there; the
+readout reset SHALL NOT change the fit action's semantics. In the
+Realtime 3D view the same controls SHALL zoom and pan the 3D camera's
+view of the mesh, and activating the readout SHALL reset that camera
+zoom to 100% the same way.
 
 #### Scenario: Corner controls adjust zoom
 
@@ -834,11 +839,33 @@ camera's view of the mesh.
   fit
 - **THEN** the whole image is visible inside the viewport again
 
+#### Scenario: Clicking the percentage readout resets to 100%
+
+- **WHEN** the user has zoomed a 2D view to a non-100% zoom and activates
+  the percentage readout in the corner zoom controls
+- **THEN** the zoom becomes exactly 100% (one image pixel per screen
+  pixel), the readout shows `100%`, and the point that was at the panel
+  center before the click remains at the panel center
+
+#### Scenario: Realtime view readout resets its camera zoom
+
+- **WHEN** the user has zoomed the Realtime 3D view away from 100% and
+  activates the percentage readout
+- **THEN** the 3D camera's zoom resets to 100% with the isometric viewing
+  direction unchanged
+
 #### Scenario: Realtime view zooms its camera
 
 - **WHEN** the user zooms or pans while the Realtime 3D view is active
 - **THEN** the mesh's rendered view zooms and pans accordingly, and the
   isometric viewing direction is unchanged
+
+#### Scenario: Readout reset never dirties the document
+
+- **WHEN** the user clicks the percentage readout on an unsaved sprite
+  document
+- **THEN** the view transform changes in memory only and the document is
+  not marked dirty
 
 ### Requirement: Sprite viewport state is per-document in-memory
 
@@ -1101,8 +1128,10 @@ and panning with the sprite editor's established viewport conventions:
   and never reach the browser, so they are explicitly out of scope.
 - Corner zoom controls (zoom out, a percentage readout, zoom in, and a
   fit action) SHALL overlay the viewport. Zoom actions SHALL anchor at
-  the panel center; fit SHALL restore the default view that shows the
-  whole grid letterboxed in the panel.
+  the panel center; activating the percentage readout SHALL reset the
+  zoom to 100% anchored at the panel center like the zoom buttons; fit
+  SHALL restore the default view that shows the whole grid letterboxed
+  in the panel.
 
 The zoom/pan SHALL be a 2D view transform of the fixed projected image:
 the fixed isometric camera, projection constants, and the projected
@@ -1208,9 +1237,17 @@ in-memory editor state and never serialized either.
 #### Scenario: Zoom controls mirror the sprite editor
 
 - **WHEN** the user activates the corner zoom controls
-- **THEN** zoom out, the percentage readout, and zoom in work as in the
-  sprite viewport, and the fit action restores the whole-grid default
-  view
+- **THEN** zoom out, the percentage readout (including click-to-reset at
+  100%), and zoom in work as in the sprite viewport, and the fit action
+  restores the whole-grid default view
+
+#### Scenario: Clicking the world percentage readout resets to 100%
+
+- **WHEN** the user has zoomed the world viewport to a non-100% zoom and
+  activates the percentage readout in the corner zoom controls
+- **THEN** the zoom becomes exactly 100%, the readout shows `100%`, the
+  point that was at the panel center stays at the panel center, and no
+  placement is added or erased
 
 #### Scenario: Picking stays accurate at any zoom
 
