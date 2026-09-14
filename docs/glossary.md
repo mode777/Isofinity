@@ -234,3 +234,7 @@ the pointer for the real semantics.
   and meshes alike through the same pass.
 - **Sun position** — `src/shared/sun.ts`: NOAA-style az/el from time of
   day / day of year / latitude; writes through to the manual sliders.
+- **Load trace** — an opt-in, in-memory span record per instrumented load
+  phase (sprite decode, world open, material decode/upload), logged as
+  `[loadtrace] <tag> <ms>ms <meta>` and accumulated on `globalThis.
+  __loadTrace`; diagnostics only, never serialized (ADR 0006).

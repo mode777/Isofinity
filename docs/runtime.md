@@ -410,6 +410,28 @@ A pass uploaded unflipped pairs each pixel's data with its mirrored twin —
 this exact bug made baked-depth occlusion look vertically mirrored on the
 live site.
 
+## Load tracing (diagnostics)
+
+Sprite-bundle and ground-material loading can be timed phase by phase through
+an opt-in, in-memory tracer (`src/perf/trace.ts`). It is enabled by default in
+`npm run dev`, and in any build by adding `?loadtrace` to the URL or setting
+`globalThis.__loadTraceOn = true` before loading; production otherwise emits
+nothing. Each completed phase logs one copyable line
+`[loadtrace] <tag> <ms>ms <key=value>...` and appends a record to
+`globalThis.__loadTrace`. `__loadTraceSummary()` prints a per-tag `{count,
+totalMs}` table and returns it; `__loadTraceClear()` empties the accumulator.
+The tags are: `sprite.read`, `sprite.manifest`, `sprite.inflate` (per zip
+entry), `sprite.exr`, `sprite.depth`, `sprite.png`, `sprite.north`,
+`sprite.view`, `sprite.padding`, `sprite.upload`, `world.open`,
+`world.asset`, `world.direction`, `renderer.build`, `material.parse`,
+`material.inflate`, `material.exr`, `material.image`, `material.srgb`,
+`material.resample`, `material.defaults`, `material.upload`, `material.mipmap`
+and `paint.decode`. The tracer only observes: it never changes which layers or
+maps load, and the buffer is engine state that is never written into bundles,
+worlds, materials or presets (ADR 0006). The pure aggregation is checked by
+`npm run verify:trace`; browser runs are the user's (this environment cannot
+launch one).
+
 ## Display
 
 There are no display modes: every placed sprite shows its prerendered lit
@@ -737,6 +759,7 @@ placement bindings never move.
 - `src/runtime/history.ts` — undo/redo command-pair stacks (world-edit history; `npm run verify:history`)
 - `src/runtime/selection.ts` — CPU placement picking for the Select tool (g-buffer silhouette + per-fragment depth; `npm run verify:selection`)
 - `src/runtime/*-verify.ts` — Node check entry points (`npm run verify:mesh/history/selection`)
+- `src/perf/trace.ts` — opt-in in-memory load-tracing facility (`npm run verify:trace`)
 - `src/app/document.ts` — document/tab types and defaults
 - `src/app/store/` — Zustand stores: editor (tabs + documents + status),
   workspace adapter, project listings, bake actions, world actions

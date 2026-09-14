@@ -65,6 +65,9 @@ it as the reference architecture; design against it.
   `isoinfinity-world/8` ground round trip). Run after touching
   `src/app/groundMaterial.ts`, `src/app/worldFile.ts`, `src/shared/splat.ts`,
   or `src/shared/png.ts`.
+- `npm run verify:trace` — Node-runnable load-tracing checks
+  (`src/perf/trace-verify.ts`: span record shape, deterministic per-tag
+  summary, formatting, clear). Run after touching `src/perf/trace.ts`.
 - Browser harnesses (need a browser — update when behavior changes, but
   leave the browser run to the user): `npm run dev` →
   `/scratch-verify.html` (bake/GL checks, primitive bundle hashes for

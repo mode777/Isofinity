@@ -7,6 +7,7 @@ import {
   SHADOW_MAX_STEPS,
   type ShadowField,
 } from './shadowField.js';
+import { span, TAGS } from '../perf/trace.js';
 
 /** Joint-palette cap, mirroring `meshAsset.ts`. */
 export const MAX_MESH_JOINTS = 64;
@@ -1117,6 +1118,11 @@ export class Renderer {
     maxW: number,
     maxH: number,
   ): void {
+    const upload = span(TAGS.spriteUpload, {
+      layers: renderLayers.length,
+      maxW,
+      maxH,
+    });
     const gl = this.gl;
     if (this.renderTex !== null) gl.deleteTexture(this.renderTex);
     if (this.gbufferTex !== null) gl.deleteTexture(this.gbufferTex);
@@ -1126,6 +1132,7 @@ export class Renderer {
 
     gl.useProgram(this.spriteProg);
     gl.uniform2f(this.uSpriteMaxSize, maxW, maxH);
+    upload();
   }
 
   private byteArray(layers: Uint8Array[], maxW: number, maxH: number, filter: number): WebGLTexture {
@@ -1578,12 +1585,14 @@ export class Renderer {
       }
       return bytes;
     };
+    const defaults = span(TAGS.materialDefaults, { size });
     // Absent maps degrade to neutrals: flat normal (+Z), no AO, unit
     // displacement (the shader's height seam is centered on 1.0).
     const diffuseDefault = defaultLayer(0, 0, 0, 255);
     const normalDefault = defaultLayer(128, 128, 255, 255);
     const armDefault = defaultLayer(255, 255, 255, 255);
     const dispDefault = defaultLayer(255, 255, 255, 255);
+    defaults();
 
     const uploadLayer = (
       tex: WebGLTexture,
@@ -1624,9 +1633,18 @@ export class Renderer {
     const mapSource = (
       src: ImageBitmap | null,
       fallback: Uint8Array,
-    ): ImageBitmap | Uint8Array =>
-      !src ? fallback : src.width === size && src.height === size ? src : bitmapToRgba(src, size);
+      slot: number,
+    ): ImageBitmap | Uint8Array => {
+      if (!src) return fallback;
+      if (src.width === size && src.height === size) return src;
+      const resample = span(TAGS.materialResample, { slot, size });
+      const bytes = bitmapToRgba(src, size);
+      resample();
+      return bytes;
+    };
 
+    const boundCount = materials.filter((m) => m !== null).length;
+    const upload = span(TAGS.materialUpload, { size, slots: boundCount });
     for (let i = 0; i < 4; i++) {
       const m = materials[i];
       if (!m) {
@@ -1636,15 +1654,21 @@ export class Renderer {
         uploadLayer(this.groundDispArr, i, dispDefault);
         continue;
       }
-      const diffuse =
-        m.diffuse.kind === 'linear'
-          ? linearDiffuseToRgba(m.diffuse.data, m.diffuse.width, m.diffuse.height, size)
-          : mapSource(m.diffuse.image, diffuseDefault);
+      let diffuse: ImageBitmap | Uint8Array;
+      if (m.diffuse.kind === 'linear') {
+        const srgb = span(TAGS.materialSrgb, { slot: i });
+        diffuse = linearDiffuseToRgba(m.diffuse.data, m.diffuse.width, m.diffuse.height, size);
+        srgb();
+      } else {
+        diffuse = mapSource(m.diffuse.image, diffuseDefault, i);
+      }
       uploadLayer(this.groundDiffuseArr, i, diffuse);
-      uploadLayer(this.groundNormalArr, i, mapSource(m.normal, normalDefault));
-      uploadLayer(this.groundArmArr, i, mapSource(m.arm, armDefault));
-      uploadLayer(this.groundDispArr, i, mapSource(m.disp, dispDefault));
+      uploadLayer(this.groundNormalArr, i, mapSource(m.normal, normalDefault, i));
+      uploadLayer(this.groundArmArr, i, mapSource(m.arm, armDefault, i));
+      uploadLayer(this.groundDispArr, i, mapSource(m.disp, dispDefault, i));
     }
+    upload();
+    const mipmap = span(TAGS.materialMipmap, { size });
     for (const tex of [
       this.groundDiffuseArr,
       this.groundNormalArr,
@@ -1654,6 +1678,7 @@ export class Renderer {
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
       gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
     }
+    mipmap();
     this.setSplat(splat);
   }
 

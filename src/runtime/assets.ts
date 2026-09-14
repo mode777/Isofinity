@@ -27,6 +27,7 @@ import {
   type Vec3,
   type ViewSlot,
 } from '../shared/iso.js';
+import { span, TAGS } from '../perf/trace.js';
 
 export const RUNTIME_PPU = 64;
 
@@ -163,9 +164,10 @@ export function proceduralEnvironment(): PtEnvironment {
 }
 
 export function layersToSet(layers: SpriteLayer[]): SpriteSet {
+  const padding = span(TAGS.spritePadding, { layers: layers.length });
   const maxW = Math.max(...layers.map((l) => l.width));
   const maxH = Math.max(...layers.map((l) => l.height));
-  return {
+  const set: SpriteSet = {
     ids: layers.map((l) => l.id),
     maxW,
     maxH,
@@ -176,6 +178,8 @@ export function layersToSet(layers: SpriteLayer[]): SpriteSet {
     gbufferLayers: layers.map((l) => padHalf(l.gbuffer, l.width, l.height, maxW, maxH)),
     renderLayers: layers.map((l) => padBytes(l.render, l.width, l.height, maxW, maxH)),
   };
+  padding({ maxW, maxH });
+  return set;
 }
 
 /**
@@ -303,26 +307,36 @@ function buildViewLayer(
   };
 }
 
-async function decodeNorth(info: BakeManifestInfo, buffer: ArrayBuffer): Promise<SpriteLayer> {
+async function decodeNorth(
+  info: BakeManifestInfo,
+  buffer: ArrayBuffer,
+  asset?: string,
+): Promise<SpriteLayer> {
   const spec = info.north;
+  const label = asset ?? info.manifest.id;
   if (!spec.renderFile) {
     throw new Error('bundle has no render pass — re-bake with an environment');
   }
-  const gbuffer = decodeExrGbuffer(
-    entryBuffer(readBakeEntry(buffer, spec.gbufferFile)),
-    spec.width,
-    spec.height,
-  );
-  if (gbufferDepthOutOfRange(gbuffer, info.manifest.depth?.range)) {
+  const inflateG = span(TAGS.spriteInflate, { asset: label, entry: spec.gbufferFile });
+  const gbufferBytes = entryBuffer(readBakeEntry(buffer, spec.gbufferFile));
+  inflateG();
+  const exr = span(TAGS.spriteExr, { asset: label, view: `${spec.width}x${spec.height}` });
+  const gbuffer = decodeExrGbuffer(gbufferBytes, spec.width, spec.height);
+  exr();
+  const depth = span(TAGS.spriteDepth, { asset: label });
+  const outOfRange = gbufferDepthOutOfRange(gbuffer, info.manifest.depth?.range);
+  depth();
+  if (outOfRange) {
     throw new Error(
       'north view depth outside the manifest range — stale view-slot bake, re-bake this sprite',
     );
   }
-  const render = await decodePng(
-    new Blob([entryBuffer(readBakeEntry(buffer, spec.renderFile))]),
-    spec.width,
-    spec.height,
-  );
+  const inflateR = span(TAGS.spriteInflate, { asset: label, entry: spec.renderFile });
+  const renderBytes = entryBuffer(readBakeEntry(buffer, spec.renderFile));
+  inflateR();
+  const png = span(TAGS.spritePng, { asset: label, view: `${spec.width}x${spec.height}` });
+  const render = await decodePng(new Blob([renderBytes]), spec.width, spec.height);
+  png();
   return buildViewLayer(info, spec, gbuffer, render, info.manifest.id);
 }
 
@@ -331,21 +345,36 @@ async function decodeExtra(
   spec: BakeViewSpec,
   buffer: ArrayBuffer,
   id: string,
+  asset?: string,
 ): Promise<ViewResolution> {
+  const label = asset ?? info.manifest.id;
   if (!spec.renderFile) return { ok: false, reason: VIEW_SKIP_NO_RENDER };
-  const gbuffer = decodeExrGbuffer(
-    entryBuffer(readBakeEntry(buffer, spec.gbufferFile)),
-    spec.width,
-    spec.height,
-  );
-  if (gbufferDepthOutOfRange(gbuffer, info.manifest.depth?.range)) {
+  const inflateG = span(TAGS.spriteInflate, { asset: label, entry: spec.gbufferFile });
+  const gbufferBytes = entryBuffer(readBakeEntry(buffer, spec.gbufferFile));
+  inflateG();
+  const exr = span(TAGS.spriteExr, {
+    asset: label,
+    slot: spec.slot,
+    view: `${spec.width}x${spec.height}`,
+  });
+  const gbuffer = decodeExrGbuffer(gbufferBytes, spec.width, spec.height);
+  exr();
+  const depth = span(TAGS.spriteDepth, { asset: label, slot: spec.slot });
+  const outOfRange = gbufferDepthOutOfRange(gbuffer, info.manifest.depth?.range);
+  depth();
+  if (outOfRange) {
     return { ok: false, reason: VIEW_SKIP_STALE_DEPTH };
   }
-  const render = await decodePng(
-    new Blob([entryBuffer(readBakeEntry(buffer, spec.renderFile))]),
-    spec.width,
-    spec.height,
-  );
+  const inflateR = span(TAGS.spriteInflate, { asset: label, entry: spec.renderFile });
+  const renderBytes = entryBuffer(readBakeEntry(buffer, spec.renderFile));
+  inflateR();
+  const png = span(TAGS.spritePng, {
+    asset: label,
+    slot: spec.slot,
+    view: `${spec.width}x${spec.height}`,
+  });
+  const render = await decodePng(new Blob([renderBytes]), spec.width, spec.height);
+  png();
   return { ok: true, layer: buildViewLayer(info, spec, gbuffer, render, id) };
 }
 
@@ -370,8 +399,12 @@ async function cacheInfo(
   ) {
     return { cached: existing, buffer: null };
   }
+  const read = span(TAGS.spriteRead, { asset: source.key, bytes: source.size });
   const buffer = await source.read();
+  read();
+  const manifest = span(TAGS.spriteManifest, { asset: source.key });
   const info = parseBakeManifest(buffer);
+  manifest();
   const cached: CachedBundle = {
     size: source.size,
     lastModified: source.lastModified,
@@ -390,11 +423,16 @@ async function cacheInfo(
 export async function loadBundleNorth(
   source: BundleSource,
 ): Promise<{ north: SpriteLayer; descriptor: BakeManifestInfo }> {
+  const whole = span(TAGS.spriteNorth, { asset: source.key });
   const { cached, buffer } = await cacheInfo(source);
   const cachedNorth = cached.views.get('n');
-  if (cachedNorth) return { north: cachedNorth, descriptor: cached.info };
-  const north = await decodeNorth(cached.info, buffer ?? (await source.read()));
+  if (cachedNorth) {
+    whole({ cached: true });
+    return { north: cachedNorth, descriptor: cached.info };
+  }
+  const north = await decodeNorth(cached.info, buffer ?? (await source.read()), source.key);
   cached.views.set('n', north);
+  whole();
   return { north, descriptor: cached.info };
 }
 
@@ -407,21 +445,33 @@ export async function resolveBundleView(
   source: BundleSource,
   slot: ExtraViewSlot,
 ): Promise<ViewResolution> {
+  const whole = span(TAGS.spriteView, { asset: source.key, slot });
   const { cached, buffer } = await cacheInfo(source);
   const cachedView = cached.views.get(slot);
-  if (cachedView) return { ok: true, layer: cachedView };
+  if (cachedView) {
+    whole({ cached: true });
+    return { ok: true, layer: cachedView };
+  }
   const cachedSkip = cached.skips.get(slot);
-  if (cachedSkip) return { ok: false, reason: cachedSkip };
+  if (cachedSkip) {
+    whole({ cached: true, ok: false });
+    return { ok: false, reason: cachedSkip };
+  }
   const spec = cached.info.extras.find((e) => e.slot === slot);
-  if (!spec) return { ok: false, reason: VIEW_SKIP_NOT_STORED };
+  if (!spec) {
+    whole({ ok: false });
+    return { ok: false, reason: VIEW_SKIP_NOT_STORED };
+  }
   const resolution = await decodeExtra(
     cached.info,
     spec,
     buffer ?? (await source.read()),
     viewLayerId(cached.info.manifest.id, slot),
+    source.key,
   );
   if (resolution.ok) cached.views.set(slot, resolution.layer);
   else cached.skips.set(slot, resolution.reason);
+  whole({ ok: resolution.ok });
   return resolution;
 }
 

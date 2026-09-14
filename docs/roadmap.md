@@ -64,6 +64,11 @@ each line below has a full record there).
   point, and decoded views are cached per source file for the session
   (`verify:bundles`; ADR 0014), so loading a large multi-view sprite no
   longer pays for directions the world never uses.
+- **Load tracing** — opt-in, in-memory per-phase timings for sprite decode,
+  world open and material decode/upload, logged as copyable
+  `[loadtrace] <tag> <ms>ms` lines and summarized via `__loadTraceSummary()`
+  (`verify:trace`), so the next optimization targets a measured bottleneck
+  rather than a guess; diagnostics only, never serialized (ADR 0006).
 - **Directional shadows** — the key directional light casts a real shadow
   from a world-space occluder reconstructed at runtime from the placed
   sprites' baked g-buffers, ray-marched in the deferred pass; characters

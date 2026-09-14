@@ -6,6 +6,7 @@ import {
   screenToGround,
 } from '../../shared/iso.js';
 import { RUNTIME_PPU, layersToSet, viewLayerId } from '../../runtime/assets.js';
+import { span, TAGS } from '../../perf/trace.js';
 import { meshYawMat, Renderer, type FlatBatch, type MeshDraw } from '../../runtime/renderer.js';
 import { CharacterPlayer, bindPosePalette } from '../../runtime/meshAsset.js';
 import { surfaceHeightAt } from '../../runtime/surfaceSnap.js';
@@ -386,6 +387,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     let renderer: Renderer;
     try {
       const hasLayers = doc.layers.length > 0;
+      const buildSpan = span(TAGS.rendererBuild, { layers: doc.layers.length });
       renderer = new Renderer(
         canvas,
         hasLayers ? spriteSet.renderLayers : [new Uint8Array(4)],
@@ -393,6 +395,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         hasLayers ? spriteSet.maxW : 1,
         hasLayers ? spriteSet.maxH : 1,
       );
+      buildSpan();
     } catch (err) {
       useEditor
         .getState()

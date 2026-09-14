@@ -30,6 +30,7 @@ import {
   type Placement,
 } from '../../runtime/world.js';
 import { HistoryStack, type HistoryCommand } from '../../runtime/history.js';
+import { span, TAGS } from '../../perf/trace.js';
 import { parseCharacterAsset } from '../../runtime/meshAsset.js';
 import {
   equirectFromProcedural,
@@ -410,6 +411,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     }
   }
   ed().setStatus(`Loading world ${fileName}…`);
+  const whole = span(TAGS.worldOpen, { world: fileName });
   try {
     const file = await readWorkspaceFile('worlds', fileName);
     const data = parseWorldFile(await file.text(), fileName);
@@ -487,43 +489,48 @@ export async function openWorldDoc(fileName: string): Promise<void> {
         value: loadedAssets,
         max: totalSteps,
       });
-      const bundleName = resolveBundleFile(entry.asset);
-      if (!bundleName) {
-        if (PRIMITIVE_KINDS.includes(entry.asset as PrimitiveKind)) {
-          try {
-            loaded.set(
-              entry.asset,
-              [await bakePrimitiveLayer(entry.asset as PrimitiveKind)],
-            );
-          } catch (bakeErr) {
-            markSkipped(entry.asset, bakeErr);
-          }
-        } else {
-          markSkipped(
-            entry.asset,
-            new Error(`no matching .sprite bundle in sprites/`),
-          );
-        }
-        continue;
-      }
+      const assetSpan = span(TAGS.worldAsset, { asset: entry.asset });
       try {
-        const bundleFile = await readWorkspaceFile('sprites', bundleName);
-        const source = bundleSource(`sprites/${bundleName}`, bundleFile);
-        // North only: the extra directions decode on first use, so an
-        // unused view is never inflated or decoded.
-        const { north, descriptor } = await loadBundleNorth(source);
-        captureEnv(docId, doc, descriptor.provenance);
-        // Pin the layer ids to the placement's asset id: a bundle's
-        // manifest id can differ from the file name it was saved as.
-        loaded.set(entry.asset, [{ ...north, id: entry.asset }]);
-        if (descriptor.extras.length > 0) {
-          lazyViews.set(entry.asset, {
-            source,
-            slots: descriptor.extras.map((e) => e.slot as ExtraViewSlot),
-          });
+        const bundleName = resolveBundleFile(entry.asset);
+        if (!bundleName) {
+          if (PRIMITIVE_KINDS.includes(entry.asset as PrimitiveKind)) {
+            try {
+              loaded.set(
+                entry.asset,
+                [await bakePrimitiveLayer(entry.asset as PrimitiveKind)],
+              );
+            } catch (bakeErr) {
+              markSkipped(entry.asset, bakeErr);
+            }
+          } else {
+            markSkipped(
+              entry.asset,
+              new Error(`no matching .sprite bundle in sprites/`),
+            );
+          }
+          continue;
         }
-      } catch (err) {
-        markSkipped(entry.asset, err);
+        try {
+          const bundleFile = await readWorkspaceFile('sprites', bundleName);
+          const source = bundleSource(`sprites/${bundleName}`, bundleFile);
+          // North only: the extra directions decode on first use, so an
+          // unused view is never inflated or decoded.
+          const { north, descriptor } = await loadBundleNorth(source);
+          captureEnv(docId, doc, descriptor.provenance);
+          // Pin the layer ids to the placement's asset id: a bundle's
+          // manifest id can differ from the file name it was saved as.
+          loaded.set(entry.asset, [{ ...north, id: entry.asset }]);
+          if (descriptor.extras.length > 0) {
+            lazyViews.set(entry.asset, {
+              source,
+              slots: descriptor.extras.map((e) => e.slot as ExtraViewSlot),
+            });
+          }
+        } catch (err) {
+          markSkipped(entry.asset, err);
+        }
+      } finally {
+        assetSpan();
       }
     }
     doc.layers = loaded.size > 0 ? [...loaded.values()].flat() : [];
@@ -605,7 +612,13 @@ export async function openWorldDoc(fileName: string): Promise<void> {
         value: loadedAssets + resolvedDirs,
         max: totalSteps,
       });
-      await ensureView(docId, asset, dir);
+      const dirSpan = span(TAGS.worldDirection, { asset, dir });
+      let resolved: boolean | undefined;
+      try {
+        resolved = await ensureView(docId, asset, dir);
+      } finally {
+        dirSpan(resolved === undefined ? undefined : { ok: resolved });
+      }
       resolvedDirs++;
     }
     ed().setProgress({ label: loadingLabel, value: totalSteps, max: totalSteps });
@@ -630,6 +643,7 @@ export async function openWorldDoc(fileName: string): Promise<void> {
     console.error(err);
   } finally {
     ed().setProgress(null);
+    whole();
   }
 }
 
@@ -723,7 +737,9 @@ function resampleSplatState(ground: GroundState): void {
 async function loadGroundPaint(docId: string, fileName: string): Promise<void> {
   try {
     const file = await readWorkspaceFile('worlds', fileName);
+    const paintSpan = span(TAGS.paintDecode, { file: fileName });
     const decoded = decodePngRgba(new Uint8Array(await file.arrayBuffer()));
+    paintSpan({ w: decoded.width, h: decoded.height });
     update(docId, (d) => {
       d.ground.splat = decoded.data;
       d.ground.splatWidth = decoded.width;

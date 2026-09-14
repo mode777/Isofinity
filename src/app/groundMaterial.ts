@@ -11,6 +11,7 @@
  */
 
 import { unzipSync } from 'three/examples/jsm/libs/fflate.module.js';
+import { span, TAGS } from '../perf/trace.js';
 
 /** A decoded diffuse map: sRGB bytes or float EXR radiance (linear). */
 export type GroundDiffuseMap =
@@ -110,9 +111,13 @@ const MIME_BY_EXT: Record<string, string> = {
 async function decodeImage(bytes: Uint8Array, name: string): Promise<ImageBitmap> {
   const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
   const blob = new Blob([bytes as BlobPart], { type: MIME_BY_EXT[ext] ?? 'application/octet-stream' });
+  const imageSpan = span(TAGS.materialImage, { file: name });
   try {
-    return await createImageBitmap(blob);
+    const bitmap = await createImageBitmap(blob);
+    imageSpan({ w: bitmap.width, h: bitmap.height });
+    return bitmap;
   } catch (err) {
+    imageSpan({ ok: false });
     throw new Error(`${name}: unsupported map format — ${err instanceof Error ? err.message : String(err)}`);
   }
 }
@@ -122,11 +127,13 @@ async function decodeExr(
   bytes: Uint8Array,
   name: string,
 ): Promise<{ data: Float32Array; width: number; height: number }> {
+  const exrSpan = span(TAGS.materialExr, { file: name });
   const { EXRLoader } = await import('three/examples/jsm/loaders/EXRLoader.js');
   const texData = new EXRLoader().parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
   if (!(texData.data instanceof Float32Array) || !texData.width || !texData.height) {
     throw new Error(`${name}: EXR did not decode to float RGBA`);
   }
+  exrSpan({ w: texData.width, h: texData.height });
   return { data: texData.data, width: texData.width, height: texData.height };
 }
 
@@ -135,42 +142,50 @@ export async function parseGroundMaterial(
   buffer: ArrayBuffer,
   fileName: string,
 ): Promise<GroundMaterialMaps> {
-  let files: Record<string, Uint8Array>;
+  const parseSpan = span(TAGS.materialParse, { file: fileName });
   try {
-    files = unzipSync(new Uint8Array(buffer));
-  } catch (err) {
-    throw new Error(`${fileName}: not a readable zip — ${err instanceof Error ? err.message : String(err)}`);
+    const inflate = span(TAGS.materialInflate, { file: fileName });
+    let files: Record<string, Uint8Array>;
+    try {
+      files = unzipSync(new Uint8Array(buffer));
+    } catch (err) {
+      inflate({ ok: false });
+      throw new Error(`${fileName}: not a readable zip — ${err instanceof Error ? err.message : String(err)}`);
+    }
+    inflate();
+    const names = Object.keys(files).filter((n) => !n.endsWith('/'));
+    const slots = matchMaterialMaps(names);
+    if (!slots) {
+      throw new Error(
+        `${fileName}: no diffuse map — expected <name>_diff_* or <name>_diffuse_*.(exr|png|jpg) inside the material zip`,
+      );
+    }
+    const notes: string[] = [];
+    const slotLabel: Record<'arm' | 'nor_gl' | 'disp', string> = {
+      arm: 'AO',
+      nor_gl: 'normal',
+      disp: 'displacement',
+    };
+    for (const slot of ['arm', 'nor_gl', 'disp'] as const) {
+      if (!slots[slot]) notes.push(`no ${slotLabel[slot]} map (${slot}) — using the default`);
+    }
+    for (const name of names) {
+      const m = SLOT_RE.exec(name);
+      if (!m) continue;
+      const slot = normalizeSlot(m[1]);
+      if (name !== slots[slot]) notes.push(`duplicate ${slot} map "${name}" ignored`);
+    }
+    const diffBytes = files[slots.diff];
+    const diffuse = /\.exr$/i.test(slots.diff)
+      ? { kind: 'linear' as const, ...(await decodeExr(diffBytes, slots.diff)) }
+      : { kind: 'srgb' as const, image: await decodeImage(diffBytes, slots.diff) };
+    const normal = slots.nor_gl
+      ? await decodeImage(files[slots.nor_gl], slots.nor_gl)
+      : null;
+    const arm = slots.arm ? await decodeImage(files[slots.arm], slots.arm) : null;
+    const disp = slots.disp ? await decodeImage(files[slots.disp], slots.disp) : null;
+    return { name: fileName, diffuse, normal, arm, disp, notes };
+  } finally {
+    parseSpan();
   }
-  const names = Object.keys(files).filter((n) => !n.endsWith('/'));
-  const slots = matchMaterialMaps(names);
-  if (!slots) {
-    throw new Error(
-      `${fileName}: no diffuse map — expected <name>_diff_* or <name>_diffuse_*.(exr|png|jpg) inside the material zip`,
-    );
-  }
-  const notes: string[] = [];
-  const slotLabel: Record<'arm' | 'nor_gl' | 'disp', string> = {
-    arm: 'AO',
-    nor_gl: 'normal',
-    disp: 'displacement',
-  };
-  for (const slot of ['arm', 'nor_gl', 'disp'] as const) {
-    if (!slots[slot]) notes.push(`no ${slotLabel[slot]} map (${slot}) — using the default`);
-  }
-  for (const name of names) {
-    const m = SLOT_RE.exec(name);
-    if (!m) continue;
-    const slot = normalizeSlot(m[1]);
-    if (name !== slots[slot]) notes.push(`duplicate ${slot} map "${name}" ignored`);
-  }
-  const diffBytes = files[slots.diff];
-  const diffuse = /\.exr$/i.test(slots.diff)
-    ? { kind: 'linear' as const, ...(await decodeExr(diffBytes, slots.diff)) }
-    : { kind: 'srgb' as const, image: await decodeImage(diffBytes, slots.diff) };
-  const normal = slots.nor_gl
-    ? await decodeImage(files[slots.nor_gl], slots.nor_gl)
-    : null;
-  const arm = slots.arm ? await decodeImage(files[slots.arm], slots.arm) : null;
-  const disp = slots.disp ? await decodeImage(files[slots.disp], slots.disp) : null;
-  return { name: fileName, diffuse, normal, arm, disp, notes };
 }
