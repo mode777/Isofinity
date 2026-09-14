@@ -5,7 +5,7 @@ import type { SpriteSet } from './assets.js';
 /**
  * CPU-side placement picking for the world editor's Select tool. Sprites
  * are picked by their baked g-buffer silhouette (not their ground
- * footprint), using the exact padded-stride texel indexing and
+ * footprint), using the same tight per-layer texel indexing and
  * per-fragment depth the compositor uses (see `surfaceSnap.ts`); meshes
  * and point lights are picked by screen-space proximity to their
  * projected anchor. No GPU readback is involved.
@@ -92,7 +92,7 @@ export function pickSpriteAt(
     const ty = Math.floor((wy - by) / scale);
     if (tx < 0 || ty < 0 || tx >= w || ty >= h) continue;
     const g = set.gbufferLayers[p.layer];
-    const o = (ty * set.maxW + tx) * 4;
+    const o = (ty * w + tx) * 4;
     const nx = DataUtils.fromHalfFloat(g[o]);
     const ny = DataUtils.fromHalfFloat(g[o + 1]);
     const nz = DataUtils.fromHalfFloat(g[o + 2]);

@@ -1,6 +1,6 @@
 # 0014 — Sprite views decode lazily and cache per source file
 
-Status: Accepted (2026-09-12, change `lazy-sprite-view-loading`)
+Status: Accepted (2026-09-12, change `lazy-sprite-view-loading`); amended 2026-09-14 (change `fix-sprite-load-structure`)
 
 ## Context
 
@@ -54,6 +54,23 @@ unchanged; old bundles load as before.
 - The cache and the remembered `File` handles are session state; a page
   reload rebuilds them.
 
+## Amendment (2026-09-14, change `fix-sprite-load-structure`)
+
+The original decision did not retain the raw zip specifically to bound
+memory. Browser measurements then showed the opposite trade: reads dominate
+decode by orders of magnitude (a 54 MB bundle read in seconds while its
+inflate + EXR decode was ~0.6 s), and `resolveBundleView` re-read the whole
+file per extra view. The reader now retains the compressed bytes in the
+session cache (`CachedBundle.bytes`) and decodes every view from them; a
+view is read only on a cache miss/identity change or after the bytes were
+evicted.
+
+Eviction bounds the retained bytes: a session byte budget (256 MB,
+`BUNDLE_BYTE_BUDGET`, overridable via `setBundleByteBudget`) drops bytes
+LRU-style while keeping decoded views, and bytes are released outright once
+every stored view of an asset has resolved (decoded or remembered skipped).
+Retained bytes are still engine state — never serialized (ADR 0006).
+
 ## Rejected alternatives
 
 - **Decode all views but spread across idle callbacks** — still pays full
@@ -63,6 +80,7 @@ unchanged; old bundles load as before.
   larger change; left as a follow-on.
 - **Store the g-buffer as half-float EXR** — halves file and decode cost
   but needs a format change and a re-bake to benefit; separate concern.
-- **Hold the raw zip bytes in the document to avoid re-reads** — trades
-  disk reads for tens of MB of resident memory per asset; the per-view
-  decode already happens once and is cached.
+- **Hold the raw zip bytes in the document to avoid re-reads** — originally
+  rejected for tens of MB of resident memory per asset; superseded by the
+  2026-09-14 amendment, which retains bounded bytes in the session cache
+  because measured reads cost far more than the retained compressed bytes.

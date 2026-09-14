@@ -36,7 +36,6 @@ export interface ShadowLayerSource {
   anchors: Vec3[];
   ppus: number[];
   gbufferLayers: Uint16Array[];
-  maxW: number;
 }
 
 export interface ShadowPlacement {
@@ -76,7 +75,7 @@ export function buildLayerShadowPoints(
   const [ox, oy] = set.origins[layerIndex];
   const [ax, ay, az] = set.anchors[layerIndex];
   const ppu = set.ppus[layerIndex];
-  const stride = set.maxW;
+  const stride = w;
   const invPpu = 1 / ppu;
   const anchorDepth = VIEW_DIR[0] * ax + VIEW_DIR[1] * ay + VIEW_DIR[2] * az;
   const pts: number[] = [];

@@ -175,8 +175,12 @@ export function layersToSet(layers: SpriteLayer[]): SpriteSet {
     origins: layers.map((l) => l.originPx),
     anchors: layers.map((l) => l.origin),
     ppus: layers.map((l) => l.pxPerUnit),
-    gbufferLayers: layers.map((l) => padHalf(l.gbuffer, l.width, l.height, maxW, maxH)),
-    renderLayers: layers.map((l) => padBytes(l.render, l.width, l.height, maxW, maxH)),
+    // Tight per-layer passes: consumers index each layer with its own width
+    // (no shared padded stride), and the renderer uploads each at its own
+    // size. The arrays are the layers' own buffers, so appending a layer
+    // leaves the existing references untouched.
+    gbufferLayers: layers.map((l) => l.gbuffer),
+    renderLayers: layers.map((l) => l.render),
   };
   padding({ maxW, maxH });
   return set;
@@ -384,9 +388,101 @@ interface CachedBundle {
   info: BakeManifestInfo;
   views: Map<ViewSlot, SpriteLayer>;
   skips: Map<ViewSlot, string>;
+  /** Retained compressed bundle bytes while any stored view is unresolved. */
+  bytes: ArrayBuffer | null;
+  /** Monotonic touch counter for LRU byte eviction. */
+  byteOrder: number;
 }
 
+/** Session cap on retained compressed bundle bytes (decoded views exempt). */
+export const BUNDLE_BYTE_BUDGET = 256 * 1024 * 1024;
+
 const bundleCache = new Map<string, CachedBundle>();
+let bundleByteBudget = BUNDLE_BYTE_BUDGET;
+let retainedBytes = 0;
+let byteClock = 0;
+
+/** Override the retained-byte budget (session tuning and tests). */
+export function setBundleByteBudget(bytes: number): void {
+  bundleByteBudget = Math.max(0, bytes);
+  evictBundleBytes();
+}
+
+/** Drop every cached bundle (decoded views and retained bytes). */
+export function clearBundleCache(): void {
+  bundleCache.clear();
+  retainedBytes = 0;
+}
+
+function releaseBytes(cached: CachedBundle): void {
+  if (!cached.bytes) return;
+  retainedBytes -= cached.bytes.byteLength;
+  cached.bytes = null;
+}
+
+function evictBundleBytes(): void {
+  while (retainedBytes > bundleByteBudget) {
+    let lru: CachedBundle | null = null;
+    for (const entry of bundleCache.values()) {
+      if (!entry.bytes) continue;
+      if (!lru || entry.byteOrder < lru.byteOrder) lru = entry;
+    }
+    if (!lru) break;
+    releaseBytes(lru);
+  }
+}
+
+function retainBytes(cached: CachedBundle, buffer: ArrayBuffer): void {
+  if (cached.bytes === buffer) {
+    cached.byteOrder = ++byteClock;
+    return;
+  }
+  releaseBytes(cached);
+  cached.bytes = buffer;
+  cached.byteOrder = ++byteClock;
+  retainedBytes += buffer.byteLength;
+  evictBundleBytes();
+}
+
+/** Every stored view is decoded or remembered as skipped — bytes no longer needed. */
+function allViewsResolved(cached: CachedBundle): boolean {
+  if (!cached.views.has('n')) return false;
+  for (const extra of cached.info.extras) {
+    if (!cached.views.has(extra.slot) && !cached.skips.has(extra.slot)) return false;
+  }
+  return true;
+}
+
+function maybeReleaseBytes(cached: CachedBundle): void {
+  if (allViewsResolved(cached)) releaseBytes(cached);
+}
+
+async function readBundleBytes(
+  source: BundleSource,
+  extra?: Record<string, string | number | boolean>,
+): Promise<ArrayBuffer> {
+  const read = span(TAGS.spriteRead, { asset: source.key, bytes: source.size, ...extra });
+  const buffer = await source.read();
+  read();
+  return buffer;
+}
+
+/** The bundle bytes for a source: freshly read, retained, or re-read if evicted. */
+async function bundleBytes(
+  cached: CachedBundle,
+  source: BundleSource,
+  provided: ArrayBuffer | null,
+  extra?: Record<string, string | number | boolean>,
+): Promise<ArrayBuffer> {
+  if (provided) return provided;
+  if (cached.bytes) {
+    cached.byteOrder = ++byteClock;
+    return cached.bytes;
+  }
+  const buffer = await readBundleBytes(source, extra);
+  retainBytes(cached, buffer);
+  return buffer;
+}
 
 async function cacheInfo(
   source: BundleSource,
@@ -397,11 +493,11 @@ async function cacheInfo(
     existing.size === source.size &&
     existing.lastModified === source.lastModified
   ) {
-    return { cached: existing, buffer: null };
+    existing.byteOrder = ++byteClock;
+    return { cached: existing, buffer: existing.bytes };
   }
-  const read = span(TAGS.spriteRead, { asset: source.key, bytes: source.size });
-  const buffer = await source.read();
-  read();
+  if (existing) releaseBytes(existing);
+  const buffer = await readBundleBytes(source);
   const manifest = span(TAGS.spriteManifest, { asset: source.key });
   const info = parseBakeManifest(buffer);
   manifest();
@@ -411,8 +507,11 @@ async function cacheInfo(
     info,
     views: new Map(),
     skips: new Map(),
+    bytes: null,
+    byteOrder: 0,
   };
   bundleCache.set(source.key, cached);
+  retainBytes(cached, buffer);
   return { cached, buffer };
 }
 
@@ -430,8 +529,10 @@ export async function loadBundleNorth(
     whole({ cached: true });
     return { north: cachedNorth, descriptor: cached.info };
   }
-  const north = await decodeNorth(cached.info, buffer ?? (await source.read()), source.key);
+  const bytes = await bundleBytes(cached, source, buffer);
+  const north = await decodeNorth(cached.info, bytes, source.key);
   cached.views.set('n', north);
+  maybeReleaseBytes(cached);
   whole();
   return { north, descriptor: cached.info };
 }
@@ -439,7 +540,8 @@ export async function loadBundleNorth(
 /**
  * Decode one extra view slot on demand, applying the render-pass and
  * depth-range checks the eager loader applies. Successful and skipped
- * results are cached per source file.
+ * results are cached per source file; the bundle's retained bytes are
+ * reused so resolving a view never re-reads the file.
  */
 export async function resolveBundleView(
   source: BundleSource,
@@ -462,15 +564,17 @@ export async function resolveBundleView(
     whole({ ok: false });
     return { ok: false, reason: VIEW_SKIP_NOT_STORED };
   }
+  const bytes = await bundleBytes(cached, source, buffer, { slot });
   const resolution = await decodeExtra(
     cached.info,
     spec,
-    buffer ?? (await source.read()),
+    bytes,
     viewLayerId(cached.info.manifest.id, slot),
     source.key,
   );
   if (resolution.ok) cached.views.set(slot, resolution.layer);
   else cached.skips.set(slot, resolution.reason);
+  maybeReleaseBytes(cached);
   whole({ ok: resolution.ok });
   return resolution;
 }
@@ -591,37 +695,6 @@ export function ptImageToLayerBytes(image: { width: number; height: number; rgba
   for (let y = 0; y < h; y++) {
     const s = (h - 1 - y) * w * 4;
     out.set(rgba.subarray(s, s + w * 4), y * w * 4);
-  }
-  return out;
-}
-
-// Layers are already top-down; pad copies rows verbatim (row 0 stays v=0).
-function padBytes(src: Uint8Array, w: number, h: number, maxW: number, maxH: number): Uint8Array {
-  const out = new Uint8Array(maxW * maxH * 4);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const s = (y * w + x) * 4;
-      const d = (y * maxW + x) * 4;
-      out[d] = src[s];
-      out[d + 1] = src[s + 1];
-      out[d + 2] = src[s + 2];
-      out[d + 3] = src[s + 3];
-    }
-  }
-  return out;
-}
-
-function padHalf(src: Uint16Array, w: number, h: number, maxW: number, maxH: number): Uint16Array {
-  const out = new Uint16Array(maxW * maxH * 4);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const s = (y * w + x) * 4;
-      const d = (y * maxW + x) * 4;
-      out[d] = src[s];
-      out[d + 1] = src[s + 1];
-      out[d + 2] = src[s + 2];
-      out[d + 3] = src[s + 3];
-    }
   }
   return out;
 }

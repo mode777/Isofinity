@@ -387,8 +387,11 @@ function stripModelExt(name: string): string {
 
 /** A workspace sprite File as a lazily-reread bundle source. */
 function bundleSource(key: string, file: File): BundleSource {
+  // Scope the cache key by the connected workspace epoch: reconnecting to a
+  // different workspace must not reuse the previous workspace's decoded data.
+  const epoch = useWorkspace.getState().epoch;
   return {
-    key,
+    key: `ws${epoch}:${key}`,
     size: file.size,
     lastModified: file.lastModified,
     read: () => file.arrayBuffer(),

@@ -1243,6 +1243,28 @@ export async function deletePreset(fileName: string): Promise<void> {
  * both drive the shared bake renderer.
  */
 export async function bakePrimitiveLayer(primitive: PrimitiveKind): Promise<SpriteLayer> {
+  const cached = primitiveLayerCache.get(primitive);
+  if (cached) return cached;
+  const pending = bakePrimitiveLayerUncached(primitive);
+  primitiveLayerCache.set(primitive, pending);
+  try {
+    return await pending;
+  } catch (err) {
+    // A cancelled/failed bake should not poison the cache.
+    primitiveLayerCache.delete(primitive);
+    throw err;
+  }
+}
+
+/**
+ * Session cache of boot-baked primitive layers. Bakes use default settings
+ * and the procedural environment, so a given primitive always produces the
+ * same passes; the layer's arrays are read-only and may be shared across
+ * documents. In-memory, session-only (ADR 0006). Bumped on each first bake.
+ */
+const primitiveLayerCache = new Map<PrimitiveKind, Promise<SpriteLayer>>();
+
+async function bakePrimitiveLayerUncached(primitive: PrimitiveKind): Promise<SpriteLayer> {
   const prim = PRIMITIVES[primitive]();
   const result = bakePrimitive(prim, undefined, undefined, undefined, true);
   const settings = { ...DEFAULT_PT_SETTINGS };

@@ -64,6 +64,14 @@ each line below has a full record there).
   point, and decoded views are cached per source file for the session
   (`verify:bundles`; ADR 0014), so loading a large multi-view sprite no
   longer pays for directions the world never uses.
+- **Sprite load structure** — the reader retains a bundle's compressed bytes
+  (bounded by a session byte budget) so resolving an extra view never
+  re-reads the file; decoded views are cached under a workspace-scoped key;
+  layers upload tight at their own size and are appended without re-uploading
+  or rebuilding the renderer, and the world viewport keeps one renderer for
+  the document (`verify:bundles`/`verify:selection`/`verify:shadows`; ADR
+  0014 amended, ADR 0016); boot-baked primitives are cached per session.
+  Removed CPU layer padding entirely.
 - **Load tracing** — opt-in, in-memory per-phase timings for sprite decode,
   world open and material decode/upload, logged as copyable
   `[loadtrace] <tag> <ms>ms` lines and summarized via `__loadTraceSummary()`

@@ -146,6 +146,12 @@ file + a row in its index). Full design/process records stay in
   convention: `hdri/`, `models/`, `sprites/`, `worlds/`, `presets/`,
   `materials/`) is surfaced through the top bar, project browser and
   panels, with dialogs/downloads as fallback.
+- **Keep the workspace folder out of cloud-synced/on-demand locations —
+  iCloud Desktop & Documents (`~/Documents`, `~/Desktop`), Dropbox/OneDrive
+  online-only, network shares.** Chrome's File System Access reads measured
+  ~3–6 MB/s through the iCloud FileProvider versus >1 GB/s on plain local
+  storage; this dominated sprite/world load time. `dd` bypasses the provider
+  and looks fast, so validate with `fs_usage` or by moving the folder.
 - World editor: free-form cursor-anchored placements (sprites, the built-in
   skinned character, point lights) with heights, surface snap, N/E/S/W
   facing, a Select tool with pixel-accurate picking (ADR 0012), a terrain

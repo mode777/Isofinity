@@ -764,6 +764,12 @@ export class Renderer {
   private spriteProg: WebGLProgram;
   private renderTex: WebGLTexture | null = null;
   private gbufferTex: WebGLTexture | null = null;
+  private spriteRenderLayers: Uint8Array[] = [];
+  private spriteGbufferLayers: Uint16Array[] = [];
+  private spriteSizes: [number, number][] = [];
+  private spriteCapacityW = 0;
+  private spriteCapacityH = 0;
+  private spriteCapacityLayers = 0;
   private groundVao: WebGLVertexArrayObject;
   private groundVbo: WebGLBuffer;
   private shadowVao: WebGLVertexArrayObject;
@@ -881,8 +887,7 @@ export class Renderer {
     canvas: HTMLCanvasElement,
     renderLayers: Uint8Array[],
     gbufferLayers: Uint16Array[],
-    maxW: number,
-    maxH: number,
+    sizes: readonly [number, number][],
   ) {
     const gl = canvas.getContext('webgl2', {
       alpha: false,
@@ -975,7 +980,7 @@ export class Renderer {
     gl.enableVertexAttribArray(aLightPos);
     gl.vertexAttribPointer(aLightPos, 2, gl.FLOAT, false, 8, 0);
 
-    this.setSprites(renderLayers, gbufferLayers, maxW, maxH);
+    this.setSprites(renderLayers, gbufferLayers, sizes);
 
     this.groundVao = gl.createVertexArray()!;
     this.groundVbo = gl.createBuffer()!;
@@ -1111,61 +1116,121 @@ export class Renderer {
     gl.clearDepth(1);
   }
 
-  /** (Re)builds the sprite texture arrays; callable again after loading new layers. */
+  /** (Re)builds the sprite texture arrays from scratch; used at construction. */
   setSprites(
     renderLayers: Uint8Array[],
     gbufferLayers: Uint16Array[],
-    maxW: number,
-    maxH: number,
+    sizes: readonly [number, number][],
   ): void {
     const upload = span(TAGS.spriteUpload, {
       layers: renderLayers.length,
-      maxW,
-      maxH,
+      maxW: Math.max(1, ...sizes.map((s) => s[0])),
+      maxH: Math.max(1, ...sizes.map((s) => s[1])),
     });
-    const gl = this.gl;
-    if (this.renderTex !== null) gl.deleteTexture(this.renderTex);
-    if (this.gbufferTex !== null) gl.deleteTexture(this.gbufferTex);
-
-    this.renderTex = this.byteArray(renderLayers, maxW, maxH, gl.LINEAR);
-    this.gbufferTex = this.halfArray(gbufferLayers, maxW, maxH);
-
-    gl.useProgram(this.spriteProg);
-    gl.uniform2f(this.uSpriteMaxSize, maxW, maxH);
+    this.spriteRenderLayers = renderLayers.slice();
+    this.spriteGbufferLayers = gbufferLayers.slice();
+    this.spriteSizes = sizes.map((s) => [s[0], s[1]]);
+    this.rebuildSpriteTextures();
     upload();
   }
 
-  private byteArray(layers: Uint8Array[], maxW: number, maxH: number, filter: number): WebGLTexture {
+  /**
+   * Append one sprite layer at its own size without re-uploading the layers
+   * already present. Reallocates (and re-uploads everything) only when the
+   * new layer exceeds the allocation or the slice capacity; the caller
+   * appends matching layers in order.
+   */
+  addSpriteLayer(
+    render: Uint8Array,
+    gbuffer: Uint16Array,
+    width: number,
+    height: number,
+  ): void {
+    const upload = span(TAGS.spriteUpload, {
+      layers: this.spriteRenderLayers.length + 1,
+      added: 1,
+    });
+    this.spriteRenderLayers.push(render);
+    this.spriteGbufferLayers.push(gbuffer);
+    this.spriteSizes.push([width, height]);
+    const index = this.spriteRenderLayers.length - 1;
+    if (
+      this.renderTex !== null &&
+      this.gbufferTex !== null &&
+      index < this.spriteCapacityLayers &&
+      width <= this.spriteCapacityW &&
+      height <= this.spriteCapacityH
+    ) {
+      this.uploadSpriteLayerAt(index);
+    } else {
+      this.rebuildSpriteTextures();
+    }
+    upload();
+  }
+
+  private nextCapacity(value: number): number {
+    let cap = 1;
+    while (cap < value) cap *= 2;
+    return cap;
+  }
+
+  private rebuildSpriteTextures(): void {
+    const gl = this.gl;
+    const count = this.spriteRenderLayers.length;
+    const maxW = Math.max(1, ...this.spriteSizes.map((s) => s[0]));
+    const maxH = Math.max(1, ...this.spriteSizes.map((s) => s[1]));
+    const capW = this.nextCapacity(maxW);
+    const capH = this.nextCapacity(maxH);
+    const capLayers = Math.max(1, this.nextCapacity(Math.max(1, count)));
+    if (this.renderTex !== null) gl.deleteTexture(this.renderTex);
+    if (this.gbufferTex !== null) gl.deleteTexture(this.gbufferTex);
+    this.renderTex = this.createSpriteArray(
+      gl.RGBA8,
+      gl.UNSIGNED_BYTE,
+      capW,
+      capH,
+      capLayers,
+      gl.LINEAR,
+    );
+    this.gbufferTex = this.createSpriteArray(
+      gl.RGBA16F,
+      gl.HALF_FLOAT,
+      capW,
+      capH,
+      capLayers,
+      gl.NEAREST,
+    );
+    this.spriteCapacityW = capW;
+    this.spriteCapacityH = capH;
+    this.spriteCapacityLayers = capLayers;
+    for (let i = 0; i < count; i++) this.uploadSpriteLayerAt(i);
+    gl.useProgram(this.spriteProg);
+    gl.uniform2f(this.uSpriteMaxSize, capW, capH);
+  }
+
+  private createSpriteArray(
+    internal: number,
+    type: number,
+    w: number,
+    h: number,
+    layers: number,
+    filter: number,
+  ): WebGLTexture {
     const gl = this.gl;
     const tex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
     gl.texImage3D(
       gl.TEXTURE_2D_ARRAY,
       0,
-      gl.RGBA8,
-      maxW,
-      maxH,
-      layers.length,
+      internal,
+      w,
+      h,
+      layers,
       0,
       gl.RGBA,
-      gl.UNSIGNED_BYTE,
+      type,
       null,
     );
-    layers.forEach((bytes, i) => {
-      gl.texSubImage3D(
-        gl.TEXTURE_2D_ARRAY,
-        0,
-        0,
-        0,
-        i,
-        maxW,
-        maxH,
-        1,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        bytes,
-      );
-    });
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, filter);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, filter);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -1173,42 +1238,39 @@ export class Renderer {
     return tex;
   }
 
-  private halfArray(layers: Uint16Array[], maxW: number, maxH: number): WebGLTexture {
+  private uploadSpriteLayerAt(index: number): void {
     const gl = this.gl;
-    const tex = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
-    gl.texImage3D(
+    const [w, h] = this.spriteSizes[index];
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.renderTex!);
+    gl.texSubImage3D(
       gl.TEXTURE_2D_ARRAY,
       0,
-      gl.RGBA16F,
-      maxW,
-      maxH,
-      layers.length,
       0,
+      0,
+      index,
+      w,
+      h,
+      1,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      this.spriteRenderLayers[index],
+    );
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.gbufferTex!);
+    gl.texSubImage3D(
+      gl.TEXTURE_2D_ARRAY,
+      0,
+      0,
+      0,
+      index,
+      w,
+      h,
+      1,
       gl.RGBA,
       gl.HALF_FLOAT,
-      null,
+      this.spriteGbufferLayers[index],
     );
-    layers.forEach((data, i) => {
-      gl.texSubImage3D(
-        gl.TEXTURE_2D_ARRAY,
-        0,
-        0,
-        0,
-        i,
-        maxW,
-        maxH,
-        1,
-        gl.RGBA,
-        gl.HALF_FLOAT,
-        data,
-      );
-    });
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    return tex;
   }
 
   setLight(light: LightParams): void {

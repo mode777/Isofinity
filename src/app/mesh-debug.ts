@@ -301,7 +301,7 @@ async function main(): Promise<void> {
     row.appendChild(caption);
     rows.appendChild(row);
 
-    const renderer = new Renderer(canvas, [new Uint8Array(4)], [new Uint16Array(4)], 1, 1);
+    const renderer = new Renderer(canvas, [new Uint8Array(4)], [new Uint16Array(4)], [[1, 1]]);
     renderer.setLight({ dir: [0.5, 0.7071, 0.5], key: [1.2, 1.1, 0.9], ambient: [0.35, 0.35, 0.4] });
     renderer.setMeshFrame(ORIGIN_X, ORIGIN_Y, PPU);
     renderer.setShProbe(new Float32Array([

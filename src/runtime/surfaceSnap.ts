@@ -28,9 +28,8 @@ export interface SurfacePlacement {
  * per-pixel depth test resolves, so the read is the surface actually
  * drawn under the cursor.
  *
- * Texel indexing uses the set's padded stride (`maxW`), matching the GPU
- * texture upload — NOT the layer's own width, which drifts across rows
- * whenever any loaded layer is wider than the picked one.
+ * Texel indexing uses each layer's own width — the passes are stored tight
+ * per layer (no shared padded stride), matching the GPU texture upload.
  */
 export function surfaceHeightAt(
   set: SpriteSet,
@@ -58,7 +57,7 @@ export function surfaceHeightAt(
     const ty = Math.floor((wy - by) / scale);
     if (tx < 0 || ty < 0 || tx >= w || ty >= h) continue;
     const g = set.gbufferLayers[p.layer];
-    const o = (ty * set.maxW + tx) * 4;
+    const o = (ty * w + tx) * 4;
     const nx = DataUtils.fromHalfFloat(g[o]);
     const ny = DataUtils.fromHalfFloat(g[o + 1]);
     const nz = DataUtils.fromHalfFloat(g[o + 2]);

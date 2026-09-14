@@ -348,6 +348,12 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
 
   // Stable unless the document's layers change (place-in-world, load).
   const spriteSet = useMemo(() => layersToSet(doc.layers), [doc.layers]);
+  // The renderer lives for the document's lifetime; per-frame code reads the
+  // current sprite set through this ref so adding a layer never rebuilds it.
+  const spriteSetRef = useRef(spriteSet);
+  spriteSetRef.current = spriteSet;
+  const rendererRef = useRef<Renderer | null>(null);
+  const syncedSpriteSetRef = useRef(spriteSet);
 
   // The per-size world-image frame: a memoized pure function of the
   // document's ground size (memoization is per size, so this is cheap).
@@ -386,16 +392,18 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
 
     let renderer: Renderer;
     try {
-      const hasLayers = doc.layers.length > 0;
-      const buildSpan = span(TAGS.rendererBuild, { layers: doc.layers.length });
+      const liveSet = spriteSetRef.current;
+      const hasLayers = liveSet.renderLayers.length > 0;
+      const buildSpan = span(TAGS.rendererBuild, { layers: liveSet.renderLayers.length });
       renderer = new Renderer(
         canvas,
-        hasLayers ? spriteSet.renderLayers : [new Uint8Array(4)],
-        hasLayers ? spriteSet.gbufferLayers : [new Uint16Array(4)],
-        hasLayers ? spriteSet.maxW : 1,
-        hasLayers ? spriteSet.maxH : 1,
+        hasLayers ? liveSet.renderLayers : [new Uint8Array(4)],
+        hasLayers ? liveSet.gbufferLayers : [new Uint16Array(4)],
+        hasLayers ? liveSet.sizes : ([[1, 1]] as [number, number][]),
       );
       buildSpan();
+      rendererRef.current = renderer;
+      syncedSpriteSetRef.current = liveSet;
     } catch (err) {
       useEditor
         .getState()
@@ -493,7 +501,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           z: p.z,
           layer: placementLayerIndex(live, p.primId, p.dir),
         }));
-      return surfaceHeightAt(spriteSet, placements, wx, wy, frameRef.current.originY, PPU, toPx);
+      return surfaceHeightAt(spriteSetRef.current, placements, wx, wy, frameRef.current.originY, PPU, toPx);
     };
 
     /**
@@ -527,7 +535,7 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         y: l.y,
         z: l.z,
       }));
-      const hit = pickPlacementAt(spriteSet, sprites, meshes, lights, px[0], px[1], PPU, toPx);
+      const hit = pickPlacementAt(spriteSetRef.current, sprites, meshes, lights, px[0], px[1], PPU, toPx);
       return hit ? { kind: hit.kind, id: hit.id } : null;
     };
 
@@ -664,12 +672,12 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         const shadowPlacements: ShadowPlacement[] = shadowSprites.map((p) => {
           const layer = placementLayerIndex(live, p.primId, p.dir);
           if (layer >= 0 && !shadowPoints.has(layer)) {
-            shadowPoints.set(layer, buildLayerShadowPoints(spriteSet, layer));
+            shadowPoints.set(layer, buildLayerShadowPoints(spriteSetRef.current, layer));
           }
           return { x: p.x, y: p.y, z: p.z, layer };
         });
         staticShadowField = buildShadowField(
-          spriteSet,
+          spriteSetRef.current,
           shadowPlacements,
           live.ground.width,
           live.ground.depth,
@@ -714,10 +722,10 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         z: number,
         shadow: number,
       ): void => {
-        const scale = PPU / spriteSet.ppus[layerIndex];
-        const [ox, oy] = spriteSet.origins[layerIndex];
-        const [ax, ay, az] = spriteSet.anchors[layerIndex];
-        const [w, h] = spriteSet.sizes[layerIndex];
+        const scale = PPU / spriteSetRef.current.ppus[layerIndex];
+        const [ox, oy] = spriteSetRef.current.origins[layerIndex];
+        const [ax, ay, az] = spriteSetRef.current.anchors[layerIndex];
+        const [w, h] = spriteSetRef.current.sizes[layerIndex];
         const [cx, cy] = toPx(x, z, y);
         instances[count * 10] = cx - ox * scale;
         instances[count * 10 + 1] = cy - oy * scale;
@@ -962,9 +970,9 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
         if (!p) return;
         const layerIndex = placementLayerIndex(live, p.primId, p.dir);
         if (layerIndex < 0) return;
-        const scale = PPU / spriteSet.ppus[layerIndex];
-        const [ox, oy] = spriteSet.origins[layerIndex];
-        const [w, h] = spriteSet.sizes[layerIndex];
+        const scale = PPU / spriteSetRef.current.ppus[layerIndex];
+        const [ox, oy] = spriteSetRef.current.origins[layerIndex];
+        const [w, h] = spriteSetRef.current.sizes[layerIndex];
         const [cx, cy] = toPx(p.x, p.z, p.y);
         const x0 = cx - ox * scale;
         const y0 = cy - oy * scale;
@@ -1588,11 +1596,35 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
       canvas.removeEventListener('contextmenu', onContext);
       canvas.removeEventListener('wheel', onWheel);
       for (const [, entry] of players) entry.player.release();
+      rendererRef.current = null;
       renderer.dispose();
     };
-    // spriteSet identity changes only when the document's layers change,
-    // which re-uploads the sprite texture arrays.
-  }, [doc.docId, spriteSet]);
+    // One renderer per document: layer changes are applied by the sprite
+    // delta effect below, not by rebuilding here.
+  }, [doc.docId]);
+
+  // Apply document layer changes to the live renderer. Appending layers (a
+  // resolved direction or a newly acquired brush) uploads only the new
+  // slices; anything else falls back to a full sprite rebuild.
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    const previous = syncedSpriteSetRef.current;
+    if (previous === spriteSet) return;
+    syncedSpriteSetRef.current = spriteSet;
+    const appended =
+      spriteSet.renderLayers.length > previous.renderLayers.length &&
+      previous.renderLayers.every((layer, i) => spriteSet.renderLayers[i] === layer) &&
+      previous.gbufferLayers.every((layer, i) => spriteSet.gbufferLayers[i] === layer);
+    if (appended) {
+      for (let i = previous.renderLayers.length; i < spriteSet.renderLayers.length; i++) {
+        const [w, h] = spriteSet.sizes[i];
+        renderer.addSpriteLayer(spriteSet.renderLayers[i], spriteSet.gbufferLayers[i], w, h);
+      }
+    } else {
+      renderer.setSprites(spriteSet.renderLayers, spriteSet.gbufferLayers, spriteSet.sizes);
+    }
+  }, [spriteSet]);
 
   // World-editor shortcuts, active only while this world tab is focused:
   // `E` cycles the brush through its available directions (wrapping; the

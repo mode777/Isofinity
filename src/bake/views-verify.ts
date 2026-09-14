@@ -22,11 +22,14 @@ import {
   type ViewSlot,
 } from '../shared/iso.js';
 import {
+  BUNDLE_BYTE_BUDGET,
+  clearBundleCache,
   loadBundleNorth,
   loadBundleViews,
   orderedViewSlots,
   parseViewLayerId,
   resolveBundleView,
+  setBundleByteBudget,
   viewLayerId,
   VIEW_SKIP_NO_RENDER,
   VIEW_SKIP_NOT_STORED,
@@ -564,11 +567,11 @@ async function main(): Promise<void> {
     );
     const resolvedE = await resolveBundleView(lazySource, 'e');
     ok(
-      resolvedE.ok && resolvedE.layer.width === 8 && reads === 2,
-      'resolveBundleView decodes the extra view on first request',
+      resolvedE.ok && resolvedE.layer.width === 8 && reads === 1,
+      `resolveBundleView reuses the retained bytes, no re-read (reads=${reads})`,
     );
     const resolvedAgain = await resolveBundleView(lazySource, 'e');
-    ok(resolvedAgain.ok && reads === 2, 'a repeat resolve is cache-served');
+    ok(resolvedAgain.ok && reads === 1, 'a repeat resolve is cache-served');
 
     // A changed file identity must not serve stale cached views.
     const changedSource: BundleSource = {
@@ -577,7 +580,7 @@ async function main(): Promise<void> {
       lastModified: 2,
     };
     await loadBundleNorth(changedSource);
-    ok(reads === 3, `a changed file identity reloads (reads=${reads})`);
+    ok(reads === 2, `a changed file identity reloads (reads=${reads})`);
     const notStored = await resolveBundleView(lazySource, 's');
     ok(
       !notStored.ok && notStored.reason === VIEW_SKIP_NOT_STORED,
@@ -675,6 +678,85 @@ async function main(): Promise<void> {
       missingErr.includes('missing pass lazy-e-gbuffer.exr'),
       `an extra entry is only read when resolved (got "${missingErr}")`,
     );
+
+    // 5d. Read once per load, and re-read only when the retained bytes were
+    //     evicted (a zero byte budget).
+    console.log('test: bundle bytes are read at most once');
+    const bytes = await guardBundle(0.9, 0.9);
+    let readOnce = 0;
+    const onceSource: BundleSource = {
+      key: 'views-verify/read-once',
+      size: bytes.byteLength,
+      lastModified: 1,
+      read: async () => {
+        readOnce++;
+        return bytes;
+      },
+    };
+    await loadBundleNorth(onceSource);
+    await resolveBundleView(onceSource, 'e');
+    ok(readOnce === 1, `one read serves north and an extra view (reads=${readOnce})`);
+
+    clearBundleCache();
+    setBundleByteBudget(0);
+    let evictedReads = 0;
+    const evictedSource: BundleSource = {
+      key: 'views-verify/evicted',
+      size: bytes.byteLength,
+      lastModified: 1,
+      read: async () => {
+        evictedReads++;
+        return bytes;
+      },
+    };
+    await loadBundleNorth(evictedSource);
+    ok(evictedReads === 1, 'north reads once even with a zero byte budget');
+    const evictedE = await resolveBundleView(evictedSource, 'e');
+    ok(
+      evictedE.ok && evictedReads === 2,
+      'an evicted extra view re-reads and still resolves',
+    );
+    setBundleByteBudget(BUNDLE_BYTE_BUDGET);
+    clearBundleCache();
+
+    // 5e. The decode cache is scoped by source identity, not the relative name.
+    console.log('test: cache entries are scoped by source key');
+    let firstReads = 0;
+    let secondReads = 0;
+    const scopedA: BundleSource = {
+      key: 'ws1:sprites/tree.sprite',
+      size: bytes.byteLength,
+      lastModified: 1,
+      read: async () => {
+        firstReads++;
+        return bytes;
+      },
+    };
+    const scopedB: BundleSource = {
+      key: 'ws2:sprites/tree.sprite',
+      size: bytes.byteLength,
+      lastModified: 1,
+      read: async () => {
+        secondReads++;
+        return bytes;
+      },
+    };
+    const scopedNorthA = await loadBundleNorth(scopedA);
+    const scopedNorthB = await loadBundleNorth(scopedB);
+    ok(
+      firstReads === 1 && secondReads === 1,
+      `distinct keys decode independently (reads=${firstReads}/${secondReads})`,
+    );
+    const scopedAgain = await loadBundleNorth(scopedA);
+    ok(
+      firstReads === 1 && scopedAgain.north === scopedNorthA.north,
+      'the same key reuses its decoded views',
+    );
+    ok(
+      scopedNorthA.north !== scopedNorthB.north,
+      'two keys never share a decoded view',
+    );
+    clearBundleCache();
   }
 
   // 6. Grounding shadow: provenance flag round trip + default omission.

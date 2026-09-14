@@ -98,19 +98,22 @@ the pointer for the real semantics.
   displacement height (centered on 1, so a missing map is neutral) so the
   boundary between materials follows surface detail instead of a straight
   fade.
-- **Sprite layer** — a world's loaded sprite asset: padded passes in two
-  texture arrays (render RGBA8 + g-buffer RGBA16F) plus per-layer size/
-  origin (`src/runtime/assets.ts`). A multi-view asset loads the north
-  layer eagerly and one layer per extra view slot **on demand**; see
-  **Lazy view**.
+- **Sprite layer** — a world's loaded sprite asset: tight passes (no
+  padding) in two texture arrays (render RGBA8 + g-buffer RGBA16F) plus
+  per-layer size/origin (`src/runtime/assets.ts`); each layer is uploaded at
+  its own dimensions and added incrementally (ADR 0016). A multi-view asset
+  loads the north layer eagerly and one layer per extra view slot **on
+  demand**; see **Lazy view**.
 - **Lazy view** — an extra bundle view slot (E/S/W) the world document
   knows about but has not decoded yet: the manifest lists it, so the
   direction is selectable, but its passes are inflated and decoded — and
   its render-pass/depth checks run — only the first time that direction is
-  used. Decoded views are cached per source file for the session
-  (invalidated by size/last-modified); a view that fails the checks is
-  dropped with a skip note and the direction falls back to north
-  (`src/runtime/assets.ts`, ADR 0014). The north view always loads eagerly.
+  used. Decoded views are cached for the session under a workspace-scoped
+  key (workspace epoch + path + size/last-modified) and the bundle's
+  compressed bytes are retained so a view is never re-read; a view that
+  fails the checks is dropped with a skip note and the direction falls back
+  to north (`src/runtime/assets.ts`, ADR 0014 as amended). The north view
+  always loads eagerly.
 - **Placement direction** — which baked view slot a placement stands in
   (`n`/`e`/`s`/`w`, default `n`): the brush's facing at placement time,
   persisted with the placement (omitted in world files when north).

@@ -276,7 +276,7 @@ or a point light — clicking empty space or pressing Escape clears the
 selection, and one placement is selected at a time. Sprite selection is
 **pixel-accurate**: the picker reads the placement's baked g-buffer
 silhouette at the cursor pixel from the document's in-memory sprite set
-(`src/runtime/selection.ts`, the same padded-stride texel indexing
+(`src/runtime/selection.ts`, the same tight per-layer texel indexing
 `surfaceSnap.ts` uses) and resolves overlaps by the per-fragment depth
 the compositor uses (ADR 0012), so a sprite's transparent margin is not
 selectable and the visually topmost sprite wins. Characters and point
@@ -321,12 +321,17 @@ brush state stays un-undoable.
 The world editor uploads two WebGL2 `TEXTURE_2D_ARRAY`s: the render pass
 (RGBA8, LINEAR) and the g-buffer (RGBA16F, NEAREST — `rgb = world-space
 normal`, `a = linear ray depth`). Assets may be arbitrary cuboids, so
-sprites differ in pixel size: every layer is padded into a shared max-size
-rect (sprite data anchored bottom-left, zero padding elsewhere), and each
-sprite's pixel size + origin travel with the layer — quad size, UV window
-and origin offset are per-instance/per-layer data. UVs are computed from
-texel centers (`mix(0.5, size - 0.5, corner) / maxSize`) so LINEAR-filtered
-render texels never bleed across the padding boundary.
+sprites differ in pixel size: each layer's passes stay **tight** at their
+own dimensions and are uploaded with `texSubImage3D` into the top-left of
+their slice; the array is allocated with power-of-two dimension/slice
+headroom, and adding a layer uploads only its slice (reallocating rarely,
+only when a layer exceeds the allocation). A sprite's pixel size + origin
+travel with the layer — quad size, UV window and origin offset are
+per-instance/per-layer data. UVs are computed from texel centers
+(`mix(0.5, size - 0.5, corner) / capacity`) so LINEAR-filtered render
+texels never read outside the layer's own region; the padded remainder is
+never sampled. CPU consumers (picking, surface snap, shadow points) index
+each layer with its own width. ADR 0016.
 
 ### Workspace folder
 
@@ -391,12 +396,17 @@ it is about to decode (formats `isoinfinity-bake/4`,
 `/5` and `/6` accepted; anything else is rejected by name; `/6`'s extra
 views are listed but not decoded until requested), the render PNG decodes
 via `createImageBitmap` and the EXR via `EXRLoader.parse`. Decoded views
-are cached per source file for the session (invalidated when the file's
-size or last-modified changes), so re-opening a world or re-picking a
-brush does not re-read or re-decode it. Placing into a
+are cached for the session under a **workspace-scoped** key (connected
+workspace epoch + file path + size/last-modified), so re-opening a world or
+re-picking a brush does not re-decode it, and reconnecting to a different
+workspace never reuses another workspace's data. The compressed bundle
+bytes are **retained** in that cache and every stored view is decoded from
+them, so resolving an extra view never re-reads the file; the bytes are
+released once all stored views resolve, and a session byte budget
+(256 MB) evicts them LRU-style past that (ADR 0014, amended). Placing into a
 world **requires** the render pass. Row order differs per decoder and both
 must end top-down (row 0 = sprite top) for upload: the PNG decodes top-down
-and is padded **as-is**, while `EXRLoader` writes rows bottom-up in GL
+and is uploaded **as-is**, while `EXRLoader` writes rows bottom-up in GL
 texture order — so the EXR gets the **same flip as a live bake**. Getting
 this wrong mirrors the object vertically; the two decoders are
 deliberately asymmetric. Per-layer `pxPerUnit` from the manifest drives the
@@ -719,8 +729,8 @@ the placement then takes its height from the visible surface under the
 cursor, computed CPU-side from the world document's in-memory g-buffers
 (max composite depth among the covering placements' texels, unprojected
 via the orthonormal frame — `surfaceHeightAt` in
-`src/runtime/surfaceSnap.ts`; texel indexing uses the sprite set's
-padded stride `maxW`, matching the GPU upload). While snap is on the
+`src/runtime/surfaceSnap.ts`; texel indexing uses each layer's own width,
+matching the tight GPU upload). While snap is on the
 height field displays the height snap read under the cursor (an
 eyedropper read, transient in-memory state — the stored brush height is
 kept and applies again when snap goes off). Height level and snap are
@@ -749,7 +759,7 @@ placement bindings never move.
 - `src/shared/sun.ts` — NOAA-style sun azimuth/elevation from local solar
   time (dependency-free, shared style with `iso.ts`)
 - `src/runtime/assets.ts` — `SpriteLayer` type, bundle loading (with
-  provenance), procedural environment, layer-set padding/normalization
+  provenance), procedural environment, tight layer-set assembly
 - `src/runtime/renderer.ts` — WebGL2 batches, per-pixel occlusion + shading,
   `dispose()` for tab teardown
 - `src/runtime/meshAsset.ts` — skinned character assets + CPU pose engine (mixer → joint palettes)

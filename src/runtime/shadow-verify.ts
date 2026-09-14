@@ -116,7 +116,6 @@ function buildChecks(): void {
     origins: [[0, 0]],
     anchors: [[0, 0, 0]],
     ppus: [1],
-    maxW: 2,
     gbufferLayers: [gb],
   };
 

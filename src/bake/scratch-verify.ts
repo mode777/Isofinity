@@ -675,7 +675,7 @@ async function runMeshSpike(): Promise<void> {
     render: new Uint8Array(w * h * 4).fill(0).map((_, i) => (i % 4 === 3 ? 255 : 200)),
   };
   const set = layersToSet([layer]);
-  const renderer = new WorldRenderer(canvas, set.renderLayers, set.gbufferLayers, set.maxW, set.maxH);
+  const renderer = new WorldRenderer(canvas, set.renderLayers, set.gbufferLayers, set.sizes);
 
   // Fixed world-image frame (arbitrary but deterministic).
   const PPU = RUNTIME_PPU;
@@ -753,10 +753,9 @@ async function runMeshSpike(): Promise<void> {
 /**
  * Surface-snap spike: the CPU-side visible-surface height read against a
  * REAL baked cube g-buffer, through the same layer/set construction the
- * world editor uses (`bakeFloatToHalf` -> `layersToSet`). A wider empty
- * layer loaded alongside forces `maxW` past the cube layer's width, so a
- * stride regression (indexing with the layer's own width instead of the
- * set's padded stride) breaks the reads.
+ * world editor uses (`bakeFloatToHalf` -> `layersToSet`). Passes are stored
+ * tight per layer, so a wider empty layer loaded alongside must not disturb
+ * the cube layer's reads (indexing uses the layer's own width).
  */
 function runSurfaceSnapSpike(): void {
   log('test: surface-snap height reads (real bake data)');
@@ -773,8 +772,8 @@ function runSurfaceSnapSpike(): void {
     gbuffer: bakeFloatToHalf(cube.gbuffer, w, h),
     render: new Uint8Array(w * h * 4),
   };
-  // A wider all-empty layer: nothing to read from it, but its width makes
-  // the set's padded stride (`maxW`) exceed the cube layer's own.
+  // A wider all-empty layer: nothing to read from it, but its presence must
+  // not change how the cube layer's tight texels are indexed.
   const wide = cube.width + 40;
   const wideLayer: SpriteLayer = {
     ...cubeLayer,
@@ -784,7 +783,11 @@ function runSurfaceSnapSpike(): void {
     render: new Uint8Array(wide * h * 4),
   };
   const set = layersToSet([cubeLayer, wideLayer]);
-  ok(set.maxW === wide, `padded stride exceeds the cube layer width (${set.maxW} > ${w})`);
+  ok(set.gbufferLayers[0] === cubeLayer.gbuffer, 'layer passes are stored tight (same buffer)');
+  ok(
+    set.sizes[0][0] === w && set.sizes[1][0] === wide,
+    'each layer keeps its own width (no shared padded stride)',
+  );
 
   // Fixed world-image frame (same convention as the mesh spike).
   const PPU = RUNTIME_PPU;
@@ -844,7 +847,7 @@ async function runGroundSpike(): Promise<void> {
     render: new Uint8Array(w * h * 4).fill(0).map((_, i) => (i % 4 === 3 ? 255 : 200)),
   };
   const set = layersToSet([layer]);
-  const renderer = new WorldRenderer(canvas, set.renderLayers, set.gbufferLayers, set.maxW, set.maxH);
+  const renderer = new WorldRenderer(canvas, set.renderLayers, set.gbufferLayers, set.sizes);
   renderer.setMeshFrame(300, 500, RUNTIME_PPU);
   renderer.setLight({ dir: [0.5, 0.7071, 0.5], key: [1.2, 1.1, 0.9], ambient: [0.3, 0.3, 0.35] });
 
@@ -1120,7 +1123,7 @@ async function runGroundingShadowSpike(): Promise<void> {
     });
 
   const set = layersToSet([wall, cover, mkGrounded('none', [0, 0])]);
-  const renderer = new WorldRenderer(canvas, set.renderLayers, set.gbufferLayers, set.maxW, set.maxH);
+  const renderer = new WorldRenderer(canvas, set.renderLayers, set.gbufferLayers, set.sizes);
   renderer.setMeshFrame(OX, OY, RUNTIME_PPU);
   renderer.setLight({ dir: [0.5, 0.7071, 0.5], key: [1.2, 1.1, 0.9], ambient: [0.3, 0.3, 0.35] });
 
@@ -1164,7 +1167,7 @@ async function runGroundingShadowSpike(): Promise<void> {
     // Re-upload layers for this frame (cheap at 64px; keeps the layer set
     // per frame so tint/fringe/none variants swap cleanly).
     const s = layersToSet(layers);
-    renderer.setSprites(s.renderLayers, s.gbufferLayers, s.maxW, s.maxH);
+    renderer.setSprites(s.renderLayers, s.gbufferLayers, s.sizes);
     const origins = layers.map((l) => l.originPx);
     const all = new Float32Array(list.length * 10);
     list.forEach((inst, i) => all.set(instance(inst, origins), i * 10));
@@ -1271,7 +1274,7 @@ async function runDeferredLightSpike(): Promise<void> {
     render: new Uint8Array(w * h * 4).fill(0).map((_, i) => (i % 4 === 3 ? 255 : 200)),
   };
   const set = layersToSet([layer]);
-  const renderer = new WorldRenderer(canvas, set.renderLayers, set.gbufferLayers, set.maxW, set.maxH);
+  const renderer = new WorldRenderer(canvas, set.renderLayers, set.gbufferLayers, set.sizes);
   // The grounding-shadow spike's frame: the ground around the light is on
   // the 256px canvas with this origin (down-screen = larger x+z).
   const PPU = RUNTIME_PPU;
