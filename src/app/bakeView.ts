@@ -142,6 +142,30 @@ export function zoomAround(
   };
 }
 
+/**
+ * Zoom to an absolute `targetZoom` keeping the viewport point (cx, cy)
+ * fixed, with the same pan-origin convention as `zoomAround`. Unlike
+ * zooming by the factor `targetZoom / zoom`, the resulting zoom is
+ * exactly `clampZoom(targetZoom)` — a factor multiply can round off
+ * (e.g. `1.4 * (1 / 1.4)` → 0.9999999999999998, never quite 100%).
+ */
+export function zoomTo(
+  t: ViewTransform,
+  targetZoom: number,
+  cx: number,
+  cy: number,
+  originX = 0,
+  originY = 0,
+): ViewTransform {
+  const zoom = clampZoom(targetZoom);
+  const k = zoom / t.zoom;
+  return {
+    zoom,
+    panX: k * t.panX + (1 - k) * (cx - originX),
+    panY: k * t.panY + (1 - k) * (cy - originY),
+  };
+}
+
 /** Pan by a viewport-space delta at constant zoom. */
 export function panned(t: ViewTransform, dx: number, dy: number): ViewTransform {
   return { zoom: t.zoom, panX: t.panX + dx, panY: t.panY + dy };

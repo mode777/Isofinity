@@ -494,13 +494,31 @@ h2 {
   right: 0.6rem;
 }
 
-.zoom-value {
+/* The zoom percentage readout doubles as the reset-to-100% button: flat
+   like the old label, with hover/focus affordances like its siblings. */
+.zoom-controls .zoom-value {
   min-width: 3.2em;
+  padding: 0.1rem 0.25rem;
   text-align: center;
   color: var(--muted);
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
   user-select: none;
+  background: none;
+  border-color: transparent;
+}
+
+.zoom-controls .zoom-value:hover:not(:disabled) {
+  color: var(--text, #e8e8e8);
+}
+
+.zoom-controls .zoom-value:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.zoom-controls .zoom-value:disabled {
+  cursor: default;
 }
 
 canvas {

@@ -24,7 +24,8 @@ each line below has a full record there).
   viewport + Bake All; stale view-slot depth rejected on load. Authored
   origin anchor (ADR 0008) with per-slot re-projection. Bake-setting
   presets (`isoinfinity-bake-preset/1`). Sprite editor viewport: realtime
-  3D preview, zoom/pan, box overlay, 1.8 m human reference.
+  3D preview, zoom/pan (percentage readout click resets to 100%), box
+  overlay, 1.8 m human reference.
 - **Editor shell** — the integrated React editor (`src/app/`) replacing
   the separate bake/runtime pages: tabs over in-memory documents (ADR
   0006), project browser, context-sensitive properties panel, status bar;
@@ -46,7 +47,8 @@ each line below has a full record there).
   blending, and the splat persisted as a PNG beside the world JSON
   (`isoinfinity-world/8`, `verify:terrain`; ADR 0013).
 - **World editor** — viewport navigation (scroll-pan/pinch-zoom/
-  middle-drag/space-drag + dedicated pan tool, three-finger touch),
+  middle-drag/space-drag + dedicated pan tool, three-finger touch,
+  percentage readout click resets to 100%),
   depth-tested brush ghost, light tool +
   selectable light icons, Select tool with pixel-accurate g-buffer picking
   (ADR 0012, `verify:selection`), terrain paint tool, undo/redo

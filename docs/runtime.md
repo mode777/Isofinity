@@ -77,7 +77,9 @@ prompt/download fallbacks unchanged.
 
 The sprite viewport shows one of four views at a time (toolbar order):
 **Realtime 3D**, **Normals** (g-buffer rgb), **Depth** (g-buffer alpha) and
-**Render**. All views share per-view zoom/pan state (`src/app/bakeView.ts`).
+**Render**. All views share per-view zoom/pan state (`src/app/bakeView.ts`);
+clicking the zoom controls' percentage readout resets that view's zoom to
+exactly 100%, anchored at the panel center (`zoomTo`).
 A view-slot switcher (N/E/S/W, top-left overlay) selects which slot's
 passes the 2D views display and which slot bake actions target; baked
 slots fill, the active slot is outlined, and unbaked non-N slots are
@@ -218,7 +220,8 @@ world image (the bake's isometric projection, CPU-computed once) through
 a 2D view transform — two-finger scroll (or a mouse wheel) pans, pinch
 (ctrl+wheel) zooms around the cursor, middle-drag pans (left paints,
 right erases), and corner `− / % / + / Fit` controls
-mirror the sprite viewport (shared `ViewTransform`/zoom constants in
+mirror the sprite viewport, including click-the-percentage to reset the
+zoom to exactly 100% (shared `ViewTransform`/zoom constants in
 `src/app/bakeView.ts`). Holding Space enters a temporary **pan mode**:
 the cursor turns grab/grabbing and a left-drag pans — place/paint/
 select/erase presses (including the shift+move height gesture) are

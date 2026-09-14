@@ -21,7 +21,7 @@ import { pickPlacementAt } from '../../runtime/selection.js';
 import { depthOf } from '../../runtime/world.js';
 import { DEFAULT_POINT_LIGHT, PRIMITIVE_KINDS } from '../document.js';
 import type { PlacementRef, ViewTransform, WorldDocument } from '../document.js';
-import { fitTransform, panned, ZOOM_STEP, zoomAround } from '../bakeView.js';
+import { fitTransform, panned, ZOOM_STEP, zoomAround, zoomTo } from '../bakeView.js';
 import { lightParams, srgbHexToLinearRgb } from '../light.js';
 import {
   CHARACTER_BRUSH_ID,
@@ -1826,6 +1826,13 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
     );
   };
 
+  const resetZoom = (): void => {
+    const { transform, panel } = liveRef.current;
+    if (!transform || !panel) return;
+    // Anchor at the panel center.
+    setWorldViewTransform(doc.docId, zoomTo(transform, 1, panel.w / 2, panel.h / 2));
+  };
+
   return (
     <div className="world-editor">
       {assetBrowserOpen ? (
@@ -2043,9 +2050,15 @@ export function WorldEditor(props: { doc: WorldDocument }): React.JSX.Element {
           <button title="Zoom out" disabled={!transform} onClick={() => zoomBy(1 / ZOOM_STEP)}>
             −
           </button>
-          <span className="zoom-value">
+          <button
+            type="button"
+            className="zoom-value"
+            title="Reset zoom to 100%"
+            disabled={!transform}
+            onClick={resetZoom}
+          >
             {transform ? `${Math.round(transform.zoom * 100)}%` : '—'}
-          </span>
+          </button>
           <button title="Zoom in" disabled={!transform} onClick={() => zoomBy(ZOOM_STEP)}>
             +
           </button>

@@ -27,6 +27,7 @@ import {
   VIEW_MODES,
   ZOOM_STEP,
   zoomAround,
+  zoomTo,
 } from '../bakeView.js';
 import {
   bakeAll,
@@ -348,6 +349,19 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
     );
   };
 
+  const resetZoom = (): void => {
+    const { view, transform, panel } = liveRef.current;
+    if (!transform) return;
+    // Anchor at the panel center, in the view's pan-origin space.
+    const ox = view === 'realtime' ? (panel?.w ?? 0) / 2 : 0;
+    const oy = view === 'realtime' ? (panel?.h ?? 0) / 2 : 0;
+    setViewTransform(
+      doc.docId,
+      view,
+      zoomTo(transform, 1, (panel?.w ?? 0) / 2, (panel?.h ?? 0) / 2, ox, oy),
+    );
+  };
+
   return (
     <div className="sprite-editor">
       {saveDialog ? (
@@ -500,9 +514,15 @@ export function SpriteEditor(props: { doc: BakeDocument }): React.JSX.Element {
           >
             −
           </button>
-          <span className="zoom-value">
+          <button
+            type="button"
+            className="zoom-value"
+            title="Reset zoom to 100%"
+            disabled={!transform}
+            onClick={resetZoom}
+          >
             {transform ? `${Math.round(transform.zoom * 100)}%` : '—'}
-          </span>
+          </button>
           <button title="Zoom in" disabled={!transform} onClick={() => zoomBy(ZOOM_STEP)}>
             +
           </button>
