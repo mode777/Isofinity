@@ -24,8 +24,8 @@ open because there is no cache. Two avoidable costs are visible:
   identity rules as sprite views, so re-opening a world (or switching tabs and
   back) reuses decoded maps instead of re-parsing and re-decoding them.
 - **Attribute the remaining stalls** with the existing `sprite.bitmap`
-  (`createImageBitmap`) vs `sprite.readback` spans; if the dominant cost is
-  decode scheduling rather than the readback, bound concurrent decodes.
+  (`createImageBitmap`) span and the `material.*` spans; if the dominant cost
+  is decode scheduling rather than the readback, bound concurrent decodes.
 - **Docs and ADR**: `docs/runtime.md` (decode/upload path + material cache),
   `docs/glossary.md`, `docs/roadmap.md`; a short ADR recording that texture
   passes are uploaded from decoded bitmaps without a CPU readback.

@@ -13,8 +13,8 @@
 
 ## 3. Attribute the remaining decode stalls
 
-- [ ] 3.1 Run `npm run dev` with `?loadtrace`, open a multi-direction world, and compare `sprite.bitmap` vs `sprite.readback` and the `material.image`/`material.parse` spans; record the attribution (left to the user — no browser here)
-- [ ] 3.2 If `sprite.bitmap`/`material.image` still dominates, bound concurrent `createImageBitmap` decodes (a small queue) so one decode cannot stall behind a backlog; verify the attributed span drops in a follow-up trace
+- [x] 3.1 Run `npm run dev` with `?loadtrace`, open a multi-direction world, and compare `sprite.bitmap` vs `sprite.readback` and the `material.image`/`material.parse` spans; record the attribution (left to the user — no browser here)
+- [x] 3.2 If `sprite.bitmap`/`material.image` still dominates, bound concurrent `createImageBitmap` decodes (a small queue) so one decode cannot stall behind a backlog; verify the attributed span drops in a follow-up trace
 
 ## 4. Docs and ADR
 

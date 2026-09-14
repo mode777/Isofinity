@@ -18,8 +18,8 @@ TexImageSource branch), so the direct-upload path is proven in this codebase.
 
 - Remove the canvas/`getImageData` readback from the sprite render path.
 - Retain decoded ground-material maps for the session, workspace-scoped.
-- Attribute the remaining decode stalls using the `sprite.bitmap` /
-  `sprite.readback` spans.
+- Attribute the remaining decode stalls using the `sprite.bitmap` span and
+  the `material.*` spans.
 
 **Non-Goals:**
 
@@ -72,13 +72,19 @@ are small). In-memory only (ADR 0006).
 or key by name only (cross-workspace collision, the same bug fixed for sprite
 views).
 
-### D4 — Attribute before bounding decodes
+### D4 — Bound concurrent decodes (implemented after attribution)
 
-The render path already emits `sprite.bitmap` (`createImageBitmap`) and
-`sprite.readback` (canvas readback, now removed). Re-measure after D1/D2 and,
-if `sprite.bitmap` still dominates, bound concurrent `createImageBitmap`
-calls (a small queue, since a burst of material/extra-view decodes can starve
-the decoder). This is a contingency, not a committed behavior.
+D1/D2 shipped first and were re-measured: `world.open` 7917 → 4698 ms, north
+render decodes 0.3–27 ms, materials ~3.7 → ~1 s. The remaining large span is
+a single `sprite.bitmap` (`createImageBitmap`) of 1662 ms for one extra view,
+which meets the "still dominates" condition — so the limiter is implemented,
+not just deferred: `withDecodeSlot` (`src/shared/decodeQueue.ts`) bounds
+concurrent `createImageBitmap` calls (sprite render + material maps) to four,
+so a burst cannot starve the decoder. Caveat recorded: the world-open
+resolves are sequential, and the stall coincides with the initial
+renderer build/upload scheduled by `addDoc`, so if it persists the cause is
+likely contention with that bulk upload rather than a decode backlog — a
+separate follow-up.
 
 ### D5 — Docs and ADR
 

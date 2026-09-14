@@ -406,7 +406,9 @@ released once all stored views resolve, and a session byte budget
 (256 MB) evicts them LRU-style past that (ADR 0014, amended). The runtime
 decodes the render pass to the `ImageBitmap` itself and uploads it straight
 to the sprite texture array — no canvas `getImageData` readback (ADR 0017);
-the sprite editor's preview keeps the byte-returning decoder. Placing into a
+the sprite editor's preview keeps the byte-returning decoder. Bitmap decodes
+(sprite render and material maps) are bounded to a few at a time so a burst
+cannot starve the browser's image decoder. Placing into a
 world **requires** the render pass. Row order differs per decoder and both
 must end top-down (row 0 = sprite top) for upload: the PNG decodes top-down
 and is uploaded **as-is**, while `EXRLoader` writes rows bottom-up in GL

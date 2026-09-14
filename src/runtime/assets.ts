@@ -28,6 +28,7 @@ import {
   type ViewSlot,
 } from '../shared/iso.js';
 import { span, TAGS } from '../perf/trace.js';
+import { withDecodeSlot } from '../shared/decodeQueue.js';
 
 export const RUNTIME_PPU = 64;
 
@@ -650,10 +651,12 @@ export async function decodePng(blob: Blob, w: number, h: number): Promise<Uint8
  */
 export async function decodePngBitmap(blob: Blob, w: number, h: number): Promise<ImageBitmap> {
   const bitmapSpan = span(TAGS.spriteBitmap, { view: `${w}x${h}` });
-  const bitmap = await createImageBitmap(blob, {
-    premultiplyAlpha: 'none',
-    colorSpaceConversion: 'none',
-  });
+  const bitmap = await withDecodeSlot(() =>
+    createImageBitmap(blob, {
+      premultiplyAlpha: 'none',
+      colorSpaceConversion: 'none',
+    }),
+  );
   bitmapSpan();
   if (bitmap.width !== w || bitmap.height !== h) {
     const got = `${bitmap.width}x${bitmap.height}`;

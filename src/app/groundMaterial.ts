@@ -12,6 +12,7 @@
 
 import { unzipSync } from 'three/examples/jsm/libs/fflate.module.js';
 import { span, TAGS } from '../perf/trace.js';
+import { withDecodeSlot } from '../shared/decodeQueue.js';
 
 /** A decoded diffuse map: sRGB bytes or float EXR radiance (linear). */
 export type GroundDiffuseMap =
@@ -113,7 +114,7 @@ async function decodeImage(bytes: Uint8Array, name: string): Promise<ImageBitmap
   const blob = new Blob([bytes as BlobPart], { type: MIME_BY_EXT[ext] ?? 'application/octet-stream' });
   const imageSpan = span(TAGS.materialImage, { file: name });
   try {
-    const bitmap = await createImageBitmap(blob);
+    const bitmap = await withDecodeSlot(() => createImageBitmap(blob));
     imageSpan({ w: bitmap.width, h: bitmap.height });
     return bitmap;
   } catch (err) {

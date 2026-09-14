@@ -14,6 +14,7 @@ import {
   type GroundMaterialMaps,
 } from './groundMaterial.js';
 import { strToU8, zipSync } from 'three/examples/jsm/libs/fflate.module.js';
+import { withDecodeSlot } from '../shared/decodeQueue.js';
 import { buildWorldFile, parseWorldFile } from './worldFile.js';
 import {
   DEFAULT_GROUND_TILE_SCALE,
@@ -341,6 +342,25 @@ async function main(): Promise<void> {
         ),
       'a non-array materials field is rejected as malformed',
     );
+  }
+
+  console.log('decode queue:');
+  {
+    let running = 0;
+    let peak = 0;
+    const results = await Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        withDecodeSlot(async () => {
+          running += 1;
+          peak = Math.max(peak, running);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          running -= 1;
+          return i;
+        }),
+      ),
+    );
+    ok(results.length === 12 && results.every((v, i) => v === i), 'all queued decodes run');
+    ok(peak <= 4, `concurrent decodes stay bounded (peak=${peak})`);
   }
 
   console.log('material session cache:');
