@@ -23,5 +23,5 @@
 
 ## 5. Docs and gates
 
-- [ ] 5.1 Update `docs/runtime.md` (world toolbar brush controls + the asset browser), add an "asset browser" term to `docs/glossary.md`, and add the done row to `docs/roadmap.md`. Verify: the three docs mention the feature consistently with the delta specs' vocabulary.
-- [ ] 5.2 Run the gates: `npm run build` (typecheck + production build) and `npm run verify:bundles` (regression sanity — the dialog consumes `parseBakeManifest`/`readBakeEntry` from `src/bake/bundle.ts` without modifying it); then walk the delta-spec scenarios once in `npm run dev` (open/close, thumbnails, search, picks, recent list, disconnect case). Verify: both commands exit 0 and every scenario above behaves as pinned.
+- [x] 5.1 Update `docs/runtime.md` (world toolbar brush controls + the asset browser), add an "asset browser" term to `docs/glossary.md`, and add the done row to `docs/roadmap.md`. Verify: the three docs mention the feature consistently with the delta specs' vocabulary.
+- [x] 5.2 Run the gates: `npm run build` (typecheck + production build) and `npm run verify:bundles` (regression sanity — the dialog consumes `parseBakeManifest`/`readBakeEntry` from `src/bake/bundle.ts` without modifying it); then walk the delta-spec scenarios once in `npm run dev` (open/close, thumbnails, search, picks, recent list, disconnect case). Verify: both commands exit 0 and every scenario above behaves as pinned.

@@ -429,43 +429,73 @@ undo/redo buttons SHALL undo and redo the document's world edits as
 specified by the world-edit-history capability, and SHALL be disabled when
 there is nothing to undo (or redo).
 
-The tool-contextual controls are the brush dropdown and the surface-snap
-toggle, and they SHALL be visible only while a placement (pencil) tool is
-active — including when no brush is chosen yet. With the Select, eraser, or
-point-light tool active they SHALL be hidden. Hiding them SHALL NOT change
-their stored state: the chosen brush and the snap toggle's on/off state are
-per-document in-memory editor state and SHALL apply again when a placement
-tool is reactivated.
+The tool-contextual controls are the brush controls — the current-brush
+label, the "…" picker button that opens the asset browser (see the
+world-asset-browser capability), and the previously-used-brushes dropdown —
+plus the surface-snap toggle, and they SHALL be visible only while a
+placement (pencil) tool is active — including when no brush is chosen yet.
+With the Select, eraser, or point-light tool active they SHALL be hidden.
+Hiding them SHALL NOT change their stored state: the chosen brush, the
+previously-used list, and the snap toggle's on/off state are per-document
+in-memory editor state and SHALL apply again when a placement tool is
+reactivated.
 
 The pencil tool SHALL be the active placement tool by default; it is
 activated from the world viewport's tool bar (see the world-editor tool bar
-requirement). The brush it places is chosen from a dropdown grouped into
-**Primitives** (the built-in test primitives) and **Sprites** (the
-workspace's saved sprite bundles, listed when a workspace is connected).
-Clicking or dragging on the world canvas with the pencil places the chosen
-brush at the pointed cell; the right mouse button removes placements. The
-surface-snap toggle SHALL control whether placements take their height from
-the visible surface under the cursor (on) or from the user-adjusted
-placement height (off), as specified by the placement-height requirement.
-The brush's placement height, grounding-shadow strength, and direction
-SHALL be edited in the properties panel's Brush section (see the
-properties-panel requirement), not in the toolbar. The toolbar SHALL NOT
-host tool selection: the Select, pencil, point-light, and eraser tools live
-in the world viewport's tool bar.
+requirement). The brush it places is chosen from the asset browser opened by
+the "…" picker button; the label next to it SHALL name the current brush
+(and a no-brush placeholder when none is chosen). The dropdown next to the
+picker SHALL list the brushes this document has already used, most recently
+used first, and SHALL offer no other entries: it starts empty, picking from
+it acquires that brush exactly as a fresh pick from the browser does, and it
+never lists primitives, sprites, or anything else that has not been used in
+this document. The previously-used list SHALL NOT be serialized into world
+files — a reopened world starts with an empty list. Clicking or dragging on
+the world canvas with the pencil places the chosen brush at the pointed
+cell; the right mouse button removes placements. The surface-snap toggle
+SHALL control whether placements take their height from the visible surface
+under the cursor (on) or from the user-adjusted placement height (off), as
+specified by the placement-height requirement. The brush's placement height,
+grounding-shadow strength, and direction SHALL be edited in the properties
+panel's Brush section (see the properties-panel requirement), not in the
+toolbar. The toolbar SHALL NOT host tool selection: the Select, pencil,
+point-light, and eraser tools live in the world viewport's tool bar.
 
 #### Scenario: World toolbar offers save, pencil, and brush dropdown
 
 - **WHEN** the user activates a world editor tab with the pencil tool active
 - **THEN** the toolbar shows Save, undo, and redo as icon buttons separated
-  by a divider from the brush dropdown and surface-snap toggle, the tool bar
-  in the viewport marks the pencil active, and the brush dropdown's groups
-  list the built-in primitives and the workspace's saved sprites
+  by a divider from the brush controls and surface-snap toggle, the tool bar
+  in the viewport marks the pencil active, and the brush controls show the
+  current brush's label, the "…" picker button, and the previously-used
+  brushes dropdown
+
+#### Scenario: Picker button opens the asset browser
+
+- **WHEN** the user activates the "…" picker button in the toolbar
+- **THEN** the asset browser modal opens (as specified by the
+  world-asset-browser capability) without changing the active tool or brush
+
+#### Scenario: Previously used brushes are listed
+
+- **WHEN** the user picks brush `A`, then brush `B`, and then opens the
+  dropdown in the same world document
+- **THEN** the dropdown lists `B` first and `A` second, and choosing `A`
+  activates it again as the placement brush
+
+#### Scenario: Recent list starts empty and stays per document
+
+- **WHEN** the user has used brushes in one world tab and then switches to
+  another world tab that has not placed anything, and later reopens the
+  saved first world
+- **THEN** the second tab's dropdown is empty and the reopened world's
+  dropdown starts empty (the list is not restored from the file)
 
 #### Scenario: Contextual controls appear only in placement mode
 
 - **WHEN** the user switches to the Select, eraser, or point-light tool
-- **THEN** the brush dropdown and the surface-snap toggle are hidden from
-  the toolbar, and switch back to a placement tool shows them again
+- **THEN** the brush controls and the surface-snap toggle are hidden from
+  the toolbar, and switching back to a placement tool shows them again
 
 #### Scenario: Surface-snap toggle and height field are available
 
@@ -506,7 +536,8 @@ in the world viewport's tool bar.
 
 #### Scenario: Pencil places the selected brush
 
-- **WHEN** the user picks a brush and clicks a cell with the pencil active
+- **WHEN** the user picks a brush (from the asset browser or the
+  previously-used dropdown) and clicks a cell with the pencil active
 - **THEN** an instance of that brush appears at the cell and the world tab
   turns dirty
 
